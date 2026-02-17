@@ -367,7 +367,7 @@ def plot_fit_interactive(
         yaxis_range=[y_lower, y_upper],
         xaxis=dict(exponentformat="none"),
         template="plotly_white",
-        hovermode="x unified",
+        hovermode=False,
         dragmode="zoom",
         legend=dict(x=1.0, y=1.0, xanchor="right"),
         width=1000,
