@@ -318,7 +318,18 @@ def fit_lines(
         lb[nL + i] = lam_obs_A - cent_margin
         ub[nL + i] = lam_obs_A + cent_margin
 
-        # Sigma bounds.
+        # Sigma bounds — scale up for broad components.
+        if "_BROAD2" in name:
+            # Very broad: 7× narrow seed, bounds [4×, 12×] narrow σ.
+            sig_seed = sig_seed * 7.0
+            sig_lo = sig_lo * 4.0
+            sig_hi = sig_hi * 12.0
+        elif "_BROAD" in name:
+            # Intermediate broad: 3× narrow seed, bounds [1.5×, 5×] narrow σ.
+            sig_seed = sig_seed * 3.0
+            sig_lo = sig_lo * 1.5
+            sig_hi = sig_hi * 5.0
+
         p0[2 * nL + i] = sig_seed
         lb[2 * nL + i] = sig_lo
         ub[2 * nL + i] = sig_hi
