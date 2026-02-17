@@ -139,9 +139,10 @@ def _grating_bounds(
     if "PRISM" in g:
         return (0.40 * pix, 0.90 * sig, 1.70 * sig)
     if any(k in g for k in ("G140M", "G235M", "G395M")):
-        return (max(0.12 * pix, 0.22 * sig), 0.60 * sig, 1.05 * sig)
+        # Upper bound allows ~2× instrumental σ for astrophysical broadening.
+        return (max(0.12 * pix, 0.22 * sig), 0.60 * sig, 2.0 * sig)
     if any(k in g for k in ("G140H", "G235H", "G395H")):
-        return (0.10 * pix, 0.50 * sig, 0.95 * sig)
+        return (0.10 * pix, 0.50 * sig, 1.8 * sig)
     # Default (e.g. stacked spectra): generous bounds — lines are broadened
     # by galaxy velocity dispersions and the stacking process.
     return (0.20 * pix, 1.0 * sig, 5.0 * sig)
@@ -340,6 +341,9 @@ def fit_lines(
         ub[2 * nL + i] = sig_hi
 
     # Override seeds from a previous fit (e.g. narrow-only results).
+    # For non-broad lines, also set an amplitude floor at 30% of the
+    # narrow-only value to prevent the optimizer from zeroing out narrow
+    # lines when a broad component can absorb their flux.
     idx = {name: i for i, name in enumerate(line_names)}
     if _p0_hint is not None:
         for hint_name, (hint_A, hint_mu, hint_sig) in _p0_hint.items():
@@ -348,6 +352,9 @@ def fit_lines(
                 p0[j] = np.clip(hint_A, lb[j], ub[j])
                 p0[nL + j] = np.clip(hint_mu, lb[nL + j], ub[nL + j])
                 p0[2 * nL + j] = np.clip(hint_sig, lb[2 * nL + j], ub[2 * nL + j])
+                # Amplitude floor for narrow lines (not broad components).
+                if "BROAD" not in hint_name and hint_A > 0:
+                    lb[j] = max(lb[j], 0.3 * hint_A)
 
     # Mask constrained parameters: only optimise free ones.
     free_mask = constraints.free_mask()
