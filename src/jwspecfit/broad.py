@@ -255,10 +255,10 @@ def fit_with_broad(
         z, narrow_lines, grating=grating, R=R, deg=deg,
     )
 
-    # Always fit narrow-only first.
+    # --- Phase 1: fast fits without bootstrap for BIC comparison ---
     fit_narrow, bic_narrow = _fit_model_variant(
         spectrum, z, narrow_lines, grating, R, continuum, deg,
-        broad_type=None, n_boot=n_boot,
+        broad_type=None, n_boot=0,
     )
 
     bic_b1 = np.nan
@@ -267,6 +267,13 @@ def fit_with_broad(
     all_fits: dict[str, FitResult] = {"narrow": fit_narrow}
 
     if mode == "off":
+        # Re-fit with bootstrap for the narrow model.
+        if n_boot > 0:
+            fit_narrow, bic_narrow = _fit_model_variant(
+                spectrum, z, narrow_lines, grating, R, continuum, deg,
+                broad_type=None, n_boot=n_boot,
+            )
+            all_fits["narrow"] = fit_narrow
         return BroadFitResult(
             best_fit=fit_narrow,
             selected_model="narrow",
@@ -277,7 +284,7 @@ def fit_with_broad(
             all_fits=all_fits,
         )
 
-    # Check Hα SNR before attempting broad fits.
+    # Check Hα SNR before attempting broad fits (analytic errors are fine here).
     ha_snr = 0.0
     if "Ha" in fit_narrow.lines:
         ha_snr = fit_narrow.lines["Ha"].snr
@@ -286,6 +293,13 @@ def fit_with_broad(
 
     if not attempt_broad and mode == "auto":
         logger.info("Hα SNR=%.1f < %.1f; skipping broad fitting.", ha_snr, snr_threshold)
+        # Re-fit with bootstrap for the narrow model.
+        if n_boot > 0:
+            fit_narrow, bic_narrow = _fit_model_variant(
+                spectrum, z, narrow_lines, grating, R, continuum, deg,
+                broad_type=None, n_boot=n_boot,
+            )
+            all_fits["narrow"] = fit_narrow
         return BroadFitResult(
             best_fit=fit_narrow,
             selected_model="narrow",
@@ -296,29 +310,29 @@ def fit_with_broad(
             all_fits=all_fits,
         )
 
-    # Fit variants.
+    # Fast BIC fits (no bootstrap).
     if mode in ("auto", "broad1", "both"):
         fit_b1, bic_b1 = _fit_model_variant(
             spectrum, z, narrow_lines, grating, R, continuum, deg,
-            "broad1", n_boot=n_boot,
+            "broad1", n_boot=0,
         )
         all_fits["broad1"] = fit_b1
 
     if mode in ("auto", "broad2", "both"):
         fit_b2, bic_b2 = _fit_model_variant(
             spectrum, z, narrow_lines, grating, R, continuum, deg,
-            "broad2", n_boot=n_boot,
+            "broad2", n_boot=0,
         )
         all_fits["broad2"] = fit_b2
 
     if mode in ("auto", "both"):
         fit_both, bic_both = _fit_model_variant(
             spectrum, z, narrow_lines, grating, R, continuum, deg,
-            "both", n_boot=n_boot,
+            "both", n_boot=0,
         )
         all_fits["both"] = fit_both
 
-    # Model selection.
+    # --- Phase 2: select best model by BIC ---
     if mode == "auto":
         candidates = {
             "narrow": bic_narrow,
@@ -326,11 +340,9 @@ def fit_with_broad(
             "broad2": bic_b2,
             "both": bic_both,
         }
-        # Remove NaN entries.
         candidates = {k: v for k, v in candidates.items() if np.isfinite(v)}
         best_name = min(candidates, key=candidates.get)
 
-        # Only accept complex model if ΔBIC exceeds threshold.
         if best_name != "narrow":
             delta = bic_narrow - candidates[best_name]
             if delta < bic_delta:
@@ -349,6 +361,15 @@ def fit_with_broad(
         best_name = "both"
     else:
         best_name = "narrow"
+
+    # --- Phase 3: re-fit only the selected model with bootstrap ---
+    if n_boot > 0:
+        broad_type = None if best_name == "narrow" else best_name
+        best_fit, _ = _fit_model_variant(
+            spectrum, z, narrow_lines, grating, R, continuum, deg,
+            broad_type=broad_type, n_boot=n_boot,
+        )
+        all_fits[best_name] = best_fit
 
     return BroadFitResult(
         best_fit=all_fits[best_name],
