@@ -159,6 +159,7 @@ def fit_lines(
     n_boot: int = 200,
     clip_sigma: float = 2.5,
     _label: str = "",
+    _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
     """Fit emission lines in a spectrum.
 
@@ -337,6 +338,16 @@ def fit_lines(
         p0[2 * nL + i] = sig_seed
         lb[2 * nL + i] = sig_lo
         ub[2 * nL + i] = sig_hi
+
+    # Override seeds from a previous fit (e.g. narrow-only results).
+    idx = {name: i for i, name in enumerate(line_names)}
+    if _p0_hint is not None:
+        for hint_name, (hint_A, hint_mu, hint_sig) in _p0_hint.items():
+            if hint_name in idx:
+                j = idx[hint_name]
+                p0[j] = np.clip(hint_A, lb[j], ub[j])
+                p0[nL + j] = np.clip(hint_mu, lb[nL + j], ub[nL + j])
+                p0[2 * nL + j] = np.clip(hint_sig, lb[2 * nL + j], ub[2 * nL + j])
 
     # Mask constrained parameters: only optimise free ones.
     free_mask = constraints.free_mask()
