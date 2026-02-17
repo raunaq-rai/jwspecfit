@@ -138,6 +138,7 @@ def _fit_model_variant(
     continuum: np.ndarray,
     deg: int,
     broad_type: str | None = None,
+    n_boot: int = 200,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -157,7 +158,7 @@ def _fit_model_variant(
         fit_lines_list = list(line_names)
 
     result = fit_lines(
-        spec, z, grating=grating, R=R, lines=fit_lines_list, deg=deg,
+        spec, z, grating=grating, R=R, lines=fit_lines_list, deg=deg, n_boot=n_boot,
     )
 
     # Compute BIC.
@@ -186,6 +187,7 @@ def fit_with_broad(
     lines: list[str] | None = None,
     deg: int = 2,
     mode: str = "auto",
+    n_boot: int = 200,
     snr_threshold: float = 5.0,
     bic_delta: float = BIC_DELTA_THRESHOLD,
 ) -> BroadFitResult:
@@ -212,6 +214,8 @@ def fit_with_broad(
         - ``"broad1"``: Force intermediate broad.
         - ``"broad2"``: Force very broad.
         - ``"both"``: Force both broad components.
+    n_boot : int
+        Number of bootstrap iterations for uncertainties (default 200).
     snr_threshold : float
         Minimum Hα SNR to attempt broad fitting (default 5.0).
     bic_delta : float
@@ -244,7 +248,8 @@ def fit_with_broad(
 
     # Always fit narrow-only first.
     fit_narrow, bic_narrow = _fit_model_variant(
-        spectrum, z, narrow_lines, grating, R, continuum, deg, broad_type=None,
+        spectrum, z, narrow_lines, grating, R, continuum, deg,
+        broad_type=None, n_boot=n_boot,
     )
 
     bic_b1 = np.nan
@@ -285,19 +290,22 @@ def fit_with_broad(
     # Fit variants.
     if mode in ("auto", "broad1", "both"):
         fit_b1, bic_b1 = _fit_model_variant(
-            spectrum, z, narrow_lines, grating, R, continuum, deg, "broad1",
+            spectrum, z, narrow_lines, grating, R, continuum, deg,
+            "broad1", n_boot=n_boot,
         )
         all_fits["broad1"] = fit_b1
 
     if mode in ("auto", "broad2", "both"):
         fit_b2, bic_b2 = _fit_model_variant(
-            spectrum, z, narrow_lines, grating, R, continuum, deg, "broad2",
+            spectrum, z, narrow_lines, grating, R, continuum, deg,
+            "broad2", n_boot=n_boot,
         )
         all_fits["broad2"] = fit_b2
 
     if mode in ("auto", "both"):
         fit_both, bic_both = _fit_model_variant(
-            spectrum, z, narrow_lines, grating, R, continuum, deg, "both",
+            spectrum, z, narrow_lines, grating, R, continuum, deg,
+            "both", n_boot=n_boot,
         )
         all_fits["both"] = fit_both
 

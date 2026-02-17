@@ -95,17 +95,19 @@ T = igm_transmission(wave_obs_A, z_source=7.0)
 
 ### Uncertainties
 
-Two methods are available:
-
-- **Analytic** (default, `n_boot=0`): estimates flux errors from the local
-  noise RMS around each line, scaled by the effective number of resolution
-  elements.
-- **Bootstrap** (`n_boot=200`): perturbs the spectrum by its error array
-  200 times and refits, returning the standard deviation of recovered
-  fluxes.  More robust but slower (~200× the single-fit time).
+**Bootstrap is the default** (`n_boot=200`): the spectrum is perturbed by
+its error array 200 times and refit, giving the standard deviation of
+recovered fluxes as the uncertainty.  For quick exploration you can set
+`n_boot=0` to fall back on analytic estimates (local noise RMS scaled by
+the effective line width).
 
 ```python
-result = jwspecfit.fit_lines(spec, z=6.0, n_boot=200)
+# Default: bootstrap with 200 iterations
+result = jwspecfit.fit_lines(spec, z=6.0)
+
+# Fast analytic errors for quick exploration
+result = jwspecfit.fit_lines(spec, z=6.0, n_boot=0)
+
 for name, line in result.lines.items():
     print(f"{name}: flux = {line.flux:.2e} ± {line.flux_err:.2e}")
 ```

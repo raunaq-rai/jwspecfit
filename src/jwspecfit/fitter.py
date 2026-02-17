@@ -154,7 +154,7 @@ def fit_lines(
     R: float | Callable | None = None,
     lines: list[str] | None = None,
     deg: int = 2,
-    n_boot: int = 0,
+    n_boot: int = 200,
     clip_sigma: float = 2.5,
 ) -> FitResult:
     """Fit emission lines in a spectrum.
@@ -174,7 +174,7 @@ def fit_lines(
     deg : int
         Continuum polynomial degree (default 2).
     n_boot : int
-        Number of bootstrap iterations for uncertainty estimation (default 0 = analytic).
+        Number of bootstrap iterations for uncertainty estimation (default 200).
     clip_sigma : float
         Continuum sigma-clipping threshold.
 

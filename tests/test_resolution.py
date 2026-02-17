@@ -90,7 +90,7 @@ class TestRFromPixels:
         spec = prism_spectrum.copy()
         spec.grating = None
         spec.R = None
-        result = fit_lines(spec, z=6.0)
+        result = fit_lines(spec, z=6.0, n_boot=0)
         assert result.success
 
 

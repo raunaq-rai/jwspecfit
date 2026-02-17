@@ -21,8 +21,13 @@ def plot_fit(
     show_residuals: bool = True,
     show_components: bool = True,
     label_lines: bool = True,
+    y_pad: float = 1.3,
 ) -> "Figure":
     """Plot a spectral fit with data, model, continuum, and residuals.
+
+    The y-axis upper limit is set to the peak of the tallest emission
+    line (above continuum) times *y_pad*, so the plot is scaled to the
+    lines rather than noise spikes.
 
     Parameters
     ----------
@@ -35,9 +40,12 @@ def plot_fit(
     show_residuals : bool
         Show residual panel below the main plot (default True).
     show_components : bool
-        Show individual line components (default True).
+        Show individual Gaussian components as filled curves (default True).
+        Broad components are drawn with hatching for clarity.
     label_lines : bool
         Annotate line identifications (default True).
+    y_pad : float
+        Multiplicative padding above the tallest line peak (default 1.3).
 
     Returns
     -------
@@ -46,6 +54,7 @@ def plot_fit(
     """
     import matplotlib.pyplot as plt
     from .models import build_model
+    from .io import _flam_to_ujy
 
     spec = result.spectrum
 
@@ -77,47 +86,61 @@ def plot_fit(
         ax_main = axes[0]
         ax_res = axes[1] if len(axes) > 1 else None
 
-    # Main panel: data + model + continuum.
     valid = spec.mask_valid()
-    ax_main.step(wave[valid], flux[valid], where="mid", color="0.3", lw=0.8, label="Data")
-    ax_main.fill_between(
-        wave[valid],
-        (flux - err)[valid],
-        (flux + err)[valid],
-        step="mid",
-        alpha=0.15,
-        color="0.5",
-    )
-    ax_main.plot(wave, cont, "--", color="C2", lw=1.0, alpha=0.7, label="Continuum")
-    ax_main.plot(wave, model_total, color="C3", lw=1.5, label="Model")
 
-    # Individual line components.
+    # --- Individual line components (drawn first, behind data) ---
     if show_components and len(result.line_names) > 0:
         edges = spec.wave_edges_A
         nL = len(result.line_names)
-        colours = plt.cm.tab10(np.linspace(0, 1, min(nL, 10)))
+
+        # Colour map: narrow lines in blues/greens, broad in reds/oranges.
+        narrow_names = [n for n in result.line_names if "BROAD" not in n]
+        broad_names = [n for n in result.line_names if "BROAD" in n]
+
+        narrow_colours = plt.cm.Set2(np.linspace(0, 0.8, max(len(narrow_names), 1)))
+        broad_colours = plt.cm.Oranges(np.linspace(0.4, 0.8, max(len(broad_names), 1)))
+
+        n_narrow = 0
+        n_broad = 0
 
         for i, name in enumerate(result.line_names):
+            amp = result.params[i]
+            if amp <= 0:
+                continue
+
             p_single = np.zeros(3 * nL)
-            p_single[i] = result.params[i]
+            p_single[i] = amp
             p_single[nL + i] = result.params[nL + i]
             p_single[2 * nL + i] = result.params[2 * nL + i]
             comp_flam = build_model(p_single, edges, nL)
-
-            from .io import _flam_to_ujy
             comp_ujy = _flam_to_ujy(comp_flam, spec.wave_um) + cont
 
-            colour = colours[i % len(colours)]
-            ax_main.plot(wave, comp_ujy, "-", color=colour, lw=0.7, alpha=0.6)
+            is_broad = "BROAD" in name
 
-            if label_lines and result.params[i] > 0:
+            if is_broad:
+                colour = broad_colours[n_broad % len(broad_colours)]
+                n_broad += 1
+                ax_main.fill_between(
+                    wave, cont, comp_ujy,
+                    alpha=0.25, color=colour, hatch="//", linewidth=0,
+                )
+                ax_main.plot(wave, comp_ujy, "-", color=colour, lw=1.2, alpha=0.8)
+            else:
+                colour = narrow_colours[n_narrow % len(narrow_colours)]
+                n_narrow += 1
+                ax_main.fill_between(
+                    wave, cont, comp_ujy,
+                    alpha=0.20, color=colour, linewidth=0,
+                )
+                ax_main.plot(wave, comp_ujy, "-", color=colour, lw=0.8, alpha=0.7)
+
+            if label_lines:
                 centroid_A = result.params[nL + i]
                 if wave_unit == "A":
                     x_label = centroid_A
                 else:
                     x_label = centroid_A * 1e-4
                 y_label = comp_ujy[np.argmin(np.abs(spec.wave_A - centroid_A))]
-                # Clean up name for display.
                 display_name = name.replace("_", " ")
                 ax_main.annotate(
                     display_name,
@@ -127,14 +150,38 @@ def plot_fit(
                     fontsize=7,
                     ha="center",
                     color=colour,
+                    fontweight="bold" if is_broad else "normal",
                     rotation=45,
                 )
+
+    # Main panel: data + model + continuum.
+    ax_main.step(wave[valid], flux[valid], where="mid", color="0.3", lw=0.8,
+                 label="Data", zorder=3)
+    ax_main.fill_between(
+        wave[valid],
+        (flux - err)[valid],
+        (flux + err)[valid],
+        step="mid", alpha=0.12, color="0.5", zorder=2,
+    )
+    ax_main.plot(wave, cont, "--", color="C2", lw=1.0, alpha=0.7, label="Continuum",
+                 zorder=4)
+    ax_main.plot(wave, model_total, color="C3", lw=1.5, label="Model", zorder=5)
 
     ax_main.set_ylabel(r"Flux density [$\mu$Jy]")
     ax_main.legend(fontsize=8, loc="upper right")
 
     if result.spectrum.z is not None:
         ax_main.set_title(f"z = {result.spectrum.z:.4f}   |   χ²/dof = {result.chi2:.2f}")
+
+    # --- Y-axis limits based on emission-line peaks ---
+    model_peak = np.nanmax(model_total[valid]) if np.any(valid) else 1.0
+    cont_median = np.nanmedian(cont[valid]) if np.any(valid) else 0.0
+    # Upper limit: tallest line peak × y_pad
+    y_upper = cont_median + (model_peak - cont_median) * y_pad
+    # Lower limit: slightly below zero or the minimum continuum
+    y_lower = min(0.0, np.nanmin(cont[valid]) * 1.1) if np.any(valid) else -0.1
+    if y_upper > y_lower:
+        ax_main.set_ylim(y_lower, y_upper)
 
     # Residual panel.
     if show_residuals and ax_res is not None:
