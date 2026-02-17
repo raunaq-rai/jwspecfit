@@ -159,6 +159,7 @@ def fit_lines(
     deg: int = 2,
     n_boot: int = 200,
     clip_sigma: float = 2.5,
+    n_jobs: int = -1,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -186,6 +187,9 @@ def fit_lines(
         Number of bootstrap iterations for uncertainty estimation (default 200).
     clip_sigma : float
         Continuum sigma-clipping threshold.
+    n_jobs : int
+        Number of parallel jobs for bootstrap. ``-1`` uses all cores,
+        ``1`` runs sequentially. Default ``-1``.
 
     Returns
     -------
@@ -401,6 +405,7 @@ def fit_lines(
     flux_errs = _bootstrap_uncertainties(
         flam, flam_err, valid, edges, nL, constraints, free_mask,
         lb_free, ub_free, p0_free, w_pix, n_boot, label=_label,
+        n_jobs=n_jobs,
     )
 
     # Build per-line results.
@@ -490,6 +495,52 @@ def _analytic_flux_err(
     return rms * dlam * sqrt(n_eff)
 
 
+def _run_single_bootstrap(
+    noise_vec: np.ndarray,
+    flam: np.ndarray,
+    flam_err: np.ndarray,
+    valid: np.ndarray,
+    edges: np.ndarray,
+    nL: int,
+    constraints: ConstraintSet,
+    lb_free: np.ndarray,
+    ub_free: np.ndarray,
+    p0_free: np.ndarray,
+    w_pix: np.ndarray,
+) -> np.ndarray:
+    """Run a single bootstrap iteration.
+
+    Parameters
+    ----------
+    noise_vec : np.ndarray
+        Pre-generated standard-normal noise vector (length ``n_pix``).
+
+    Returns
+    -------
+    np.ndarray
+        Flux (amplitude) for each line, or NaN if the fit fails.
+    """
+    flam_b = flam + noise_vec * flam_err
+
+    def residual_b(p_free: np.ndarray) -> np.ndarray:
+        p_full = constraints.expand_free_to_full(p_free)
+        model = build_model(p_full, edges, nL)
+        resid = (flam_b - model) / flam_err
+        resid *= w_pix
+        resid[~valid] = 0.0
+        return resid
+
+    try:
+        res_b = least_squares(
+            residual_b, p0_free, bounds=(lb_free, ub_free),
+            max_nfev=20000, xtol=1e-6, ftol=1e-6,
+        )
+        p_full_b = constraints.expand_free_to_full(res_b.x)
+        return p_full_b[:nL]
+    except Exception:
+        return np.full(nL, np.nan)
+
+
 def _bootstrap_uncertainties(
     flam: np.ndarray,
     flam_err: np.ndarray,
@@ -504,8 +555,15 @@ def _bootstrap_uncertainties(
     w_pix: np.ndarray,
     n_boot: int,
     label: str = "",
+    n_jobs: int = -1,
 ) -> np.ndarray | None:
     """Run bootstrap resampling for flux uncertainties.
+
+    Parameters
+    ----------
+    n_jobs : int
+        Number of parallel jobs for bootstrap. ``-1`` uses all cores,
+        ``1`` runs sequentially. Default ``-1``.
 
     Returns
     -------
@@ -515,33 +573,39 @@ def _bootstrap_uncertainties(
     if n_boot <= 0:
         return None
 
-    from tqdm import tqdm
-
-    desc = f"Bootstrap ({label})" if label else "Bootstrap"
+    # Pre-generate all noise vectors for reproducibility.
     rng = np.random.default_rng(42)
-    flux_samples = np.zeros((n_boot, nL))
+    noise_all = rng.standard_normal((n_boot, len(flam)))
 
-    for b in tqdm(range(n_boot), desc=desc, unit="iter", leave=False):
-        # Perturb flux by Gaussian noise.
-        noise = rng.standard_normal(len(flam)) * flam_err
-        flam_b = flam + noise
+    # Shared keyword arguments for _run_single_bootstrap.
+    shared_kwargs = dict(
+        flam=flam, flam_err=flam_err, valid=valid, edges=edges,
+        nL=nL, constraints=constraints, lb_free=lb_free, ub_free=ub_free,
+        p0_free=p0_free, w_pix=w_pix,
+    )
 
-        def residual_b(p_free: np.ndarray) -> np.ndarray:
-            p_full = constraints.expand_free_to_full(p_free)
-            model = build_model(p_full, edges, nL)
-            resid = (flam_b - model) / flam_err
-            resid *= w_pix
-            resid[~valid] = 0.0
-            return resid
+    try:
+        from joblib import Parallel, delayed
 
-        try:
-            res_b = least_squares(
-                residual_b, p0_free, bounds=(lb_free, ub_free),
-                max_nfev=20000, xtol=1e-6, ftol=1e-6,
+        desc = f"Bootstrap ({label})" if label else "Bootstrap"
+        logger.info("%s: %d iterations, n_jobs=%d", desc, n_boot, n_jobs)
+
+        results = Parallel(n_jobs=n_jobs, prefer="processes")(
+            delayed(_run_single_bootstrap)(noise_all[b], **shared_kwargs)
+            for b in range(n_boot)
+        )
+        flux_samples = np.array(results)
+
+    except ImportError:
+        logger.warning("joblib not installed; falling back to sequential bootstrap.")
+        from tqdm import tqdm
+
+        desc = f"Bootstrap ({label})" if label else "Bootstrap"
+        flux_samples = np.zeros((n_boot, nL))
+
+        for b in tqdm(range(n_boot), desc=desc, unit="iter", leave=False):
+            flux_samples[b, :] = _run_single_bootstrap(
+                noise_all[b], **shared_kwargs
             )
-            p_full_b = constraints.expand_free_to_full(res_b.x)
-            flux_samples[b, :] = p_full_b[:nL]  # Amplitudes = fluxes.
-        except Exception:
-            flux_samples[b, :] = np.nan
 
     return np.nanstd(flux_samples, axis=0)
