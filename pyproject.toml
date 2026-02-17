@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "jwspecfit"
+version = "0.1.0"
+description = "JWST NIRSpec emission-line fitting with resolution-aware Gaussian models"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    {name = "Raunaq Rai", email = "raunaq.rai.22@ucl.ac.uk"},
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "astropy>=5.3",
+    "matplotlib>=3.7",
+    "lmfit>=1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 99
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
