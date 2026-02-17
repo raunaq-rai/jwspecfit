@@ -7,7 +7,7 @@ narrow+broad models using the Bayesian Information Criterion (BIC).
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 import numpy as np
@@ -54,6 +54,13 @@ BROAD_BALMER = ["Ha", "HBETA", "HDELTA", "HGAMMA"]
 HA_NII_COMPLEX = ["Ha", "NII_6549", "NII_6585"]
 
 
+# Speed of light in km/s for velocity calculations.
+_C_KMS = 2.99792458e5
+
+# Velocity half-window for Balmer pixel mask (km/s).
+_BALMER_MASK_DV = 3000.0
+
+
 @dataclass
 class BroadFitResult:
     """Result of broad component model selection.
@@ -65,15 +72,18 @@ class BroadFitResult:
     selected_model : str
         Model name: ``"narrow"``, ``"broad1"``, ``"broad2"``, or ``"both"``.
     bic_narrow : float
-        BIC for narrow-only model.
+        Median BIC for narrow-only model (from bootstrap when used).
     bic_broad1 : float
-        BIC for narrow + BROAD1 model (NaN if not attempted).
+        Median BIC for narrow + BROAD1 model (NaN if not attempted).
     bic_broad2 : float
-        BIC for narrow + BROAD2 model.
+        Median BIC for narrow + BROAD2 model (NaN if not attempted).
     bic_both : float
-        BIC for narrow + BROAD1 + BROAD2 model.
+        Median BIC for narrow + BROAD1 + BROAD2 model (NaN if not attempted).
     all_fits : dict[str, FitResult]
         All fitted models for inspection.
+    bic_bootstrap : dict[str, np.ndarray]
+        Full BIC distributions from bootstrap iterations.  Empty if
+        bootstrap BIC was not run.
     """
 
     best_fit: FitResult
@@ -83,6 +93,7 @@ class BroadFitResult:
     bic_broad2: float
     bic_both: float
     all_fits: dict[str, FitResult]
+    bic_bootstrap: dict[str, np.ndarray] = field(default_factory=dict)
 
 
 def _compute_bic(
@@ -96,6 +107,116 @@ def _compute_bic(
     chi2 = float(np.sum(r**2))
     N = int(np.sum(valid))
     return chi2 + n_free * np.log(N)
+
+
+def _balmer_pixel_mask(
+    wave_um: np.ndarray,
+    z: float,
+    dv: float = _BALMER_MASK_DV,
+) -> np.ndarray:
+    """Boolean mask selecting pixels within ±dv km/s of Hα and Hβ.
+
+    Parameters
+    ----------
+    wave_um : np.ndarray
+        Observed wavelength in microns.
+    z : float
+        Source redshift.
+    dv : float
+        Velocity half-window in km/s (default 3000).
+
+    Returns
+    -------
+    np.ndarray
+        Boolean mask (True for Balmer pixels).
+    """
+    mask = np.zeros(len(wave_um), dtype=bool)
+    for line_name in ("Ha", "HBETA"):
+        lam_rest_A = REST_LINES_A[line_name]
+        lam_obs_um = lam_rest_A * (1.0 + z) * 1e-4  # Å → µm
+        # ±dv km/s → wavelength window
+        lam_lo = lam_obs_um * (1.0 - dv / _C_KMS)
+        lam_hi = lam_obs_um * (1.0 + dv / _C_KMS)
+        mask |= (wave_um >= lam_lo) & (wave_um <= lam_hi)
+    return mask
+
+
+def _bic_bootstrap_single(
+    noise: np.ndarray,
+    spec: Spectrum,
+    z: float,
+    narrow_lines: list[str],
+    grating: str | None,
+    R: float | Callable | None,
+    continuum: np.ndarray,
+    deg: int,
+    narrow_fit: FitResult,
+    balmer_mask: np.ndarray,
+    variants: list[str],
+) -> dict[str, float]:
+    """Run one BIC bootstrap iteration for all model variants.
+
+    Module-level function for joblib pickling.
+
+    Parameters
+    ----------
+    noise : np.ndarray
+        Standard-normal noise vector (length = n_pix).
+    spec : Spectrum
+        Original spectrum.
+    z : float
+        Source redshift.
+    narrow_lines : list of str
+        Narrow line list.
+    grating, R, continuum, deg
+        Fitting configuration.
+    narrow_fit : FitResult
+        Narrow-only fit on real data (used to seed broad variants).
+    balmer_mask : np.ndarray
+        Boolean mask for Balmer pixels.
+    variants : list of str
+        Model variant names to fit (includes ``"narrow"``).
+
+    Returns
+    -------
+    dict[str, float]
+        ``{variant_name: bic_value}`` for each variant.
+    """
+    # Create perturbed spectrum.
+    perturbed = spec.copy()
+    perturbed.flux_ujy = spec.flux_ujy + noise * spec.err_ujy
+
+    results: dict[str, float] = {}
+    for variant in variants:
+        broad_type = None if variant == "narrow" else variant
+        try:
+            fit_v, _ = _fit_model_variant(
+                perturbed, z, narrow_lines, grating, R, continuum, deg,
+                broad_type=broad_type, n_boot=0,
+                narrow_fit=narrow_fit if broad_type is not None else None,
+                n_jobs=1,
+            )
+        except (ValueError, RuntimeError):
+            results[variant] = np.nan
+            continue
+
+        # Compute BIC on Balmer pixels only.
+        flam_err = _ujy_to_flam(perturbed.err_ujy, perturbed.wave_um)
+        flam_data = _ujy_to_flam(
+            perturbed.flux_ujy - fit_v.continuum, perturbed.wave_um
+        )
+        flam_model = _ujy_to_flam(fit_v.model_flux, perturbed.wave_um)
+        valid = perturbed.mask_valid() & balmer_mask
+        resid = flam_data - flam_model
+
+        if fit_v.constraints is not None:
+            n_free = int(np.sum(fit_v.constraints.free_mask()))
+        else:
+            n_free = len(fit_v.params)
+
+        results[variant] = _compute_bic(resid, flam_err, valid, n_free)
+
+    return results
 
 
 def _add_broad_lines(
@@ -222,6 +343,7 @@ def fit_with_broad(
     deg: int = 2,
     mode: str = "auto",
     n_boot: int = 200,
+    n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
     bic_delta: float = BIC_DELTA_THRESHOLD,
@@ -250,7 +372,10 @@ def fit_with_broad(
         - ``"broad2"``: Force very broad.
         - ``"both"``: Force both broad components.
     n_boot : int
-        Number of bootstrap iterations for uncertainties (default 200).
+        Number of bootstrap iterations for flux uncertainties (default 200).
+    n_boot_bic : int
+        Number of bootstrap iterations for BIC model selection (default 100).
+        Set to 0 for single-point BIC (legacy behaviour).
     n_jobs : int
         Number of parallel jobs for bootstrap. ``-1`` uses all cores,
         ``1`` runs sequentially. Default ``-1``.
@@ -294,6 +419,8 @@ def fit_with_broad(
     bic_b2 = np.nan
     bic_both = np.nan
     all_fits: dict[str, FitResult] = {"narrow": fit_narrow}
+
+    bic_boot_dist: dict[str, np.ndarray] = {}
 
     if mode == "off":
         # Re-fit with bootstrap for the narrow model.
@@ -339,13 +466,8 @@ def fit_with_broad(
             all_fits=all_fits,
         )
 
-    # Fast BIC fits (no bootstrap), seeded from narrow-only results.
-    # Run in parallel using threads (numpy/scipy release the GIL).
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    bic_futures: dict[str, any] = {}
-    variants_to_fit: list[str] = []
-
+    # Determine which variants to fit.
+    variants_to_fit: list[str] = ["narrow"]
     if mode in ("auto", "broad1", "both"):
         variants_to_fit.append("broad1")
     if mode in ("auto", "broad2", "both"):
@@ -353,26 +475,86 @@ def fit_with_broad(
     if mode in ("auto", "both"):
         variants_to_fit.append("both")
 
-    with ThreadPoolExecutor(max_workers=len(variants_to_fit) or 1) as pool:
-        for variant in variants_to_fit:
-            fut = pool.submit(
-                _fit_model_variant,
+    # --- Phase 2: BIC model selection ---
+    if n_boot_bic > 0 and mode == "auto":
+        # Bootstrap BIC on Balmer pixels only.
+        from joblib import Parallel, delayed
+        from tqdm import tqdm
+
+        balmer_mask = _balmer_pixel_mask(spectrum.wave_um, z)
+        rng = np.random.default_rng()
+        noise_vectors = rng.standard_normal((n_boot_bic, len(spectrum.wave_um)))
+
+        bic_records: list[dict[str, float]] = Parallel(
+            n_jobs=n_jobs, return_as="generator"
+        )(
+            delayed(_bic_bootstrap_single)(
+                noise_vectors[i],
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
-                variant, 0, fit_narrow, n_jobs,
+                fit_narrow, balmer_mask, variants_to_fit,
             )
-            bic_futures[variant] = fut
+            for i in range(n_boot_bic)
+        )
+        bic_records = list(tqdm(
+            bic_records, total=n_boot_bic, desc="BIC bootstrap",
+        ))
 
-        for variant, fut in bic_futures.items():
-            fit_v, bic_v = fut.result()
-            all_fits[variant] = fit_v
-            if variant == "broad1":
-                bic_b1 = bic_v
-            elif variant == "broad2":
-                bic_b2 = bic_v
-            elif variant == "both":
-                bic_both = bic_v
+        # Aggregate into arrays and compute medians.
+        for variant in variants_to_fit:
+            bic_boot_dist[variant] = np.array(
+                [rec[variant] for rec in bic_records]
+            )
 
-    # --- Phase 2: select best model by BIC ---
+        bic_medians = {v: float(np.nanmedian(bic_boot_dist[v])) for v in variants_to_fit}
+        bic_narrow = bic_medians.get("narrow", bic_narrow)
+        bic_b1 = bic_medians.get("broad1", bic_b1)
+        bic_b2 = bic_medians.get("broad2", bic_b2)
+        bic_both = bic_medians.get("both", bic_both)
+
+        # Also do a single real-data fit for each variant (for all_fits dict).
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=len(variants_to_fit)) as pool:
+            futures = {}
+            for variant in variants_to_fit:
+                if variant == "narrow":
+                    continue  # already have fit_narrow
+                broad_type = variant
+                futures[variant] = pool.submit(
+                    _fit_model_variant,
+                    spectrum, z, narrow_lines, grating, R, continuum, deg,
+                    broad_type, 0, fit_narrow, 1,
+                )
+            for variant, fut in futures.items():
+                fit_v, _ = fut.result()
+                all_fits[variant] = fit_v
+
+    else:
+        # Legacy single-point BIC (n_boot_bic=0 or forced mode).
+        from concurrent.futures import ThreadPoolExecutor
+
+        broad_variants = [v for v in variants_to_fit if v != "narrow"]
+        with ThreadPoolExecutor(max_workers=len(broad_variants) or 1) as pool:
+            bic_futures: dict[str, any] = {}
+            for variant in broad_variants:
+                fut = pool.submit(
+                    _fit_model_variant,
+                    spectrum, z, narrow_lines, grating, R, continuum, deg,
+                    variant, 0, fit_narrow, n_jobs,
+                )
+                bic_futures[variant] = fut
+
+            for variant, fut in bic_futures.items():
+                fit_v, bic_v = fut.result()
+                all_fits[variant] = fit_v
+                if variant == "broad1":
+                    bic_b1 = bic_v
+                elif variant == "broad2":
+                    bic_b2 = bic_v
+                elif variant == "both":
+                    bic_both = bic_v
+
+    # --- Phase 3: select best model by BIC ---
     if mode == "auto":
         candidates = {
             "narrow": bic_narrow,
@@ -389,9 +571,10 @@ def fit_with_broad(
                 best_name = "narrow"
                 logger.info("ΔBIC=%.1f < %.1f; keeping narrow model.", delta, bic_delta)
 
+        bic_src = "median" if n_boot_bic > 0 else "single-point"
         logger.info(
-            "BIC selection: narrow=%.1f, broad1=%.1f, broad2=%.1f, both=%.1f → %s",
-            bic_narrow, bic_b1, bic_b2, bic_both, best_name,
+            "BIC selection (%s): narrow=%.1f, broad1=%.1f, broad2=%.1f, both=%.1f → %s",
+            bic_src, bic_narrow, bic_b1, bic_b2, bic_both, best_name,
         )
     elif mode == "broad1":
         best_name = "broad1"
@@ -402,7 +585,7 @@ def fit_with_broad(
     else:
         best_name = "narrow"
 
-    # --- Phase 3: re-fit only the selected model with bootstrap ---
+    # --- Phase 4: re-fit only the selected model with bootstrap ---
     if n_boot > 0:
         broad_type = None if best_name == "narrow" else best_name
         best_fit, _ = _fit_model_variant(
@@ -421,4 +604,5 @@ def fit_with_broad(
         bic_broad2=bic_b2,
         bic_both=bic_both,
         all_fits=all_fits,
+        bic_bootstrap=bic_boot_dist,
     )
