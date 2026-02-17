@@ -153,6 +153,7 @@ def fit_lines(
     grating: str | None = None,
     R: float | Callable | None = None,
     lines: list[str] | None = None,
+    wave_range_A: tuple[float, float] | None = None,
     deg: int = 2,
     n_boot: int = 200,
     clip_sigma: float = 2.5,
@@ -171,6 +172,10 @@ def fit_lines(
         Resolving power.  If ``None``, uses ``spectrum.R`` or derives from *grating*.
     lines : list of str, optional
         Lines to fit.  If ``None``, auto-detected from grating and wavelength coverage.
+    wave_range_A : tuple of float, optional
+        ``(lo, hi)`` observed wavelength range in Angstroms.  If given, only
+        pixels within this range are used for continuum fitting and line
+        fitting.  Lines outside the range are excluded.
     deg : int
         Continuum polynomial degree (default 2).
     n_boot : int
@@ -190,6 +195,28 @@ def fit_lines(
         from .resolution import R_from_pixels
         logger.info("No grating or R specified; estimating R from pixel spacing.")
         R = R_from_pixels(spec.wave_um)
+
+    # Apply fit window: crop spectrum to wavelength range.
+    if wave_range_A is not None:
+        lo_A, hi_A = wave_range_A
+        mask_win = (spec.wave_A >= lo_A) & (spec.wave_A <= hi_A)
+        if np.sum(mask_win) < 10:
+            raise ValueError(
+                f"Fit window [{lo_A:.0f}, {hi_A:.0f}] Å contains only "
+                f"{np.sum(mask_win)} pixels."
+            )
+        spec = Spectrum(
+            wave_um=spec.wave_um[mask_win],
+            flux_ujy=spec.flux_ujy[mask_win],
+            err_ujy=spec.err_ujy[mask_win],
+            grating=spec.grating,
+            z=spec.z,
+            R=spec.R,
+            meta=spec.meta,
+        )
+        logger.info(
+            "Fit window: %.0f–%.0f Å (%d pixels)", lo_A, hi_A, spec.n_pix,
+        )
 
     # Determine which lines to fit.
     if lines is None:
