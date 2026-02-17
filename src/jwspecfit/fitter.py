@@ -310,10 +310,9 @@ def fit_lines(
         lb[i] = 0.0
         ub[i] = 150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
 
-        # Centroid bounds.
-        cent_margin = max(12.0 * np.median(sig_inst), 4.0 * np.median(dlam))
-        if "PRISM" in (grating or "").upper():
-            cent_margin = 12.0 * sig_inst[np.argmin(np.abs(spec.wave_A - lam_obs_A))]
+        # Centroid bounds — generous enough to find the true line centre.
+        local_sig = sig_inst[np.argmin(np.abs(spec.wave_A - lam_obs_A))]
+        cent_margin = max(20.0 * local_sig, 6.0 * np.median(dlam))
 
         p0[nL + i] = lam_obs_A
         lb[nL + i] = lam_obs_A - cent_margin

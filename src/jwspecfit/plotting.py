@@ -93,7 +93,7 @@ def plot_fit(
     sfmt = ScalarFormatter(useOffset=False)
     sfmt.set_scientific(False)
 
-    # --- Individual line components (drawn first, behind data) ---
+    # --- Individual line components (smooth Gaussians, behind data) ---
     if show_components and len(result.line_names) > 0:
         edges = spec.wave_edges_A
         nL = len(result.line_names)
@@ -122,24 +122,38 @@ def plot_fit(
 
             is_broad = "BROAD" in name
 
+            # Fractional uncertainty for shading.
+            lr = result.lines.get(name)
+            frac_err = 0.0
+            if lr is not None and lr.flux > 0 and lr.flux_err > 0:
+                frac_err = lr.flux_err / lr.flux
+
             if is_broad:
                 colour = broad_colours[n_broad % len(broad_colours)]
                 n_broad += 1
                 ax_main.fill_between(
-                    wave, cont, comp_ujy, step="mid",
+                    wave, cont, comp_ujy,
                     alpha=0.25, color=colour, hatch="//", linewidth=0,
                 )
-                ax_main.step(wave, comp_ujy, where="mid", color=colour,
-                             lw=1.2, alpha=0.8)
+                ax_main.plot(wave, comp_ujy, "-", color=colour, lw=1.2, alpha=0.8)
             else:
                 colour = narrow_colours[n_narrow % len(narrow_colours)]
                 n_narrow += 1
                 ax_main.fill_between(
-                    wave, cont, comp_ujy, step="mid",
+                    wave, cont, comp_ujy,
                     alpha=0.20, color=colour, linewidth=0,
                 )
-                ax_main.step(wave, comp_ujy, where="mid", color=colour,
-                             lw=0.8, alpha=0.7)
+                ax_main.plot(wave, comp_ujy, "-", color=colour, lw=0.8, alpha=0.7)
+
+            # Uncertainty shading (±1σ on the Gaussian profile).
+            if frac_err > 0:
+                line_only = comp_ujy - cont
+                comp_hi = cont + line_only * (1.0 + frac_err)
+                comp_lo = cont + line_only * max(1.0 - frac_err, 0.0)
+                ax_main.fill_between(
+                    wave, comp_lo, comp_hi,
+                    alpha=0.12, color=colour, linewidth=0,
+                )
 
             if label_lines:
                 centroid_A = result.params[nL + i]
@@ -265,7 +279,7 @@ def plot_fit_interactive(
         line=dict(width=0), showlegend=False, hoverinfo="skip",
     ))
 
-    # Individual line components.
+    # Individual line components (smooth Gaussians).
     if show_components and len(result.line_names) > 0:
         edges = spec.wave_edges_A
         nL = len(result.line_names)
@@ -290,14 +304,34 @@ def plot_fit_interactive(
             display_name = name.replace("_", " ")
             dash = "dot" if is_broad else "solid"
 
+            # Uncertainty shading (±1σ).
+            lr = result.lines.get(name)
+            frac_err = 0.0
+            if lr is not None and lr.flux > 0 and lr.flux_err > 0:
+                frac_err = lr.flux_err / lr.flux
+
+            if frac_err > 0:
+                line_only = comp_ujy - cont
+                comp_hi = cont + line_only * (1.0 + frac_err)
+                comp_lo = cont + line_only * max(1.0 - frac_err, 0.0)
+                # Shaded band (smooth).
+                fig.add_trace(go.Scatter(
+                    x=np.concatenate([wave, wave[::-1]]),
+                    y=np.concatenate([comp_hi, comp_lo[::-1]]),
+                    fill="toself", fillcolor=colour.replace("0.6", "0.12")
+                    if "rgba" in colour else f"rgba(150,150,150,0.12)",
+                    line=dict(width=0), showlegend=False, hoverinfo="skip",
+                ))
+
+            # Smooth Gaussian line.
             fig.add_trace(go.Scatter(
                 x=wave, y=comp_ujy,
                 mode="lines", name=f"{'[B] ' if is_broad else ''}{display_name}",
-                line=dict(color=colour, width=1.5, dash=dash, shape="hvh"),
+                line=dict(color=colour, width=1.5, dash=dash),
                 hovertemplate=f"{display_name}<br>λ=%{{x:.1f}}<br>flux=%{{y:.4f}} µJy<extra></extra>",
             ))
 
-    # Data.
+    # Data (steps).
     fig.add_trace(go.Scatter(
         x=wave[valid], y=flux[valid],
         mode="lines", name="Data",
@@ -305,14 +339,14 @@ def plot_fit_interactive(
         hovertemplate="Data<br>λ=%{x:.1f}<br>flux=%{y:.4f} µJy<extra></extra>",
     ))
 
-    # Continuum.
+    # Continuum (steps).
     fig.add_trace(go.Scatter(
         x=wave, y=cont,
         mode="lines", name="Continuum",
         line=dict(color="green", width=1, dash="dash", shape="hvh"),
     ))
 
-    # Model.
+    # Model (steps).
     fig.add_trace(go.Scatter(
         x=wave, y=model_total,
         mode="lines", name="Model",
