@@ -65,8 +65,9 @@ class ConstraintSet:
             sigma_o3 = p[2 * nL + i_o3]
             mu_o3 = p[nL + i_o3]
 
-            # Width tying: all narrow lines share OIII velocity dispersion.
-            width_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA", "NII_6585"]
+            # Width tying: Balmer lines share OIII velocity dispersion.
+            # NII width is free (tied only via the doublet constraint).
+            width_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA"]
             for name in width_targets:
                 if name in idx:
                     i_t = idx[name]
@@ -132,8 +133,8 @@ class ConstraintSet:
             free[2 * nL + i49] = False
 
         if self.tie_balmer_to_oiii and "OIII_5007" in idx:
-            # Width tied for all narrow lines.
-            width_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA", "NII_6585"]
+            # Width tied for Balmer lines only (NII width is free).
+            width_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA"]
             for name in width_targets:
                 if name in idx:
                     free[2 * nL + idx[name]] = False
