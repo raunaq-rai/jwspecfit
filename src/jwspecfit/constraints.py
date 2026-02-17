@@ -55,26 +55,30 @@ class ConstraintSet:
         nL = len(self.line_names)
         idx = {name: i for i, name in enumerate(self.line_names)}
 
-        # --- Balmer + NII kinematics tying to [OIII] 5007 ---
-        # Width AND centroid are tied in velocity space, so the entire
-        # narrow-line complex is locked to the OIII systemic velocity.
-        # This prevents NII from drifting toward Ha and absorbing broad wings.
+        # --- Narrow-line kinematics tying to [OIII] 5007 ---
+        # Widths are tied in velocity space for all narrow lines.
+        # Centroids are tied for Balmer lines only (same systemic velocity).
+        # NII_6585 width is tied but centroid is free so it can fit its peak.
         if self.tie_balmer_to_oiii and "OIII_5007" in idx:
             i_o3 = idx["OIII_5007"]
             lam_o3 = REST_LINES_A["OIII_5007"]
             sigma_o3 = p[2 * nL + i_o3]
             mu_o3 = p[nL + i_o3]
 
-            # Lines to tie (narrow Balmer + [NII])
-            tie_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA", "NII_6585"]
-            for name in tie_targets:
+            # Width tying: all narrow lines share OIII velocity dispersion.
+            width_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA", "NII_6585"]
+            for name in width_targets:
                 if name in idx:
                     i_t = idx[name]
-                    lam_t = REST_LINES_A[name]
-                    ratio = lam_t / lam_o3
-                    # Width: same velocity dispersion → σ scales with wavelength
+                    ratio = REST_LINES_A[name] / lam_o3
                     p[2 * nL + i_t] = sigma_o3 * ratio
-                    # Centroid: same velocity offset → centroid scales with wavelength
+
+            # Centroid tying: Balmer lines only (not NII — its centroid is free).
+            centroid_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA"]
+            for name in centroid_targets:
+                if name in idx:
+                    i_t = idx[name]
+                    ratio = REST_LINES_A[name] / lam_o3
                     p[nL + i_t] = mu_o3 * ratio
 
         # --- Tie broad Balmer centroids to their narrow counterparts ---
@@ -128,13 +132,17 @@ class ConstraintSet:
             free[2 * nL + i49] = False
 
         if self.tie_balmer_to_oiii and "OIII_5007" in idx:
-            tie_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA", "NII_6585"]
-            for name in tie_targets:
+            # Width tied for all narrow lines.
+            width_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA", "NII_6585"]
+            for name in width_targets:
                 if name in idx:
-                    # Centroid is tied (mu slot)
-                    free[nL + idx[name]] = False
-                    # Width is tied (sigma slot)
                     free[2 * nL + idx[name]] = False
+
+            # Centroid tied for Balmer lines only (NII centroid stays free).
+            centroid_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA"]
+            for name in centroid_targets:
+                if name in idx:
+                    free[nL + idx[name]] = False
 
         # Broad Balmer centroids tied to narrow.
         _BROAD_PAIRS = [
