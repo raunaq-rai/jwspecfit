@@ -317,10 +317,28 @@ def fit_lines(
         lb[i] = 0.0
         ub[i] = 150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
 
-        # Centroid bounds — tight enough to prevent drift, loose enough
-        # for real velocity offsets (~few hundred km/s).
+        # Centroid bounds — expressed as a velocity offset (km/s) converted
+        # to Å at the observed wavelength.  For stacked spectra the redshift
+        # alignment can introduce ~100–300 km/s systematic offsets; individual
+        # spectra typically need less.  The margin is capped at half the
+        # separation to the nearest line so centroids cannot blend.
         local_sig = sig_inst[np.argmin(np.abs(spec.wave_A - lam_obs_A))]
-        cent_margin = max(3.0 * local_sig, 2.0 * np.median(dlam))
+        _C_KMS_CENT = 299792.458
+        _CENT_V_MAX = 300.0  # km/s — max centroid offset
+        cent_margin_v = _CENT_V_MAX / _C_KMS_CENT * lam_obs_A
+        # Floor: at least 2 pixel widths for coarsely sampled spectra.
+        cent_margin = max(cent_margin_v, 2.0 * np.median(dlam))
+
+        # Cap at half the distance to the nearest neighbour to prevent
+        # lines from drifting into each other.
+        other_obs = [
+            REST_LINES_A[n] * (1.0 + z)
+            for j, n in enumerate(line_names)
+            if j != i and "BROAD" not in n
+        ]
+        if other_obs:
+            min_sep = min(abs(lam_obs_A - o) for o in other_obs)
+            cent_margin = min(cent_margin, 0.5 * min_sep)
 
         p0[nL + i] = lam_obs_A
         lb[nL + i] = lam_obs_A - cent_margin
