@@ -3,7 +3,10 @@
 import numpy as np
 import pytest
 
-from jwspecfit import Spectrum, read_dict, read_fits, read_npz
+from jwspecfit import (
+    Spectrum, read_dict, read_fits, read_npz, fit_lines,
+    save_result, load_result, export_lines_txt,
+)
 from .conftest import G395M_FITS, PRISM_FITS, STACK_NPZ
 
 
@@ -82,3 +85,42 @@ class TestSpectrum:
         # F_λ should generally be small positive numbers
         valid = spec.mask_valid()
         assert np.any(flam[valid] > 0)
+
+
+class TestSaveLoadResult:
+    @pytest.fixture
+    def fit_result(self, prism_spectrum):
+        return fit_lines(prism_spectrum, z=6.0, grating="PRISM", n_boot=0)
+
+    def test_round_trip(self, fit_result, tmp_path):
+        outfile = tmp_path / "result.npz"
+        save_result(fit_result, outfile)
+        loaded = load_result(outfile)
+        assert loaded.success == fit_result.success
+        np.testing.assert_allclose(loaded.model_flux, fit_result.model_flux, rtol=1e-10)
+        np.testing.assert_allclose(loaded.chi2, fit_result.chi2)
+        assert set(loaded.lines.keys()) == set(fit_result.lines.keys())
+        for name in fit_result.lines:
+            np.testing.assert_allclose(loaded.lines[name].flux, fit_result.lines[name].flux)
+
+    def test_spectrum_preserved(self, fit_result, tmp_path):
+        outfile = tmp_path / "result.npz"
+        save_result(fit_result, outfile)
+        loaded = load_result(outfile)
+        np.testing.assert_allclose(loaded.spectrum.wave_um, fit_result.spectrum.wave_um)
+        assert loaded.spectrum.grating == fit_result.spectrum.grating
+
+
+class TestExportLinesTxt:
+    def test_writes_file(self, prism_spectrum, tmp_path):
+        result = fit_lines(prism_spectrum, z=6.0, grating="PRISM", n_boot=0)
+        outfile = tmp_path / "lines.txt"
+        export_lines_txt(result, outfile)
+        assert outfile.exists()
+        lines = outfile.read_text().strip().split("\n")
+        # Header + data lines
+        assert len(lines) >= 3  # 2 header + at least 1 line
+        # Check header contains expected columns
+        assert "flux" in lines[1]
+        assert "EW_A" in lines[1]
+        assert "SNR_peak" in lines[1]

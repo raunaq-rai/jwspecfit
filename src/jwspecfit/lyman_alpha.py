@@ -17,8 +17,8 @@ from scipy.stats import skewnorm
 
 logger = logging.getLogger(__name__)
 
-# Path to Inoue+2014 Table 2 (shipped with the package in data/).
-_DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+# Path to Inoue+2014 Table 2 (shipped inside the package).
+_DATA_DIR = Path(__file__).resolve().parent / "data"
 _INOUE_TABLE = _DATA_DIR / "inoue2014_table2.txt"
 
 # Lyman series rest wavelengths (Å) — first 40 transitions.

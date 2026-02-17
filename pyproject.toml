@@ -19,6 +19,7 @@ dependencies = [
     "matplotlib>=3.7",
     "lmfit>=1.2",
     "tqdm>=4.60",
+    "plotly>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+jwspecfit = ["data/*.txt"]
 
 [tool.ruff]
 line-length = 99

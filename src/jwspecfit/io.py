@@ -221,6 +221,176 @@ def read_dict(
 
 
 # ---------------------------------------------------------------------------
+# Save / load FitResult
+# ---------------------------------------------------------------------------
+
+def save_result(result: "FitResult", path: str | Path) -> None:
+    """Save a FitResult to a .npz file for later replotting.
+
+    Parameters
+    ----------
+    result : FitResult
+        Fit result to save.
+    path : str or Path
+        Output file path (should end in ``.npz``).
+    """
+    from .fitter import FitResult, LineResult
+    import json
+
+    path = Path(path)
+
+    # Serialise line results as JSON-compatible dict.
+    lines_data = {}
+    for name, lr in result.lines.items():
+        lines_data[name] = {
+            "rest_wave_A": lr.rest_wave_A,
+            "amplitude": lr.amplitude,
+            "centroid_A": lr.centroid_A,
+            "sigma_A": lr.sigma_A,
+            "flux": lr.flux,
+            "flux_err": lr.flux_err,
+            "ew_A": lr.ew_A,
+            "snr": lr.snr,
+        }
+
+    np.savez_compressed(
+        path,
+        # Arrays
+        params=result.params,
+        model_flux=result.model_flux,
+        continuum=result.continuum,
+        residuals=result.residuals,
+        wave_um=result.spectrum.wave_um,
+        flux_ujy=result.spectrum.flux_ujy,
+        err_ujy=result.spectrum.err_ujy,
+        # Scalars / metadata
+        chi2=np.array([result.chi2]),
+        success=np.array([result.success]),
+        line_names=np.array(result.line_names),
+        lines_json=np.array([json.dumps(lines_data)]),
+        grating=np.array([result.spectrum.grating or ""]),
+        z=np.array([result.spectrum.z or 0.0]),
+    )
+    logger.info("Saved FitResult to %s", path)
+
+
+def load_result(path: str | Path) -> "FitResult":
+    """Load a FitResult from a .npz file saved by :func:`save_result`.
+
+    Parameters
+    ----------
+    path : str or Path
+        Path to the ``.npz`` file.
+
+    Returns
+    -------
+    FitResult
+    """
+    from .fitter import FitResult, LineResult
+    import json
+
+    path = Path(path)
+    data = np.load(path, allow_pickle=False)
+
+    grating_str = str(data["grating"][0])
+    grating = grating_str if grating_str else None
+    z_val = float(data["z"][0])
+
+    spec = Spectrum(
+        wave_um=data["wave_um"],
+        flux_ujy=data["flux_ujy"],
+        err_ujy=data["err_ujy"],
+        grating=grating,
+        z=z_val if z_val != 0.0 else None,
+    )
+
+    lines_data = json.loads(str(data["lines_json"][0]))
+    lines = {}
+    for name, ld in lines_data.items():
+        lines[name] = LineResult(
+            name=name,
+            rest_wave_A=ld["rest_wave_A"],
+            amplitude=ld["amplitude"],
+            centroid_A=ld["centroid_A"],
+            sigma_A=ld["sigma_A"],
+            flux=ld["flux"],
+            flux_err=ld["flux_err"],
+            ew_A=ld["ew_A"],
+            snr=ld["snr"],
+        )
+
+    line_names = list(data["line_names"])
+
+    return FitResult(
+        lines=lines,
+        params=data["params"],
+        model_flux=data["model_flux"],
+        continuum=data["continuum"],
+        residuals=data["residuals"],
+        chi2=float(data["chi2"][0]),
+        spectrum=spec,
+        line_names=line_names,
+        success=bool(data["success"][0]),
+    )
+
+
+def export_lines_txt(result: "FitResult", path: str | Path, z: float | None = None) -> None:
+    """Export per-line measurements to a text file.
+
+    Columns: name, rest_wave_A, centroid_A, flux, flux_err, ew_A,
+    sigma_v_kms, snr_integrated, snr_peak.
+
+    Parameters
+    ----------
+    result : FitResult
+        Fit result.
+    path : str or Path
+        Output text file path.
+    z : float, optional
+        Redshift (for velocity calculation).  If ``None``, uses ``result.spectrum.z``.
+    """
+    path = Path(path)
+    z = z if z is not None else (result.spectrum.z or 0.0)
+    c_kms = 299792.458
+
+    with open(path, "w") as f:
+        f.write(
+            f"# jwspecfit line measurements  z={z:.6f}\n"
+            f"# {'name':<18s} {'rest_A':>10s} {'centroid_A':>12s} "
+            f"{'flux':>14s} {'flux_err':>14s} {'EW_A':>10s} "
+            f"{'sigma_v_kms':>12s} {'SNR_int':>10s} {'SNR_peak':>10s}\n"
+        )
+        for name, lr in result.lines.items():
+            # σ_v = c × σ_λ / λ_obs
+            sigma_v = c_kms * lr.sigma_A / lr.centroid_A if lr.centroid_A > 0 else 0.0
+
+            # Peak SNR: peak flux density / local error.
+            nL = len(result.line_names)
+            idx_line = result.line_names.index(name) if name in result.line_names else -1
+            if idx_line >= 0:
+                from .models import build_model
+                p_single = np.zeros(3 * nL)
+                p_single[idx_line] = result.params[idx_line]
+                p_single[nL + idx_line] = result.params[nL + idx_line]
+                p_single[2 * nL + idx_line] = result.params[2 * nL + idx_line]
+                comp = build_model(p_single, result.spectrum.wave_edges_A, nL)
+                comp_ujy = _flam_to_ujy(comp, result.spectrum.wave_um)
+                peak_idx = np.argmax(comp_ujy)
+                err_at_peak = result.spectrum.err_ujy[peak_idx]
+                snr_peak = comp_ujy[peak_idx] / err_at_peak if err_at_peak > 0 else 0.0
+            else:
+                snr_peak = 0.0
+
+            f.write(
+                f"  {name:<18s} {lr.rest_wave_A:10.3f} {lr.centroid_A:12.3f} "
+                f"{lr.flux:14.6e} {lr.flux_err:14.6e} {lr.ew_A:10.3f} "
+                f"{sigma_v:12.2f} {lr.snr:10.2f} {snr_peak:10.2f}\n"
+            )
+
+    logger.info("Exported %d lines to %s", len(result.lines), path)
+
+
+# ---------------------------------------------------------------------------
 # Unit conversion helpers
 # ---------------------------------------------------------------------------
 
