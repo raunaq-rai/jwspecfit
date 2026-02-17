@@ -157,6 +157,7 @@ def fit_lines(
     deg: int = 2,
     n_boot: int = 200,
     clip_sigma: float = 2.5,
+    _label: str = "",
 ) -> FitResult:
     """Fit emission lines in a spectrum.
 
@@ -367,7 +368,7 @@ def fit_lines(
     # Bootstrap uncertainties.
     flux_errs = _bootstrap_uncertainties(
         flam, flam_err, valid, edges, nL, constraints, free_mask,
-        lb_free, ub_free, p0_free, w_pix, n_boot,
+        lb_free, ub_free, p0_free, w_pix, n_boot, label=_label,
     )
 
     # Build per-line results.
@@ -470,6 +471,7 @@ def _bootstrap_uncertainties(
     p0_free: np.ndarray,
     w_pix: np.ndarray,
     n_boot: int,
+    label: str = "",
 ) -> np.ndarray | None:
     """Run bootstrap resampling for flux uncertainties.
 
@@ -483,10 +485,11 @@ def _bootstrap_uncertainties(
 
     from tqdm import tqdm
 
+    desc = f"Bootstrap ({label})" if label else "Bootstrap"
     rng = np.random.default_rng(42)
     flux_samples = np.zeros((n_boot, nL))
 
-    for b in tqdm(range(n_boot), desc="Bootstrap", unit="iter", leave=False):
+    for b in tqdm(range(n_boot), desc=desc, unit="iter", leave=False):
         # Perturb flux by Gaussian noise.
         noise = rng.standard_normal(len(flam)) * flam_err
         flam_b = flam + noise

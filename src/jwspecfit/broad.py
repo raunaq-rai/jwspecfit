@@ -164,8 +164,10 @@ def _fit_model_variant(
     else:
         fit_lines_list = list(line_names)
 
+    variant_label = broad_type or "narrow"
     result = fit_lines(
         spec, z, grating=grating, R=R, lines=fit_lines_list, deg=deg, n_boot=n_boot,
+        _label=variant_label,
     )
 
     # Compute BIC.
