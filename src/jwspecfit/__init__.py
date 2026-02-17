@@ -8,13 +8,14 @@ from .io import Spectrum, read_dict, read_fits, read_npz
 from .lines import REST_LINES_A, get_line_list, observable_lines
 from .lyman_alpha import igm_transmission, lya_model
 from .plotting import plot_fit
-from .resolution import R_prism, resolve_R, sigma_inst_A
+from .resolution import R_from_pixels, R_prism, resolve_R, sigma_inst_A
 
 __all__ = [
     "BroadFitResult",
     "FitResult",
     "LineResult",
     "REST_LINES_A",
+    "R_from_pixels",
     "R_prism",
     "Spectrum",
     "fit_lines",

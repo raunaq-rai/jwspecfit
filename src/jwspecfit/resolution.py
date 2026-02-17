@@ -98,7 +98,41 @@ def resolve_R(
             return R_prism(lam_um)
         return np.full_like(lam_um, R_grating(g))
 
-    raise ValueError("Either grating or R must be specified.")
+    raise ValueError("Either grating or R must be specified (or use R_from_pixels).")
+
+
+def R_from_pixels(lam_um: np.ndarray) -> Callable[[np.ndarray], np.ndarray]:
+    """Estimate resolving power from the pixel spacing.
+
+    Assumes the spectrum is Nyquist-sampled, so that the FWHM of the
+    line-spread function spans ~2 pixels:  R ≈ λ / (2 Δλ).
+
+    Returns a callable ``R(lam_um)`` that can be passed directly to
+    :func:`resolve_R`, :func:`sigma_inst_A`, or :func:`fit_lines`.
+
+    This is a rough estimate and should only be used as a fallback when
+    neither a grating name nor an explicit R is available.
+
+    Parameters
+    ----------
+    lam_um : array_like
+        Wavelength in microns (must be sorted).
+
+    Returns
+    -------
+    callable
+        Function ``R(lam_um) -> np.ndarray`` that interpolates the
+        estimated resolving power.
+    """
+    lam_um = np.asarray(lam_um, dtype=float)
+    dlam = np.diff(lam_um)
+    dlam = np.append(dlam, dlam[-1])
+    R_arr = np.clip(lam_um / (2.0 * dlam), 10.0, 10000.0)
+
+    def _R_interp(lam: np.ndarray) -> np.ndarray:
+        return np.interp(lam, lam_um, R_arr)
+
+    return _R_interp
 
 
 def sigma_inst_A(

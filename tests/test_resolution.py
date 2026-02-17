@@ -3,7 +3,9 @@
 import numpy as np
 import pytest
 
-from jwspecfit.resolution import R_prism, R_grating, resolve_R, sigma_inst_A, sigma_inst_kms
+from jwspecfit.resolution import (
+    R_from_pixels, R_prism, R_grating, resolve_R, sigma_inst_A, sigma_inst_kms,
+)
 
 
 class TestRPrism:
@@ -61,6 +63,35 @@ class TestResolveR:
     def test_neither_raises(self):
         with pytest.raises(ValueError):
             resolve_R(np.array([1.0]))
+
+
+class TestRFromPixels:
+    def test_returns_callable(self):
+        lam = np.linspace(1.0, 5.0, 200)
+        R_fn = R_from_pixels(lam)
+        assert callable(R_fn)
+
+    def test_reasonable_values(self):
+        lam = np.linspace(1.0, 5.0, 200)
+        R_fn = R_from_pixels(lam)
+        R_vals = R_fn(lam)
+        assert np.all(R_vals > 0)
+        assert np.all(R_vals < 10000)
+
+    def test_works_with_resolve_R(self):
+        lam = np.linspace(1.0, 5.0, 200)
+        R_fn = R_from_pixels(lam)
+        R_arr = resolve_R(lam, R=R_fn)
+        assert R_arr.shape == lam.shape
+
+    def test_auto_detect_in_fit(self, prism_spectrum):
+        """Full integration: fit_lines with no grating or R should auto-detect."""
+        from jwspecfit import fit_lines
+        spec = prism_spectrum.copy()
+        spec.grating = None
+        spec.R = None
+        result = fit_lines(spec, z=6.0)
+        assert result.success
 
 
 class TestSigmaInst:

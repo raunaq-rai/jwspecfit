@@ -42,13 +42,13 @@ class TestFitLinesCustomR:
         result = fit_lines(prism_spectrum, z=6.0, R=100.0)
         assert result.success
 
-    def test_no_grating_no_R_raises(self, prism_spectrum):
-        # Remove grating from spectrum.
+    def test_no_grating_no_R_auto_detects(self, prism_spectrum):
+        # With no grating or R, should auto-detect from pixel spacing.
         spec = prism_spectrum.copy()
         spec.grating = None
         spec.R = None
-        with pytest.raises(ValueError):
-            fit_lines(spec, z=6.0)
+        result = fit_lines(spec, z=6.0)
+        assert result.success
 
 
 class TestFitLinesCustomLines:

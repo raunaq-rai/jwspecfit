@@ -187,7 +187,9 @@ def fit_lines(
     R = R or spec.R
 
     if grating is None and R is None:
-        raise ValueError("Must specify grating or R (on Spectrum or as argument).")
+        from .resolution import R_from_pixels
+        logger.info("No grating or R specified; estimating R from pixel spacing.")
+        R = R_from_pixels(spec.wave_um)
 
     # Determine which lines to fit.
     if lines is None:
