@@ -454,10 +454,12 @@ def _bootstrap_uncertainties(
     if n_boot <= 0:
         return None
 
+    from tqdm import tqdm
+
     rng = np.random.default_rng(42)
     flux_samples = np.zeros((n_boot, nL))
 
-    for b in range(n_boot):
+    for b in tqdm(range(n_boot), desc="Bootstrap", unit="iter", leave=False):
         # Perturb flux by Gaussian noise.
         noise = rng.standard_normal(len(flam)) * flam_err
         flam_b = flam + noise
