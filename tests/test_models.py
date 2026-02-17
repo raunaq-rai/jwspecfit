@@ -62,6 +62,50 @@ class TestBuildModel:
         assert np.sum(model > 0.001) > 10
 
 
+    def test_vectorised_matches_loop(self):
+        """Vectorised build_model must match explicit per-line loop."""
+        edges = np.arange(4800, 5301, 0.5)
+        left = edges[:-1]
+        right = edges[1:]
+        n_lines = 5
+        rng = np.random.default_rng(123)
+        amplitudes = rng.uniform(0.1, 10.0, n_lines)
+        mus = rng.uniform(4900, 5200, n_lines)
+        sigmas = rng.uniform(2.0, 20.0, n_lines)
+        params = np.concatenate([amplitudes, mus, sigmas])
+
+        # Vectorised (current implementation).
+        model_vec = build_model(params, edges, n_lines)
+
+        # Explicit loop (reference).
+        model_loop = np.zeros(len(left))
+        for i in range(n_lines):
+            model_loop += amplitudes[i] * gaussian_binned(
+                left, right, mus[i], sigmas[i]
+            )
+
+        np.testing.assert_allclose(model_vec, model_loop, rtol=1e-12)
+
+    def test_zero_lines(self):
+        edges = np.arange(4900, 5101, 1.0)
+        params = np.array([])
+        model = build_model(params, edges, n_lines=0)
+        assert model.shape == (200,)
+        np.testing.assert_array_equal(model, 0.0)
+
+    def test_mixed_valid_invalid_sigma(self):
+        """Lines with invalid sigma should be skipped, valid ones included."""
+        edges = np.arange(4900, 5201, 1.0)
+        # Line 0: valid, Line 1: sigma=0 (invalid)
+        params = np.array([1.0, 1.0, 5000.0, 5100.0, 10.0, 0.0])
+        model = build_model(params, edges, n_lines=2)
+        # Should only contain contribution from line 0.
+        model_single = build_model(
+            np.array([1.0, 5000.0, 10.0]), edges, n_lines=1
+        )
+        np.testing.assert_allclose(model, model_single, rtol=1e-12)
+
+
 class TestPixelWeight:
     def test_uniform_pixels(self):
         dlam = np.full(100, 5.0)
