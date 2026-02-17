@@ -8,7 +8,6 @@ import numpy as np
 # Sources: NIST ASD, Morton (2003), Storey & Zeippen (2000).
 REST_LINES_A: dict[str, float] = {
     # UV lines
-    "Lya": 1215.670,
     "NV_1": 1238.821,
     "NV_2": 1242.804,
     "NV_doublet": 1240.81,
@@ -21,36 +20,37 @@ REST_LINES_A: dict[str, float] = {
     "SiIII_1": 1882.71,
     "SiIII_2": 1892.03,
     "CIII]": 1908.734,
-    # Optical - weak / auroral
-    "OIII]_2321": 2322.413,
-    "OIII]_2331": 2332.015,
-    "OII]_2471": 2471.717,
-    "OII_3726": 3727.092,
-    "OII_3729": 3729.875,
-    "OII_doublet": 3728.480,
+    # Semi-forbidden / weak
+    "OIII]_2321": 2322.41306535397,
+    "OIII]_2331": 2332.015190970458,
+    "OII]_2471": 2471.7168502042923,
+    "FeII*_2396": 2397.0897781493236,
+    # Optical doublets
+    "OII_3726": 3727.0917000220848,
+    "OII_3729": 3729.8754212488416,
+    "OII_doublet": 3728.4800597199715,
     # Balmer series
-    "HDELTA": 4104.050,
-    "HGAMMA": 4342.905,
-    "HBETA": 4864.041,
+    "HDELTA": 4104.049910602101,
+    "HGAMMA": 4342.904611871652,
+    "HBETA": 4864.041335024339,
     # Oxygen
-    "OIII_4363": 4364.436,
-    "OIII_4959": 4961.679,
-    "OIII_5007": 5009.637,
+    "OIII_4363": 4364.436278914932,
+    "OIII_4959": 4961.6792505239255,
+    "OIII_5007": 5009.636990676784,
     # Nitrogen, Helium
-    "NII_5756": 5757.787,
-    "HEI_5877": 5878.881,
-    "NII_6549": 6551.669,
-    "Ha": 6566.421,
-    "NII_6585": 6587.089,
+    "NII_5756": 5757.786514027234,
+    "HEI_5877": 5878.88092174501,
+    "NII_6549": 6551.669402278604,
+    "H⍺": 6566.421366618156,
+    "NII_6585": 6587.088921119292,
     # Sulphur
-    "SII_6718": 6720.150,
-    "SII_6732": 6734.533,
+    "SII_6718": 6720.149693980653,
+    "SII_6732": 6734.532561984591,
 }
 
 # Pre-defined line groups for different spectral resolutions.
 # Prism: doublets are merged; grating: doublets resolved.
 _PRISM_LINES = [
-    "Lya",
     "CIV_doublet",
     "CIII]",
     "OII_doublet",
@@ -61,7 +61,7 @@ _PRISM_LINES = [
     "OIII_4959",
     "OIII_5007",
     "NII_6549",
-    "Ha",
+    "H⍺",
     "NII_6585",
     "SII_6718",
     "SII_6732",
@@ -79,7 +79,7 @@ _MEDIUM_LINES = [
     "NII_5756",
     "HEI_5877",
     "NII_6549",
-    "Ha",
+    "H⍺",
     "NII_6585",
     "SII_6718",
     "SII_6732",

@@ -36,7 +36,7 @@ BROAD2_HI = 12.0
 BIC_DELTA_THRESHOLD = 6.0
 
 # Broad line definitions: (narrow_name, broad_name_suffix).
-BROAD_BALMER = ["Ha", "HBETA", "HDELTA", "HGAMMA"]
+BROAD_BALMER = ["H⍺", "HBETA", "HDELTA", "HGAMMA"]
 
 
 @dataclass
@@ -270,8 +270,8 @@ def fit_with_broad(
 
     # Check Hα SNR before attempting broad fits.
     ha_snr = 0.0
-    if "Ha" in fit_narrow.lines:
-        ha_snr = fit_narrow.lines["Ha"].snr
+    if "H⍺" in fit_narrow.lines:
+        ha_snr = fit_narrow.lines["H⍺"].snr
 
     attempt_broad = (mode != "off") and (mode != "auto" or ha_snr >= snr_threshold)
 

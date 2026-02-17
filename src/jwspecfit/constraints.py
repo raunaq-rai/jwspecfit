@@ -62,7 +62,7 @@ class ConstraintSet:
             sigma_o3 = p[2 * nL + i_o3]
 
             # Lines to tie (narrow Balmer + [NII])
-            tie_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA", "NII_6585"]
+            tie_targets = ["HBETA", "H⍺", "HDELTA", "HGAMMA", "NII_6585"]
             for name in tie_targets:
                 if name in idx:
                     i_t = idx[name]
@@ -110,7 +110,7 @@ class ConstraintSet:
             free[2 * nL + i49] = False
 
         if self.tie_balmer_to_oiii and "OIII_5007" in idx:
-            tie_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA", "NII_6585"]
+            tie_targets = ["HBETA", "H⍺", "HDELTA", "HGAMMA", "NII_6585"]
             for name in tie_targets:
                 if name in idx:
                     # Width is tied (sigma slot)
