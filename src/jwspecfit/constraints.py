@@ -55,7 +55,22 @@ class ConstraintSet:
         nL = len(self.line_names)
         idx = {name: i for i, name in enumerate(self.line_names)}
 
-        # --- [NII] doublet constraint ---
+        # --- Balmer width tying to [OIII] 5007 (must run BEFORE NII tying) ---
+        if self.tie_balmer_to_oiii and "OIII_5007" in idx:
+            i_o3 = idx["OIII_5007"]
+            lam_o3 = REST_LINES_A["OIII_5007"]
+            sigma_o3 = p[2 * nL + i_o3]
+
+            # Lines to tie (narrow Balmer + [NII])
+            tie_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA", "NII_6585"]
+            for name in tie_targets:
+                if name in idx:
+                    i_t = idx[name]
+                    lam_t = REST_LINES_A[name]
+                    ratio = lam_t / lam_o3
+                    p[2 * nL + i_t] = sigma_o3 * ratio
+
+        # --- [NII] doublet constraint (after Balmer tying so NII_6585 σ is set) ---
         if self.tie_nii and "NII_6549" in idx and "NII_6585" in idx:
             i49 = idx["NII_6549"]
             i85 = idx["NII_6585"]
@@ -69,24 +84,6 @@ class ConstraintSet:
 
             # Width: tied in velocity space
             p[2 * nL + i49] = p[2 * nL + i85] * lam_ratio
-
-        # --- Balmer width tying to [OIII] 5007 ---
-        if self.tie_balmer_to_oiii and "OIII_5007" in idx:
-            i_o3 = idx["OIII_5007"]
-            lam_o3 = REST_LINES_A["OIII_5007"]
-            sigma_o3 = p[2 * nL + i_o3]
-
-            # Lines to tie (narrow Balmer + [NII])
-            tie_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA", "NII_6585"]
-            for name in tie_targets:
-                if name in idx:
-                    i_t = idx[name]
-                    # Skip if this is already constrained by NII tying
-                    if name == "NII_6549":
-                        continue
-                    lam_t = REST_LINES_A[name]
-                    ratio = lam_t / lam_o3
-                    p[2 * nL + i_t] = sigma_o3 * ratio
 
         return p
 
