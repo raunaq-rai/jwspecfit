@@ -310,9 +310,10 @@ def fit_lines(
         lb[i] = 0.0
         ub[i] = 150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
 
-        # Centroid bounds — generous enough to find the true line centre.
+        # Centroid bounds — tight enough to prevent drift, loose enough
+        # for real velocity offsets (~few hundred km/s).
         local_sig = sig_inst[np.argmin(np.abs(spec.wave_A - lam_obs_A))]
-        cent_margin = max(20.0 * local_sig, 6.0 * np.median(dlam))
+        cent_margin = max(3.0 * local_sig, 2.0 * np.median(dlam))
 
         p0[nL + i] = lam_obs_A
         lb[nL + i] = lam_obs_A - cent_margin
