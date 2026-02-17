@@ -142,8 +142,9 @@ def _grating_bounds(
         return (max(0.12 * pix, 0.22 * sig), 0.60 * sig, 1.05 * sig)
     if any(k in g for k in ("G140H", "G235H", "G395H")):
         return (0.10 * pix, 0.50 * sig, 0.95 * sig)
-    # Default (e.g. stacked spectra): generous bounds.
-    return (0.20 * pix, 0.70 * sig, 1.50 * sig)
+    # Default (e.g. stacked spectra): generous bounds — lines are broadened
+    # by galaxy velocity dispersions and the stacking process.
+    return (0.20 * pix, 1.0 * sig, 5.0 * sig)
 
 
 def fit_lines(
