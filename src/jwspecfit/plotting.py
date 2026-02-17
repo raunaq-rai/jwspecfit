@@ -17,7 +17,7 @@ def plot_fit(
     result: "FitResult",
     *,
     fig: "Figure | None" = None,
-    wave_unit: str = "um",
+    wave_unit: str = "A",
     show_residuals: bool = True,
     show_components: bool = True,
     label_lines: bool = True,
@@ -200,4 +200,138 @@ def plot_fit(
         fig.tight_layout()
     except Exception:
         pass
+    return fig
+
+
+def plot_fit_interactive(
+    result: "FitResult",
+    *,
+    wave_unit: str = "A",
+    show_components: bool = True,
+    y_pad: float = 1.3,
+) -> "go.Figure":
+    """Interactive plotly plot of a spectral fit with zoom and hover.
+
+    Parameters
+    ----------
+    result : FitResult
+        Output of :func:`~jwspecfit.fitter.fit_lines`.
+    wave_unit : str
+        ``"A"`` for Angstroms (default) or ``"um"`` for microns.
+    show_components : bool
+        Show individual line components (default True).
+    y_pad : float
+        Multiplicative padding above tallest line (default 1.3).
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+    """
+    import plotly.graph_objects as go
+    from .models import build_model
+    from .io import _flam_to_ujy
+
+    spec = result.spectrum
+    if wave_unit == "A":
+        wave = spec.wave_A
+        xlabel = "Wavelength [Å]"
+    else:
+        wave = spec.wave_um
+        xlabel = "Wavelength [µm]"
+
+    flux = spec.flux_ujy
+    err = spec.err_ujy
+    cont = result.continuum
+    model_total = result.model_flux + cont
+    valid = spec.mask_valid()
+
+    fig = go.Figure()
+
+    # Error band.
+    fig.add_trace(go.Scatter(
+        x=np.concatenate([wave[valid], wave[valid][::-1]]),
+        y=np.concatenate([(flux + err)[valid], (flux - err)[valid][::-1]]),
+        fill="toself", fillcolor="rgba(150,150,150,0.15)",
+        line=dict(width=0), showlegend=False, hoverinfo="skip",
+    ))
+
+    # Individual line components.
+    if show_components and len(result.line_names) > 0:
+        edges = spec.wave_edges_A
+        nL = len(result.line_names)
+
+        import plotly.express as px
+        palette = px.colors.qualitative.Set2
+
+        for i, name in enumerate(result.line_names):
+            amp = result.params[i]
+            if amp <= 0:
+                continue
+
+            p_single = np.zeros(3 * nL)
+            p_single[i] = amp
+            p_single[nL + i] = result.params[nL + i]
+            p_single[2 * nL + i] = result.params[2 * nL + i]
+            comp_flam = build_model(p_single, edges, nL)
+            comp_ujy = _flam_to_ujy(comp_flam, spec.wave_um) + cont
+
+            is_broad = "BROAD" in name
+            colour = "rgba(255,140,0,0.6)" if is_broad else palette[i % len(palette)]
+            display_name = name.replace("_", " ")
+            dash = "dot" if is_broad else "solid"
+
+            # Hover shows component flux at each pixel.
+            fig.add_trace(go.Scatter(
+                x=wave, y=comp_ujy,
+                mode="lines", name=f"{'[B] ' if is_broad else ''}{display_name}",
+                line=dict(color=colour, width=1.5, dash=dash),
+                hovertemplate=f"{display_name}<br>λ=%{{x:.1f}}<br>flux=%{{y:.4f}} µJy<extra></extra>",
+            ))
+
+    # Data.
+    fig.add_trace(go.Scatter(
+        x=wave[valid], y=flux[valid],
+        mode="lines", name="Data",
+        line=dict(color="grey", width=0.8),
+        hovertemplate="Data<br>λ=%{x:.1f}<br>flux=%{y:.4f} µJy<extra></extra>",
+    ))
+
+    # Continuum.
+    fig.add_trace(go.Scatter(
+        x=wave, y=cont,
+        mode="lines", name="Continuum",
+        line=dict(color="green", width=1, dash="dash"),
+    ))
+
+    # Model.
+    fig.add_trace(go.Scatter(
+        x=wave, y=model_total,
+        mode="lines", name="Model",
+        line=dict(color="red", width=2),
+        hovertemplate="Model<br>λ=%{x:.1f}<br>flux=%{y:.4f} µJy<extra></extra>",
+    ))
+
+    # Y limits.
+    model_peak = np.nanmax(model_total[valid]) if np.any(valid) else 1.0
+    cont_median = np.nanmedian(cont[valid]) if np.any(valid) else 0.0
+    y_upper = cont_median + (model_peak - cont_median) * y_pad
+    y_lower = min(0.0, np.nanmin(cont[valid]) * 1.1) if np.any(valid) else -0.1
+
+    title = ""
+    if spec.z is not None:
+        title = f"z = {spec.z:.4f}  |  χ²/dof = {result.chi2:.2f}"
+
+    fig.update_layout(
+        title=title,
+        xaxis_title=xlabel,
+        yaxis_title="Flux density [µJy]",
+        yaxis_range=[y_lower, y_upper],
+        template="plotly_white",
+        hovermode="x unified",
+        dragmode="zoom",
+        legend=dict(x=1.0, y=1.0, xanchor="right"),
+        width=1000,
+        height=500,
+    )
+
     return fig
