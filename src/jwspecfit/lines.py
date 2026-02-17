@@ -8,6 +8,7 @@ import numpy as np
 # Sources: NIST ASD, Morton (2003), Storey & Zeippen (2000).
 REST_LINES_A: dict[str, float] = {
     # UV lines
+    "Lya": 1215.670,
     "NV_1": 1238.821,
     "NV_2": 1242.804,
     "NV_doublet": 1240.81,
@@ -41,7 +42,7 @@ REST_LINES_A: dict[str, float] = {
     "NII_5756": 5757.786514027234,
     "HEI_5877": 5878.88092174501,
     "NII_6549": 6551.669402278604,
-    "H⍺": 6566.421366618156,
+    "Ha": 6566.421366618156,
     "NII_6585": 6587.088921119292,
     # Sulphur
     "SII_6718": 6720.149693980653,
@@ -51,6 +52,7 @@ REST_LINES_A: dict[str, float] = {
 # Pre-defined line groups for different spectral resolutions.
 # Prism: doublets are merged; grating: doublets resolved.
 _PRISM_LINES = [
+    "Lya",
     "CIV_doublet",
     "CIII]",
     "OII_doublet",
@@ -61,7 +63,7 @@ _PRISM_LINES = [
     "OIII_4959",
     "OIII_5007",
     "NII_6549",
-    "H⍺",
+    "Ha",
     "NII_6585",
     "SII_6718",
     "SII_6732",
@@ -79,7 +81,7 @@ _MEDIUM_LINES = [
     "NII_5756",
     "HEI_5877",
     "NII_6549",
-    "H⍺",
+    "Ha",
     "NII_6585",
     "SII_6718",
     "SII_6732",
