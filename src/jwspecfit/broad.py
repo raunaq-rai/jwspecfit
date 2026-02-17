@@ -35,8 +35,15 @@ BROAD2_HI = 12.0
 # BIC threshold for accepting a more complex model.
 BIC_DELTA_THRESHOLD = 6.0
 
-# Broad line definitions: (narrow_name, broad_name_suffix).
+# Broad line definitions — lines that get a broad component.
+# NII_6549 and NII_6585 are included in the Ha complex so that the
+# BIC comparison accounts for the full blend and prevents broad Ha
+# from absorbing narrow NII flux.
 BROAD_BALMER = ["Ha", "HBETA", "HDELTA", "HGAMMA"]
+
+# Lines whose narrow kinematics are tied to Ha during broad fitting
+# to guard against the broad component leaking into NII.
+HA_NII_COMPLEX = ["Ha", "NII_6549", "NII_6585"]
 
 
 @dataclass

@@ -88,6 +88,11 @@ def plot_fit(
 
     valid = spec.mask_valid()
 
+    # Disable scientific notation / offset on axes so full numbers are shown.
+    from matplotlib.ticker import ScalarFormatter
+    sfmt = ScalarFormatter(useOffset=False)
+    sfmt.set_scientific(False)
+
     # --- Individual line components (drawn first, behind data) ---
     if show_components and len(result.line_names) > 0:
         edges = spec.wave_edges_A
@@ -121,18 +126,20 @@ def plot_fit(
                 colour = broad_colours[n_broad % len(broad_colours)]
                 n_broad += 1
                 ax_main.fill_between(
-                    wave, cont, comp_ujy,
+                    wave, cont, comp_ujy, step="mid",
                     alpha=0.25, color=colour, hatch="//", linewidth=0,
                 )
-                ax_main.plot(wave, comp_ujy, "-", color=colour, lw=1.2, alpha=0.8)
+                ax_main.step(wave, comp_ujy, where="mid", color=colour,
+                             lw=1.2, alpha=0.8)
             else:
                 colour = narrow_colours[n_narrow % len(narrow_colours)]
                 n_narrow += 1
                 ax_main.fill_between(
-                    wave, cont, comp_ujy,
+                    wave, cont, comp_ujy, step="mid",
                     alpha=0.20, color=colour, linewidth=0,
                 )
-                ax_main.plot(wave, comp_ujy, "-", color=colour, lw=0.8, alpha=0.7)
+                ax_main.step(wave, comp_ujy, where="mid", color=colour,
+                             lw=0.8, alpha=0.7)
 
             if label_lines:
                 centroid_A = result.params[nL + i]
@@ -163,12 +170,14 @@ def plot_fit(
         (flux + err)[valid],
         step="mid", alpha=0.12, color="0.5", zorder=2,
     )
-    ax_main.plot(wave, cont, "--", color="C2", lw=1.0, alpha=0.7, label="Continuum",
-                 zorder=4)
-    ax_main.plot(wave, model_total, color="C3", lw=1.5, label="Model", zorder=5)
+    ax_main.step(wave, cont, where="mid", color="C2", lw=1.0, alpha=0.7,
+                 label="Continuum", linestyle="--", zorder=4)
+    ax_main.step(wave, model_total, where="mid", color="C3", lw=1.5,
+                 label="Model", zorder=5)
 
     ax_main.set_ylabel(r"Flux density [$\mu$Jy]")
     ax_main.legend(fontsize=8, loc="upper right")
+    ax_main.xaxis.set_major_formatter(sfmt)
 
     if result.spectrum.z is not None:
         ax_main.set_title(f"z = {result.spectrum.z:.4f}   |   χ²/dof = {result.chi2:.2f}")
@@ -193,6 +202,7 @@ def plot_fit(
         )
         ax_res.set_ylabel("Residual")
         ax_res.set_xlabel(xlabel)
+        ax_res.xaxis.set_major_formatter(sfmt)
     else:
         ax_main.set_xlabel(xlabel)
 
@@ -280,11 +290,10 @@ def plot_fit_interactive(
             display_name = name.replace("_", " ")
             dash = "dot" if is_broad else "solid"
 
-            # Hover shows component flux at each pixel.
             fig.add_trace(go.Scatter(
                 x=wave, y=comp_ujy,
                 mode="lines", name=f"{'[B] ' if is_broad else ''}{display_name}",
-                line=dict(color=colour, width=1.5, dash=dash),
+                line=dict(color=colour, width=1.5, dash=dash, shape="hvh"),
                 hovertemplate=f"{display_name}<br>λ=%{{x:.1f}}<br>flux=%{{y:.4f}} µJy<extra></extra>",
             ))
 
@@ -292,7 +301,7 @@ def plot_fit_interactive(
     fig.add_trace(go.Scatter(
         x=wave[valid], y=flux[valid],
         mode="lines", name="Data",
-        line=dict(color="grey", width=0.8),
+        line=dict(color="grey", width=0.8, shape="hvh"),
         hovertemplate="Data<br>λ=%{x:.1f}<br>flux=%{y:.4f} µJy<extra></extra>",
     ))
 
@@ -300,14 +309,14 @@ def plot_fit_interactive(
     fig.add_trace(go.Scatter(
         x=wave, y=cont,
         mode="lines", name="Continuum",
-        line=dict(color="green", width=1, dash="dash"),
+        line=dict(color="green", width=1, dash="dash", shape="hvh"),
     ))
 
     # Model.
     fig.add_trace(go.Scatter(
         x=wave, y=model_total,
         mode="lines", name="Model",
-        line=dict(color="red", width=2),
+        line=dict(color="red", width=2, shape="hvh"),
         hovertemplate="Model<br>λ=%{x:.1f}<br>flux=%{y:.4f} µJy<extra></extra>",
     ))
 
@@ -326,6 +335,7 @@ def plot_fit_interactive(
         xaxis_title=xlabel,
         yaxis_title="Flux density [µJy]",
         yaxis_range=[y_lower, y_upper],
+        xaxis=dict(exponentformat="none"),
         template="plotly_white",
         hovermode="x unified",
         dragmode="zoom",
