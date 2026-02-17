@@ -149,5 +149,8 @@ def plot_fit(
     else:
         ax_main.set_xlabel(xlabel)
 
-    fig.tight_layout()
+    try:
+        fig.tight_layout()
+    except Exception:
+        pass
     return fig
