@@ -1,0 +1,183 @@
+"""Emission-line database and line-list helpers."""
+
+from __future__ import annotations
+
+import numpy as np
+
+# Rest-frame vacuum wavelengths in Angstroms.
+# Sources: NIST ASD, Morton (2003), Storey & Zeippen (2000).
+REST_LINES_A: dict[str, float] = {
+    # UV lines
+    "Lya": 1215.670,
+    "NV_1": 1238.821,
+    "NV_2": 1242.804,
+    "NV_doublet": 1240.81,
+    "NIV_1": 1486.496,
+    "CIV_1": 1548.187,
+    "CIV_2": 1550.772,
+    "CIV_doublet": 1549.48,
+    "HEII_1640": 1640.42,
+    "OIII_1663": 1663.48,
+    "SiIII_1": 1882.71,
+    "SiIII_2": 1892.03,
+    "CIII]": 1908.734,
+    # Optical - weak / auroral
+    "OIII]_2321": 2322.413,
+    "OIII]_2331": 2332.015,
+    "OII]_2471": 2471.717,
+    "OII_3726": 3727.092,
+    "OII_3729": 3729.875,
+    "OII_doublet": 3728.480,
+    # Balmer series
+    "HDELTA": 4104.050,
+    "HGAMMA": 4342.905,
+    "HBETA": 4864.041,
+    # Oxygen
+    "OIII_4363": 4364.436,
+    "OIII_4959": 4961.679,
+    "OIII_5007": 5009.637,
+    # Nitrogen, Helium
+    "NII_5756": 5757.787,
+    "HEI_5877": 5878.881,
+    "NII_6549": 6551.669,
+    "Ha": 6566.421,
+    "NII_6585": 6587.089,
+    # Sulphur
+    "SII_6718": 6720.150,
+    "SII_6732": 6734.533,
+}
+
+# Pre-defined line groups for different spectral resolutions.
+# Prism: doublets are merged; grating: doublets resolved.
+_PRISM_LINES = [
+    "Lya",
+    "CIV_doublet",
+    "CIII]",
+    "OII_doublet",
+    "HDELTA",
+    "HGAMMA",
+    "OIII_4363",
+    "HBETA",
+    "OIII_4959",
+    "OIII_5007",
+    "NII_6549",
+    "Ha",
+    "NII_6585",
+    "SII_6718",
+    "SII_6732",
+]
+
+_MEDIUM_LINES = [
+    "OII_3726",
+    "OII_3729",
+    "HDELTA",
+    "HGAMMA",
+    "OIII_4363",
+    "HBETA",
+    "OIII_4959",
+    "OIII_5007",
+    "NII_5756",
+    "HEI_5877",
+    "NII_6549",
+    "Ha",
+    "NII_6585",
+    "SII_6718",
+    "SII_6732",
+]
+
+_HIGH_LINES = _MEDIUM_LINES  # same set; resolution handles the splitting
+
+
+def get_line_list(grating: str = "prism") -> list[str]:
+    """Return default line names for a given grating.
+
+    Parameters
+    ----------
+    grating : str
+        One of ``"prism"``, ``"medium"`` / ``"g140m"`` / ``"g235m"`` / ``"g395m"``,
+        or ``"high"`` / ``"g140h"`` / ``"g235h"`` / ``"g395h"``.
+
+    Returns
+    -------
+    list of str
+        Line names present in :data:`REST_LINES_A`.
+    """
+    g = grating.lower()
+    if "prism" in g:
+        return list(_PRISM_LINES)
+    if any(k in g for k in ("medium", "g140m", "g235m", "g395m")):
+        return list(_MEDIUM_LINES)
+    if any(k in g for k in ("high", "g140h", "g235h", "g395h")):
+        return list(_HIGH_LINES)
+    return list(_PRISM_LINES)
+
+
+def observable_lines(
+    line_names: list[str],
+    z: float,
+    wave_min_um: float,
+    wave_max_um: float,
+    *,
+    margin_sigma: float = 3.0,
+    sigma_um: float = 0.005,
+) -> list[str]:
+    """Filter lines to those observable in the wavelength range.
+
+    Parameters
+    ----------
+    line_names : list of str
+        Candidate line names (keys of :data:`REST_LINES_A`).
+    z : float
+        Source redshift.
+    wave_min_um, wave_max_um : float
+        Observed wavelength range in microns.
+    margin_sigma : float
+        Number of sigma margin from the edges.
+    sigma_um : float
+        Approximate line width in microns (for margin calculation).
+
+    Returns
+    -------
+    list of str
+        Lines whose observed wavelength falls within the range.
+    """
+    margin = margin_sigma * sigma_um
+    lo = wave_min_um + margin
+    hi = wave_max_um - margin
+    out = []
+    for name in line_names:
+        lam_obs_um = REST_LINES_A[name] * (1 + z) * 1e-4
+        if lo <= lam_obs_um <= hi:
+            out.append(name)
+    return out
+
+
+def rest_wave_A(name: str) -> float:
+    """Return rest wavelength in Angstroms for a line name.
+
+    Parameters
+    ----------
+    name : str
+        Line name (key of :data:`REST_LINES_A`).
+
+    Returns
+    -------
+    float
+        Rest wavelength in Angstroms.
+
+    Raises
+    ------
+    KeyError
+        If the line name is not found.
+    """
+    return REST_LINES_A[name]
+
+
+def observed_wave_A(name: str, z: float) -> float:
+    """Return observed wavelength in Angstroms for a line at redshift *z*."""
+    return REST_LINES_A[name] * (1.0 + z)
+
+
+def observed_wave_um(name: str, z: float) -> float:
+    """Return observed wavelength in microns for a line at redshift *z*."""
+    return REST_LINES_A[name] * (1.0 + z) * 1e-4
