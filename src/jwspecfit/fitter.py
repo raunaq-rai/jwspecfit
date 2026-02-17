@@ -327,19 +327,21 @@ def fit_lines(
         ub[nL + i] = lam_obs_A + cent_margin
 
         # Sigma bounds — broad components use physically motivated velocity
-        # widths converted to Å at the observed wavelength.
+        # widths (km/s) converted to σ_λ at the observed wavelength.
+        _C_KMS = 299792.458  # speed of light (km/s)
         if "_BROAD2" in name:
-            # Very broad (BLR): FWHM ~ 2000–8000 km/s.
-            sig_seed = sig_seed * 7.0
-            sig_lo = local_sig * 3.0
-            sig_hi = sig_hi * 12.0
+            # Very broad (BLR): FWHM ~ 2000–5000 km/s.
+            from .broad import (
+                BROAD2_SIGMA_V_LO, BROAD2_SIGMA_V_SEED, BROAD2_SIGMA_V_HI,
+            )
+            sig_lo = BROAD2_SIGMA_V_LO / _C_KMS * lam_obs_A
+            sig_seed = BROAD2_SIGMA_V_SEED / _C_KMS * lam_obs_A
+            sig_hi = BROAD2_SIGMA_V_HI / _C_KMS * lam_obs_A
         elif "_BROAD" in name:
             # Intermediate broad (outflows / NLR): FWHM ~ 500–2000 km/s.
-            # Convert velocity dispersion bounds to σ_λ at observed wavelength.
             from .broad import (
                 BROAD1_SIGMA_V_LO, BROAD1_SIGMA_V_SEED, BROAD1_SIGMA_V_HI,
             )
-            _C_KMS = 299792.458  # speed of light (km/s)
             sig_lo = BROAD1_SIGMA_V_LO / _C_KMS * lam_obs_A
             sig_seed = BROAD1_SIGMA_V_SEED / _C_KMS * lam_obs_A
             sig_hi = BROAD1_SIGMA_V_HI / _C_KMS * lam_obs_A
@@ -591,30 +593,18 @@ def _bootstrap_uncertainties(
     desc = f"Bootstrap ({label})" if label else "Bootstrap"
 
     try:
-        import joblib
         from joblib import Parallel, delayed
         from tqdm.auto import tqdm
 
         logger.info("%s: %d iterations, n_jobs=%d", desc, n_boot, n_jobs)
 
-        with tqdm(total=n_boot, desc=desc, unit="iter", leave=False) as pbar:
-            # Patch joblib's batch callback to update tqdm incrementally.
-            _OrigCallback = joblib.parallel.BatchCompletionCallBack
-
-            class _TqdmCallback(_OrigCallback):
-                def __call__(self, *args, **kwargs):
-                    pbar.update(n=self.batch_size)
-                    return super().__call__(*args, **kwargs)
-
-            joblib.parallel.BatchCompletionCallBack = _TqdmCallback
-            try:
-                results = Parallel(n_jobs=n_jobs, prefer="processes")(
-                    delayed(_run_single_bootstrap)(noise_all[b], **shared_kwargs)
-                    for b in range(n_boot)
-                )
-            finally:
-                joblib.parallel.BatchCompletionCallBack = _OrigCallback
-
+        # return_as="generator" yields results as they complete,
+        # letting tqdm update incrementally in notebooks and terminals.
+        gen = Parallel(n_jobs=n_jobs, return_as="generator", prefer="processes")(
+            delayed(_run_single_bootstrap)(noise_all[b], **shared_kwargs)
+            for b in range(n_boot)
+        )
+        results = list(tqdm(gen, total=n_boot, desc=desc, unit="iter", leave=False))
         flux_samples = np.array(results)
 
     except ImportError:

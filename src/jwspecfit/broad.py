@@ -32,10 +32,13 @@ BROAD1_SIGMA_V_LO = 210.0    # km/s — lower bound (FWHM ~ 500 km/s)
 BROAD1_SIGMA_V_SEED = 420.0  # km/s — seed (FWHM ~ 1000 km/s)
 BROAD1_SIGMA_V_HI = 850.0    # km/s — upper bound (FWHM ~ 2000 km/s)
 
-# Very broad (BLR) component — kept as multipliers on σ_inst.
-BROAD2_FACTOR = 7.0   # Seed: 7× narrow σ_v
-BROAD2_LO = 4.0
-BROAD2_HI = 12.0
+# Very broad (BLR) component velocity bounds (km/s).
+# FWHM ~ 2000–5000 km/s corresponds to σ_v ~ 850–2120 km/s.
+# Physical origin: virial motions in the broad-line region.
+# References: Greene & Ho (2005), Shen et al. (2011).
+BROAD2_SIGMA_V_LO = 850.0    # km/s — lower bound (FWHM ~ 2000 km/s)
+BROAD2_SIGMA_V_SEED = 1270.0  # km/s — seed (FWHM ~ 3000 km/s)
+BROAD2_SIGMA_V_HI = 2120.0   # km/s — upper bound (FWHM ~ 5000 km/s)
 
 # BIC threshold for accepting a more complex model.
 BIC_DELTA_THRESHOLD = 6.0
