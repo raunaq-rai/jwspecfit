@@ -92,6 +92,9 @@ def build_model(
          mu_0, mu_1, ...,           # centroids (Å)
          sigma_0, sigma_1, ...]     # widths (Å)
 
+    Uses vectorised numpy broadcasting to evaluate all lines simultaneously
+    rather than looping in Python.
+
     Parameters
     ----------
     params : np.ndarray
@@ -109,12 +112,33 @@ def build_model(
     nL = n_lines
     left = wave_edges_A[:-1]
     right = wave_edges_A[1:]
-    model = np.zeros(len(left))
 
-    for i in range(nL):
-        A = params[i]
-        mu = params[nL + i]
-        sigma = params[2 * nL + i]
-        model += A * gaussian_binned(left, right, mu, sigma)
+    if nL == 0:
+        return np.zeros(len(left))
 
-    return model
+    amplitudes = params[:nL]                    # (nL,)
+    mus = params[nL : 2 * nL]                   # (nL,)
+    sigmas = params[2 * nL : 3 * nL]            # (nL,)
+
+    # Mask out invalid lines (non-finite or non-positive sigma).
+    valid = np.isfinite(mus) & np.isfinite(sigmas) & (sigmas > 0)
+    if not np.any(valid):
+        return np.zeros(len(left))
+
+    # Vectorised computation: shapes (n_pix, 1) op (nL,) -> (n_pix, nL)
+    inv = 1.0 / (sqrt(2.0) * sigmas[valid])              # (nL_valid,)
+    cdf_r = 0.5 * (1.0 + erf(
+        (right[:, np.newaxis] - mus[np.newaxis, valid]) * inv  # (n_pix, nL_valid)
+    ))
+    cdf_l = 0.5 * (1.0 + erf(
+        (left[:, np.newaxis] - mus[np.newaxis, valid]) * inv   # (n_pix, nL_valid)
+    ))
+    area = cdf_r - cdf_l                                  # (n_pix, nL_valid)
+
+    width = right - left                                   # (n_pix,)
+    width = np.where(width > 0, width, np.nan)
+    profiles = area / width[:, np.newaxis]                 # (n_pix, nL_valid)
+    profiles[~np.isfinite(profiles)] = 0.0
+
+    # Matrix-vector multiply: profiles @ amplitudes -> (n_pix,)
+    return profiles @ amplitudes[valid]
