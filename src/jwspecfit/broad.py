@@ -147,6 +147,7 @@ def _fit_model_variant(
     broad_type: str | None = None,
     n_boot: int = 200,
     narrow_fit: FitResult | None = None,
+    n_jobs: int = -1,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -183,7 +184,7 @@ def _fit_model_variant(
     variant_label = broad_type or "narrow"
     result = fit_lines(
         spec, z, grating=grating, R=R, lines=fit_lines_list, deg=deg, n_boot=n_boot,
-        _label=variant_label, _p0_hint=p0_hint,
+        n_jobs=n_jobs, _label=variant_label, _p0_hint=p0_hint,
     )
 
     # Compute BIC.
@@ -213,6 +214,7 @@ def fit_with_broad(
     deg: int = 2,
     mode: str = "auto",
     n_boot: int = 200,
+    n_jobs: int = -1,
     snr_threshold: float = 5.0,
     bic_delta: float = BIC_DELTA_THRESHOLD,
 ) -> BroadFitResult:
@@ -241,6 +243,9 @@ def fit_with_broad(
         - ``"both"``: Force both broad components.
     n_boot : int
         Number of bootstrap iterations for uncertainties (default 200).
+    n_jobs : int
+        Number of parallel jobs for bootstrap. ``-1`` uses all cores,
+        ``1`` runs sequentially. Default ``-1``.
     snr_threshold : float
         Minimum Hα SNR to attempt broad fitting (default 5.0).
     bic_delta : float
@@ -274,7 +279,7 @@ def fit_with_broad(
     # --- Phase 1: fast fits without bootstrap for BIC comparison ---
     fit_narrow, bic_narrow = _fit_model_variant(
         spectrum, z, narrow_lines, grating, R, continuum, deg,
-        broad_type=None, n_boot=0,
+        broad_type=None, n_boot=0, n_jobs=n_jobs,
     )
 
     bic_b1 = np.nan
@@ -287,7 +292,7 @@ def fit_with_broad(
         if n_boot > 0:
             fit_narrow, bic_narrow = _fit_model_variant(
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
-                broad_type=None, n_boot=n_boot,
+                broad_type=None, n_boot=n_boot, n_jobs=n_jobs,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -313,7 +318,7 @@ def fit_with_broad(
         if n_boot > 0:
             fit_narrow, bic_narrow = _fit_model_variant(
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
-                broad_type=None, n_boot=n_boot,
+                broad_type=None, n_boot=n_boot, n_jobs=n_jobs,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -327,26 +332,37 @@ def fit_with_broad(
         )
 
     # Fast BIC fits (no bootstrap), seeded from narrow-only results.
+    # Run in parallel using threads (numpy/scipy release the GIL).
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    bic_futures: dict[str, any] = {}
+    variants_to_fit: list[str] = []
+
     if mode in ("auto", "broad1", "both"):
-        fit_b1, bic_b1 = _fit_model_variant(
-            spectrum, z, narrow_lines, grating, R, continuum, deg,
-            "broad1", n_boot=0, narrow_fit=fit_narrow,
-        )
-        all_fits["broad1"] = fit_b1
-
+        variants_to_fit.append("broad1")
     if mode in ("auto", "broad2", "both"):
-        fit_b2, bic_b2 = _fit_model_variant(
-            spectrum, z, narrow_lines, grating, R, continuum, deg,
-            "broad2", n_boot=0, narrow_fit=fit_narrow,
-        )
-        all_fits["broad2"] = fit_b2
-
+        variants_to_fit.append("broad2")
     if mode in ("auto", "both"):
-        fit_both, bic_both = _fit_model_variant(
-            spectrum, z, narrow_lines, grating, R, continuum, deg,
-            "both", n_boot=0, narrow_fit=fit_narrow,
-        )
-        all_fits["both"] = fit_both
+        variants_to_fit.append("both")
+
+    with ThreadPoolExecutor(max_workers=len(variants_to_fit) or 1) as pool:
+        for variant in variants_to_fit:
+            fut = pool.submit(
+                _fit_model_variant,
+                spectrum, z, narrow_lines, grating, R, continuum, deg,
+                variant, 0, fit_narrow, n_jobs,
+            )
+            bic_futures[variant] = fut
+
+        for variant, fut in bic_futures.items():
+            fit_v, bic_v = fut.result()
+            all_fits[variant] = fit_v
+            if variant == "broad1":
+                bic_b1 = bic_v
+            elif variant == "broad2":
+                bic_b2 = bic_v
+            elif variant == "both":
+                bic_both = bic_v
 
     # --- Phase 2: select best model by BIC ---
     if mode == "auto":
@@ -385,6 +401,7 @@ def fit_with_broad(
             spectrum, z, narrow_lines, grating, R, continuum, deg,
             broad_type=broad_type, n_boot=n_boot,
             narrow_fit=fit_narrow if broad_type is not None else None,
+            n_jobs=n_jobs,
         )
         all_fits[best_name] = best_fit
 
