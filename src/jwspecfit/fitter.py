@@ -346,6 +346,11 @@ def fit_lines(
             sig_seed = BROAD1_SIGMA_V_SEED / _C_KMS * lam_obs_A
             sig_hi = BROAD1_SIGMA_V_HI / _C_KMS * lam_obs_A
 
+        # Hard cap: no component wider than 500 Å (prevents fitting noise).
+        _MAX_SIGMA_A = 500.0
+        sig_hi = min(sig_hi, _MAX_SIGMA_A)
+        sig_seed = min(sig_seed, 0.9 * sig_hi)
+
         p0[2 * nL + i] = sig_seed
         lb[2 * nL + i] = sig_lo
         ub[2 * nL + i] = sig_hi
@@ -594,17 +599,17 @@ def _bootstrap_uncertainties(
 
     try:
         from joblib import Parallel, delayed
-        from tqdm.auto import tqdm
+        from tqdm import tqdm
 
         logger.info("%s: %d iterations, n_jobs=%d", desc, n_boot, n_jobs)
 
         # return_as="generator" yields results as they complete,
-        # letting tqdm update incrementally in notebooks and terminals.
+        # letting tqdm update incrementally.
         gen = Parallel(n_jobs=n_jobs, return_as="generator", prefer="processes")(
             delayed(_run_single_bootstrap)(noise_all[b], **shared_kwargs)
             for b in range(n_boot)
         )
-        results = list(tqdm(gen, total=n_boot, desc=desc, unit="iter", leave=False))
+        results = list(tqdm(gen, total=n_boot, desc=desc, unit="iter"))
         flux_samples = np.array(results)
 
     except ImportError:
@@ -613,7 +618,7 @@ def _bootstrap_uncertainties(
 
         flux_samples = np.zeros((n_boot, nL))
 
-        for b in tqdm(range(n_boot), desc=desc, unit="iter", leave=False):
+        for b in tqdm(range(n_boot), desc=desc, unit="iter"):
             flux_samples[b, :] = _run_single_bootstrap(
                 noise_all[b], **shared_kwargs
             )
