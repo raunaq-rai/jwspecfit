@@ -110,8 +110,6 @@ def plot_fit(
 
         for i, name in enumerate(result.line_names):
             amp = result.params[i]
-            if amp <= 0:
-                continue
 
             p_single = np.zeros(3 * nL)
             p_single[i] = amp
@@ -186,8 +184,8 @@ def plot_fit(
     )
     ax_main.step(wave, cont, where="mid", color="C2", lw=1.0, alpha=0.7,
                  label="Continuum", linestyle="--", zorder=4)
-    ax_main.step(wave, model_total, where="mid", color="C3", lw=1.5,
-                 label="Model", zorder=5)
+    ax_main.step(wave, model_total, where="mid", color="C3", lw=1.2,
+                 alpha=0.5, label="Model", zorder=5)
 
     ax_main.set_ylabel(r"Flux density [$\mu$Jy]")
     ax_main.legend(fontsize=8, loc="upper right")
@@ -289,8 +287,6 @@ def plot_fit_interactive(
 
         for i, name in enumerate(result.line_names):
             amp = result.params[i]
-            if amp <= 0:
-                continue
 
             p_single = np.zeros(3 * nL)
             p_single[i] = amp
@@ -346,11 +342,11 @@ def plot_fit_interactive(
         line=dict(color="green", width=1, dash="dash", shape="hvh"),
     ))
 
-    # Model (steps).
+    # Model (steps, semi-transparent).
     fig.add_trace(go.Scatter(
         x=wave, y=model_total,
         mode="lines", name="Model",
-        line=dict(color="red", width=2, shape="hvh"),
+        line=dict(color="rgba(255,0,0,0.4)", width=1.5, shape="hvh"),
         hovertemplate="Model<br>λ=%{x:.1f}<br>flux=%{y:.4f} µJy<extra></extra>",
     ))
 

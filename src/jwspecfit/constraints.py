@@ -70,6 +70,17 @@ class ConstraintSet:
                     ratio = lam_t / lam_o3
                     p[2 * nL + i_t] = sigma_o3 * ratio
 
+        # --- Tie broad Balmer centroids to their narrow counterparts ---
+        _BROAD_PAIRS = [
+            ("Ha_BROAD", "Ha"), ("Ha_BROAD2", "Ha"),
+            ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
+            ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
+            ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
+        ]
+        for broad_name, narrow_name in _BROAD_PAIRS:
+            if broad_name in idx and narrow_name in idx:
+                p[nL + idx[broad_name]] = p[nL + idx[narrow_name]]
+
         # --- [NII] doublet constraint (after Balmer tying so NII_6585 σ is set) ---
         if self.tie_nii and "NII_6549" in idx and "NII_6585" in idx:
             i49 = idx["NII_6549"]
@@ -115,6 +126,17 @@ class ConstraintSet:
                 if name in idx:
                     # Width is tied (sigma slot)
                     free[2 * nL + idx[name]] = False
+
+        # Broad Balmer centroids tied to narrow.
+        _BROAD_PAIRS = [
+            ("Ha_BROAD", "Ha"), ("Ha_BROAD2", "Ha"),
+            ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
+            ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
+            ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
+        ]
+        for broad_name, narrow_name in _BROAD_PAIRS:
+            if broad_name in idx and narrow_name in idx:
+                free[nL + idx[broad_name]] = False
 
         return free
 
