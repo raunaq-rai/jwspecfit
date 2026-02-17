@@ -326,19 +326,23 @@ def fit_lines(
         lb[nL + i] = lam_obs_A - cent_margin
         ub[nL + i] = lam_obs_A + cent_margin
 
-        # Sigma bounds — scale relative to σ_inst for broad components.
-        # The lower bound is set relative to σ_inst (not the narrow bound)
-        # so the broad component is forced to be genuinely wider than narrow.
+        # Sigma bounds — broad components use physically motivated velocity
+        # widths converted to Å at the observed wavelength.
         if "_BROAD2" in name:
             # Very broad (BLR): FWHM ~ 2000–8000 km/s.
             sig_seed = sig_seed * 7.0
             sig_lo = local_sig * 3.0
             sig_hi = sig_hi * 12.0
         elif "_BROAD" in name:
-            # Intermediate broad: FWHM ~ 500–2000 km/s.
-            sig_seed = sig_seed * 3.0
-            sig_lo = local_sig * 1.5
-            sig_hi = sig_hi * 5.0
+            # Intermediate broad (outflows / NLR): FWHM ~ 500–2000 km/s.
+            # Convert velocity dispersion bounds to σ_λ at observed wavelength.
+            from .broad import (
+                BROAD1_SIGMA_V_LO, BROAD1_SIGMA_V_SEED, BROAD1_SIGMA_V_HI,
+            )
+            _C_KMS = 299792.458  # speed of light (km/s)
+            sig_lo = BROAD1_SIGMA_V_LO / _C_KMS * lam_obs_A
+            sig_seed = BROAD1_SIGMA_V_SEED / _C_KMS * lam_obs_A
+            sig_hi = BROAD1_SIGMA_V_HI / _C_KMS * lam_obs_A
 
         p0[2 * nL + i] = sig_seed
         lb[2 * nL + i] = sig_lo
@@ -584,23 +588,39 @@ def _bootstrap_uncertainties(
         p0_free=p0_free, w_pix=w_pix,
     )
 
-    try:
-        from joblib import Parallel, delayed
+    desc = f"Bootstrap ({label})" if label else "Bootstrap"
 
-        desc = f"Bootstrap ({label})" if label else "Bootstrap"
+    try:
+        import joblib
+        from joblib import Parallel, delayed
+        from tqdm.auto import tqdm
+
         logger.info("%s: %d iterations, n_jobs=%d", desc, n_boot, n_jobs)
 
-        results = Parallel(n_jobs=n_jobs, prefer="processes")(
-            delayed(_run_single_bootstrap)(noise_all[b], **shared_kwargs)
-            for b in range(n_boot)
-        )
+        with tqdm(total=n_boot, desc=desc, unit="iter", leave=False) as pbar:
+            # Patch joblib's batch callback to update tqdm incrementally.
+            _OrigCallback = joblib.parallel.BatchCompletionCallBack
+
+            class _TqdmCallback(_OrigCallback):
+                def __call__(self, *args, **kwargs):
+                    pbar.update(n=self.batch_size)
+                    return super().__call__(*args, **kwargs)
+
+            joblib.parallel.BatchCompletionCallBack = _TqdmCallback
+            try:
+                results = Parallel(n_jobs=n_jobs, prefer="processes")(
+                    delayed(_run_single_bootstrap)(noise_all[b], **shared_kwargs)
+                    for b in range(n_boot)
+                )
+            finally:
+                joblib.parallel.BatchCompletionCallBack = _OrigCallback
+
         flux_samples = np.array(results)
 
     except ImportError:
         logger.warning("joblib not installed; falling back to sequential bootstrap.")
         from tqdm import tqdm
 
-        desc = f"Bootstrap ({label})" if label else "Bootstrap"
         flux_samples = np.zeros((n_boot, nL))
 
         for b in tqdm(range(n_boot), desc=desc, unit="iter", leave=False):

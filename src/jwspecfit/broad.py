@@ -23,11 +23,16 @@ from .resolution import sigma_inst_A
 
 logger = logging.getLogger(__name__)
 
-# Broad component width factors relative to narrow σ_v.
-BROAD1_FACTOR = 3.0   # Seed: 3× narrow σ_v
-BROAD1_LO = 1.5       # Lower bound
-BROAD1_HI = 5.0       # Upper bound
+# Intermediate broad component velocity bounds (km/s).
+# FWHM ~ 500–2000 km/s corresponds to σ_v ~ 210–850 km/s.
+# Physical origin: AGN narrow-line region outflows, turbulent ISM.
+# References: Heckman et al. (1981), Zakamska & Greene (2014),
+#             Förster Schreiber et al. (2019) for star-forming outflows.
+BROAD1_SIGMA_V_LO = 210.0    # km/s — lower bound (FWHM ~ 500 km/s)
+BROAD1_SIGMA_V_SEED = 420.0  # km/s — seed (FWHM ~ 1000 km/s)
+BROAD1_SIGMA_V_HI = 850.0    # km/s — upper bound (FWHM ~ 2000 km/s)
 
+# Very broad (BLR) component — kept as multipliers on σ_inst.
 BROAD2_FACTOR = 7.0   # Seed: 7× narrow σ_v
 BROAD2_LO = 4.0
 BROAD2_HI = 12.0
