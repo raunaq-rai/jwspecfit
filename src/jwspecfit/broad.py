@@ -342,7 +342,7 @@ def fit_with_broad(
     lines: list[str] | None = None,
     deg: int = 2,
     mode: str = "auto",
-    n_boot: int = 200,
+    n_boot: int = 1000,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
@@ -372,7 +372,7 @@ def fit_with_broad(
         - ``"broad2"``: Force very broad.
         - ``"both"``: Force both broad components.
     n_boot : int
-        Number of bootstrap iterations for flux uncertainties (default 200).
+        Number of bootstrap iterations for flux uncertainties (default 1000).
     n_boot_bic : int
         Number of bootstrap iterations for BIC model selection (default 100).
         Set to 0 for single-point BIC (legacy behaviour).
