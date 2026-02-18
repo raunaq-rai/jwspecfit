@@ -255,7 +255,7 @@ class MCMCBroadFitResult:
     bic_broad2: float
     bic_both: float
 
-    # Delegate common attributes to the inner MCMCResult.
+    # Delegate all MCMCResult attributes for full API compatibility.
 
     @property
     def lines(self) -> dict[str, MCMCLineResult]:
@@ -268,9 +268,34 @@ class MCMCBroadFitResult:
         return self.mcmc_result.flat_chains
 
     @property
+    def flat_chains_free(self) -> np.ndarray:
+        """Flattened posterior samples (free parameter space)."""
+        return self.mcmc_result.flat_chains_free
+
+    @property
     def flat_log_prob(self) -> np.ndarray:
         """Log-posterior for each sample."""
         return self.mcmc_result.flat_log_prob
+
+    @property
+    def chains(self) -> np.ndarray | None:
+        """Raw walker chains (emcee) or None (nautilus)."""
+        return self.mcmc_result.chains
+
+    @property
+    def params(self) -> np.ndarray:
+        """Median posterior in the full parameter space."""
+        return self.mcmc_result.params
+
+    @property
+    def model_flux(self) -> np.ndarray:
+        """Median model flux (continuum-subtracted)."""
+        return self.mcmc_result.model_flux
+
+    @property
+    def continuum(self) -> np.ndarray:
+        """Continuum estimate."""
+        return self.mcmc_result.continuum
 
     @property
     def spectrum(self) -> Spectrum:
@@ -283,9 +308,24 @@ class MCMCBroadFitResult:
         return self.mcmc_result.line_names
 
     @property
+    def constraints(self) -> ConstraintSet | None:
+        """Applied constraints."""
+        return self.mcmc_result.constraints
+
+    @property
     def convergence(self) -> dict[str, Any]:
         """Convergence diagnostics."""
         return self.mcmc_result.convergence
+
+    @property
+    def sampler_name(self) -> str:
+        """Name of the sampler used."""
+        return self.mcmc_result.sampler_name
+
+    @property
+    def sampler_meta(self) -> dict[str, Any]:
+        """Additional sampler metadata."""
+        return self.mcmc_result.sampler_meta
 
     def to_fit_result(self) -> FitResult:
         """Convert to a :class:`jwspecfit.fitter.FitResult`.
