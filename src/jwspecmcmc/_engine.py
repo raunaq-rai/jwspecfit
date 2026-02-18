@@ -1,0 +1,459 @@
+"""Core MCMC fitting orchestrator.
+
+Mirrors the setup logic from :func:`jwspecfit.fitter.fit_lines` —
+spectrum preparation, line detection, continuum subtraction, bounds
+computation — then delegates to the chosen MCMC sampler and
+post-processes the chains into an :class:`~jwspecmcmc.result.MCMCResult`.
+"""
+
+from __future__ import annotations
+
+import logging
+from math import pi, sqrt
+from typing import Any, Callable
+
+import numpy as np
+
+from jwspecfit.constraints import ConstraintSet
+from jwspecfit.continuum import fit_continuum
+from jwspecfit.fitter import _grating_bounds
+from jwspecfit.io import Spectrum, _flam_to_ujy, _ujy_to_flam
+from jwspecfit.lines import REST_LINES_A, get_line_list, observable_lines
+from jwspecfit.models import build_model, pixel_weight
+from jwspecfit.resolution import resolve_R, sigma_inst_A
+
+from .diagnostics import summarise_convergence
+from .likelihood import LikelihoodSpec
+from .priors import GaussianPrior, PriorSet, UniformPrior, priors_from_bounds
+from .result import MCMCLineResult, MCMCResult
+from .samplers import run_emcee, run_nautilus
+
+logger = logging.getLogger(__name__)
+
+_SQRT2PI = sqrt(2.0 * pi)
+
+
+def _fit_lines_mcmc(
+    spectrum: Spectrum,
+    z: float,
+    *,
+    sampler: str = "emcee",
+    grating: str | None = None,
+    R: float | Callable | None = None,
+    lines: list[str] | None = None,
+    wave_range_A: tuple[float, float] | None = None,
+    deg: int = 2,
+    clip_sigma: float = 2.5,
+    init_from_mle: bool = True,
+    prior_overrides: dict[str, Any] | None = None,
+    # emcee options
+    n_walkers: int = 64,
+    n_steps: int = 2000,
+    n_burn: int | None = None,
+    # nautilus options
+    n_live: int = 2000,
+    n_eff: int = 10000,
+    # common options
+    progress: bool = True,
+    seed: int = 42,
+) -> MCMCResult:
+    """Fit emission lines using MCMC sampling.
+
+    Parameters
+    ----------
+    spectrum : Spectrum
+        Input spectrum.
+    z : float
+        Source redshift.
+    sampler : str
+        Sampler backend: ``"emcee"`` or ``"nautilus"`` (default ``"emcee"``).
+    grating : str, optional
+        Grating name.
+    R : float or callable, optional
+        Resolving power.
+    lines : list of str, optional
+        Lines to fit.
+    wave_range_A : tuple, optional
+        Observed wavelength range (Angstrom).
+    deg : int
+        Continuum polynomial degree.
+    clip_sigma : float
+        Continuum sigma-clipping threshold.
+    init_from_mle : bool
+        If ``True`` (default), initialise walkers from a least-squares
+        MLE fit via :func:`jwspecfit.fit_lines`.
+    prior_overrides : dict, optional
+        Per-parameter prior overrides.  Keys are parameter names like
+        ``"A_OIII_5007"`` or ``"sigma_Ha"``, values are
+        :class:`~jwspecmcmc.priors.Prior` instances.
+    n_walkers : int
+        Number of emcee walkers (ignored for nautilus).
+    n_steps : int
+        Number of emcee MCMC steps (ignored for nautilus).
+    n_burn : int or None
+        Emcee burn-in steps (auto-estimated if ``None``).
+    n_live : int
+        Nautilus live points (ignored for emcee).
+    n_eff : int
+        Nautilus target effective sample size (ignored for emcee).
+    progress : bool
+        Show a progress bar.
+    seed : int
+        Random seed.
+
+    Returns
+    -------
+    MCMCResult
+    """
+    # ------------------------------------------------------------------
+    # 1. Spectrum setup (mirrors fitter.py lines 202-260)
+    # ------------------------------------------------------------------
+    spec = spectrum
+    grating = grating or spec.grating
+    R = R or spec.R
+
+    if grating is None and R is None:
+        from jwspecfit.resolution import R_from_pixels
+        logger.info("No grating or R specified; estimating R from pixel spacing.")
+        R = R_from_pixels(spec.wave_um)
+
+    if wave_range_A is not None:
+        lo_A, hi_A = wave_range_A
+        mask_win = (spec.wave_A >= lo_A) & (spec.wave_A <= hi_A)
+        if np.sum(mask_win) < 10:
+            raise ValueError(
+                f"Fit window [{lo_A:.0f}, {hi_A:.0f}] Å contains only "
+                f"{np.sum(mask_win)} pixels."
+            )
+        spec = Spectrum(
+            wave_um=spec.wave_um[mask_win],
+            flux_ujy=spec.flux_ujy[mask_win],
+            err_ujy=spec.err_ujy[mask_win],
+            grating=spec.grating,
+            z=spec.z,
+            R=spec.R,
+            meta=spec.meta,
+        )
+
+    # ------------------------------------------------------------------
+    # 2. Line detection
+    # ------------------------------------------------------------------
+    if lines is None:
+        if grating is not None:
+            candidate_lines = get_line_list(grating)
+        else:
+            candidate_lines = get_line_list("prism")
+        line_names = observable_lines(
+            candidate_lines, z, spec.wave_um.min(), spec.wave_um.max()
+        )
+    else:
+        line_names = list(lines)
+
+    if len(line_names) == 0:
+        raise ValueError(f"No observable lines for z={z:.4f} in wavelength range.")
+
+    nL = len(line_names)
+    logger.info("MCMC fitting %d lines at z=%.4f: %s", nL, z, line_names)
+
+    # ------------------------------------------------------------------
+    # 3. Resolution and continuum
+    # ------------------------------------------------------------------
+    sig_inst = sigma_inst_A(spec.wave_um, grating=grating, R=R)
+
+    continuum = fit_continuum(
+        spec.wave_um, spec.flux_ujy, spec.err_ujy, z, line_names,
+        grating=grating, R=R, deg=deg, clip_sigma=clip_sigma,
+    )
+    flux_sub = spec.flux_ujy - continuum
+
+    flam = _ujy_to_flam(flux_sub, spec.wave_um)
+    flam_err = _ujy_to_flam(spec.err_ujy, spec.wave_um)
+
+    valid = np.isfinite(flam) & np.isfinite(flam_err) & (flam_err > 0)
+    nv_obs_A = REST_LINES_A["NV_1"] * (1.0 + z)
+    valid &= spec.wave_A >= nv_obs_A
+
+    edges = spec.wave_edges_A
+    dlam = spec.dlam_A
+    w_pix = pixel_weight(dlam)
+
+    # ------------------------------------------------------------------
+    # 4. Constraints and bounds (mirrors fitter.py lines 300-398)
+    # ------------------------------------------------------------------
+    constraints = ConstraintSet(line_names)
+
+    p0 = np.zeros(3 * nL)
+    lb = np.zeros(3 * nL)
+    ub = np.zeros(3 * nL)
+
+    for i, name in enumerate(line_names):
+        lam_obs_A = REST_LINES_A[name] * (1.0 + z)
+        sig_lo, sig_seed, sig_hi = _grating_bounds(grating, sig_inst, dlam, lam_obs_A)
+
+        # Peak flux near the line for amplitude seeding.
+        near = np.abs(spec.wave_A - lam_obs_A)
+        idx_near = np.where(near < 5 * sig_seed)[0]
+        if len(idx_near) > 0:
+            peak_flam = np.nanmax(flam[idx_near])
+        else:
+            peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
+
+        A_seed = max(peak_flam * _SQRT2PI * sig_seed, 1e-30)
+
+        p0[i] = A_seed
+        lb[i] = 0.0
+        ub[i] = 150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
+
+        # Centroid bounds.
+        _C_KMS_CENT = 299792.458
+        _CENT_V_MAX = 300.0
+        cent_margin_v = _CENT_V_MAX / _C_KMS_CENT * lam_obs_A
+        cent_margin = max(cent_margin_v, 2.0 * np.median(dlam))
+
+        other_obs = [
+            REST_LINES_A[n] * (1.0 + z)
+            for j, n in enumerate(line_names)
+            if j != i and "BROAD" not in n
+        ]
+        if other_obs:
+            min_sep = min(abs(lam_obs_A - o) for o in other_obs)
+            cent_margin = min(cent_margin, 0.5 * min_sep)
+
+        p0[nL + i] = lam_obs_A
+        lb[nL + i] = lam_obs_A - cent_margin
+        ub[nL + i] = lam_obs_A + cent_margin
+
+        # Sigma bounds.
+        _C_KMS = 299792.458
+        if "_BROAD2" in name:
+            from jwspecfit.broad import (
+                BROAD2_SIGMA_V_HI, BROAD2_SIGMA_V_LO, BROAD2_SIGMA_V_SEED,
+            )
+            sig_lo = BROAD2_SIGMA_V_LO / _C_KMS * lam_obs_A
+            sig_seed = BROAD2_SIGMA_V_SEED / _C_KMS * lam_obs_A
+            sig_hi = BROAD2_SIGMA_V_HI / _C_KMS * lam_obs_A
+        elif "_BROAD" in name:
+            from jwspecfit.broad import (
+                BROAD1_SIGMA_V_HI, BROAD1_SIGMA_V_LO, BROAD1_SIGMA_V_SEED,
+            )
+            sig_lo = BROAD1_SIGMA_V_LO / _C_KMS * lam_obs_A
+            sig_seed = BROAD1_SIGMA_V_SEED / _C_KMS * lam_obs_A
+            sig_hi = BROAD1_SIGMA_V_HI / _C_KMS * lam_obs_A
+
+        _MAX_SIGMA_A = 500.0
+        sig_hi = min(sig_hi, _MAX_SIGMA_A)
+        sig_seed = min(sig_seed, 0.9 * sig_hi)
+
+        p0[2 * nL + i] = sig_seed
+        lb[2 * nL + i] = sig_lo
+        ub[2 * nL + i] = sig_hi
+
+    free_mask = constraints.free_mask()
+    p0_free = p0[free_mask]
+    lb_free = lb[free_mask]
+    ub_free = ub[free_mask]
+    p0_free = np.clip(p0_free, lb_free + 1e-30, ub_free - 1e-30)
+
+    # ------------------------------------------------------------------
+    # 5. Optional MLE initialisation
+    # ------------------------------------------------------------------
+    if init_from_mle:
+        logger.info("Running quick MLE fit for MCMC initialisation...")
+        from jwspecfit.fitter import fit_lines as _fit_lines_mle
+
+        mle_result = _fit_lines_mle(
+            spec, z,
+            grating=grating, R=R, lines=line_names,
+            deg=deg, n_boot=0, clip_sigma=clip_sigma,
+        )
+        if mle_result.success:
+            p0_free = mle_result.params[free_mask]
+            p0_free = np.clip(p0_free, lb_free + 1e-30, ub_free - 1e-30)
+            logger.info("MLE initialisation successful (chi2=%.2f).", mle_result.chi2)
+        else:
+            logger.warning("MLE fit did not converge; using default initialisation.")
+
+    # ------------------------------------------------------------------
+    # 6. Build priors
+    # ------------------------------------------------------------------
+    # Map named overrides to free-parameter indices.
+    idx_map = {name: i for i, name in enumerate(line_names)}
+    index_overrides: dict[int, Any] = {}
+
+    if prior_overrides:
+        for pname, prior_obj in prior_overrides.items():
+            # Parse names like "A_OIII_5007", "mu_Ha", "sigma_OIII_5007".
+            if pname.startswith("A_"):
+                line_key = pname[2:]
+                if line_key in idx_map:
+                    full_idx = idx_map[line_key]
+                else:
+                    logger.warning("Unknown line in prior override: %s", pname)
+                    continue
+            elif pname.startswith("mu_"):
+                line_key = pname[3:]
+                if line_key in idx_map:
+                    full_idx = nL + idx_map[line_key]
+                else:
+                    logger.warning("Unknown line in prior override: %s", pname)
+                    continue
+            elif pname.startswith("sigma_"):
+                line_key = pname[6:]
+                if line_key in idx_map:
+                    full_idx = 2 * nL + idx_map[line_key]
+                else:
+                    logger.warning("Unknown line in prior override: %s", pname)
+                    continue
+            else:
+                logger.warning("Cannot parse prior override key: %s", pname)
+                continue
+
+            # Map full-param index to free-param index.
+            if free_mask[full_idx]:
+                free_idx = int(np.sum(free_mask[:full_idx]))
+                index_overrides[free_idx] = prior_obj
+            else:
+                logger.warning(
+                    "Prior override '%s' targets a constrained parameter; skipping.", pname
+                )
+
+    prior_set = priors_from_bounds(lb_free, ub_free, overrides=index_overrides)
+
+    # ------------------------------------------------------------------
+    # 7. Build likelihood spec
+    # ------------------------------------------------------------------
+    like_spec = LikelihoodSpec(
+        flam=flam,
+        flam_err=flam_err,
+        valid=valid,
+        edges=edges,
+        n_lines=nL,
+        constraints=constraints,
+        w_pix=w_pix,
+    )
+
+    # ------------------------------------------------------------------
+    # 8. Run sampler
+    # ------------------------------------------------------------------
+    if sampler == "emcee":
+        sampler_result = run_emcee(
+            like_spec, prior_set, p0_free,
+            n_walkers=n_walkers, n_steps=n_steps, n_burn=n_burn,
+            progress=progress, seed=seed,
+        )
+    elif sampler == "nautilus":
+        sampler_result = run_nautilus(
+            like_spec, prior_set,
+            n_live=n_live, n_eff=n_eff,
+            progress=progress, seed=seed,
+        )
+    else:
+        raise ValueError(f"Unknown sampler: '{sampler}'. Use 'emcee' or 'nautilus'.")
+
+    # ------------------------------------------------------------------
+    # 9. Post-process: expand chains to full param space
+    # ------------------------------------------------------------------
+    flat_chains_free = sampler_result["flat_chains"]
+    flat_log_prob = sampler_result["flat_log_prob"]
+    n_samples = len(flat_chains_free)
+
+    # Expand each sample to the full parameter space.
+    flat_chains_full = np.zeros((n_samples, 3 * nL))
+    for s in range(n_samples):
+        flat_chains_full[s] = constraints.expand_free_to_full(flat_chains_free[s])
+
+    # Median posterior.
+    p_median = np.median(flat_chains_full, axis=0)
+    model_flam_median = build_model(p_median, edges, nL)
+    model_ujy_median = _flam_to_ujy(model_flam_median, spec.wave_um)
+
+    # ------------------------------------------------------------------
+    # 10. Per-line MCMCLineResult
+    # ------------------------------------------------------------------
+    cont_flam = _ujy_to_flam(continuum, spec.wave_um)
+    line_results: dict[str, MCMCLineResult] = {}
+
+    for i, name in enumerate(line_names):
+        # Amplitude posteriors (flux = amplitude for area-normalised Gaussians).
+        amp_samples = flat_chains_full[:, i]
+        mu_samples = flat_chains_full[:, nL + i]
+        sig_samples = flat_chains_full[:, 2 * nL + i]
+
+        amp_med = float(np.median(amp_samples))
+        amp_lo = amp_med - float(np.percentile(amp_samples, 16))
+        amp_hi = float(np.percentile(amp_samples, 84)) - amp_med
+
+        mu_med = float(np.median(mu_samples))
+        mu_lo = mu_med - float(np.percentile(mu_samples, 16))
+        mu_hi = float(np.percentile(mu_samples, 84)) - mu_med
+
+        sig_med = float(np.median(sig_samples))
+        sig_lo = sig_med - float(np.percentile(sig_samples, 16))
+        sig_hi = float(np.percentile(sig_samples, 84)) - sig_med
+
+        flux_med = amp_med
+        flux_lo = amp_lo
+        flux_hi = amp_hi
+
+        # Equivalent width from median values.
+        lam_rest_A = REST_LINES_A[name]
+        idx_cont = np.argmin(np.abs(spec.wave_A - mu_med))
+        cont_at_line = cont_flam[idx_cont]
+        if cont_at_line <= 0:
+            near_mask = np.abs(spec.wave_A - mu_med) < 5.0 * sig_med
+            near_valid = near_mask & valid
+            if np.any(near_valid):
+                local_median_ujy = np.nanmedian(spec.flux_ujy[near_valid])
+                cont_at_line = _ujy_to_flam(
+                    np.array([max(local_median_ujy, 0.0)]),
+                    np.array([spec.wave_um[idx_cont]]),
+                )[0]
+        ew_rest = flux_med / cont_at_line / (1.0 + z) if cont_at_line > 0 else np.nan
+
+        # SNR from mean of asymmetric errors.
+        mean_err = 0.5 * (flux_lo + flux_hi)
+        snr = flux_med / mean_err if mean_err > 0 else 0.0
+
+        line_results[name] = MCMCLineResult(
+            name=name,
+            rest_wave_A=lam_rest_A,
+            amplitude=amp_med,
+            amplitude_err=(amp_lo, amp_hi),
+            centroid_A=mu_med,
+            centroid_err=(mu_lo, mu_hi),
+            sigma_A=sig_med,
+            sigma_err=(sig_lo, sig_hi),
+            flux=flux_med,
+            flux_err=(flux_lo, flux_hi),
+            flux_posterior=amp_samples,
+            ew_A=ew_rest,
+            snr=snr,
+        )
+
+    # ------------------------------------------------------------------
+    # 11. Convergence diagnostics (emcee only)
+    # ------------------------------------------------------------------
+    convergence: dict[str, Any] = {}
+    chains_raw = sampler_result.get("chains")
+    if chains_raw is not None:
+        convergence = summarise_convergence(chains_raw)
+
+    # ------------------------------------------------------------------
+    # 12. Assemble MCMCResult
+    # ------------------------------------------------------------------
+    return MCMCResult(
+        lines=line_results,
+        flat_chains=flat_chains_full,
+        flat_chains_free=flat_chains_free,
+        flat_log_prob=flat_log_prob,
+        chains=chains_raw,
+        params=p_median,
+        model_flux=model_ujy_median,
+        continuum=continuum,
+        spectrum=spec,
+        line_names=line_names,
+        constraints=constraints,
+        convergence=convergence,
+        sampler_name=sampler_result["sampler_name"],
+        sampler_meta=sampler_result["sampler_meta"],
+    )
