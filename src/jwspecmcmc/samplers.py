@@ -222,8 +222,13 @@ def run_nautilus(
             logger.warning("Unknown prior type for param %d; using uniform fallback.", i)
             naut_prior.add_parameter(param_name, dist=(-1e30, 1e30))
 
-    def likelihood_fn(params: np.ndarray) -> float:
-        return log_probability(params, spec, prior_set)
+    # nautilus v1.0.5 passes params as a dict keyed by parameter name
+    # (e.g. {"p0": val0, "p1": val1, ...}).  Convert to a flat array.
+    param_names = [f"p{i}" for i in range(n_dim)]
+
+    def likelihood_fn(params: dict) -> float:
+        p_arr = np.array([float(params[k]) for k in param_names])
+        return log_probability(p_arr, spec, prior_set)
 
     sampler = Sampler(
         naut_prior,
