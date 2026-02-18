@@ -103,11 +103,11 @@ def fit_continuum(
         coeffs = np.polyfit(w_norm[mask], flux_ujy[mask], deg, w=weights[mask])
         cont = np.polyval(coeffs, w_norm)
         resid = flux_ujy - cont
-        rms = np.sqrt(np.nanmedian(resid[mask] ** 2))
-        if rms <= 0:
-            break
-        # Clip only positive outliers (emission above continuum).
-        mask = use & (resid < clip_sigma * rms)
+        # Clip in error-normalised space so that noisy pixels (large err)
+        # are not preferentially removed.  Only clip positive outliers
+        # (emission above continuum).
+        norm_resid = np.where(err_ujy > 0, resid / err_ujy, 0.0)
+        mask = use & (norm_resid < clip_sigma)
 
     # Final fit on clipped pixels.
     if np.sum(mask) >= deg + 1:
