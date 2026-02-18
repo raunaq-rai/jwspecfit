@@ -95,6 +95,58 @@ class BroadFitResult:
     all_fits: dict[str, FitResult]
     bic_bootstrap: dict[str, np.ndarray] = field(default_factory=dict)
 
+    # Delegate common FitResult attributes to best_fit for API compatibility.
+
+    @property
+    def lines(self) -> dict:
+        """Per-line results (delegates to ``best_fit.lines``)."""
+        return self.best_fit.lines
+
+    @property
+    def params(self) -> np.ndarray:
+        """Best-fit parameter vector."""
+        return self.best_fit.params
+
+    @property
+    def model_flux(self) -> np.ndarray:
+        """Best-fit emission-line model."""
+        return self.best_fit.model_flux
+
+    @property
+    def continuum(self) -> np.ndarray:
+        """Best-fit continuum."""
+        return self.best_fit.continuum
+
+    @property
+    def residuals(self) -> np.ndarray:
+        """Fit residuals."""
+        return self.best_fit.residuals
+
+    @property
+    def chi2(self) -> float:
+        """Reduced chi-squared."""
+        return self.best_fit.chi2
+
+    @property
+    def spectrum(self):
+        """Input spectrum."""
+        return self.best_fit.spectrum
+
+    @property
+    def line_names(self) -> list[str]:
+        """Ordered line names."""
+        return self.best_fit.line_names
+
+    @property
+    def constraints(self):
+        """Applied constraints."""
+        return self.best_fit.constraints
+
+    @property
+    def success(self) -> bool:
+        """Whether the optimiser converged."""
+        return self.best_fit.success
+
 
 def _compute_bic(
     residuals: np.ndarray,
