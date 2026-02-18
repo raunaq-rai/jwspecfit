@@ -77,18 +77,30 @@ jwspecfit.export_lines_txt(result, "lines.txt")     # text table of measurements
 spec = jwspecfit.read_fits("spectrum.fits", z=6.0)
 
 # Stacked .npz file (keys: wave_angstrom, flux, err)
-spec = jwspecfit.read_npz("stack.npz", z=6.0, R=150.0)
+spec = jwspecfit.read_npz("stack.npz", z=6.0)
 
 # From numpy arrays
 spec = jwspecfit.read_dict(
     {"wave": wave_um, "flux": flux_ujy, "err": err_ujy},
-    z=6.0, R=100.0,
+    z=6.0,
 )
 ```
 
 The `Spectrum` container holds wavelength (µm), flux (µJy), uncertainty (µJy),
 and metadata.  Properties include `wave_A`, `dlam_A`, `wave_edges_A`,
 `flux_flam`, `err_flam`, and `mask_valid()`.
+
+### Resolving power (R)
+
+R is resolved automatically — you almost never need to specify it:
+
+- **FITS spectra**: grating is read from the header; R is looked up from
+  the grating name (PRISM → R(λ), G395M → 1000, etc.).
+- **No grating and no R**: `fit_lines()` automatically calls
+  `R_from_pixels()` to estimate R ≈ λ / (2Δλ) from the pixel spacing.
+- **Manual override**: pass `R=` (float or callable) to `read_dict()`,
+  `read_npz()`, or set `spec.R = ...` after loading if you know the
+  true resolving power.
 
 ### Loading non-standard formats
 
@@ -140,8 +152,9 @@ err_ujy  = data["err_flam"]  * (data["wavelength_A"] ** 2) / c_cgs * 1e29
 
 spec = jwspecfit.read_dict(
     {"wave": wave_um, "flux": flux_ujy, "err": err_ujy},
-    z=2.5, R=1000.0,
+    z=2.5,
 )
+# R will be estimated automatically from pixel spacing when fit_lines() is called.
 ```
 
 **Loading from a non-standard FITS file:**
@@ -155,6 +168,8 @@ with fits.open("other_pipeline.fits") as hdul:
     flux_ujy = tbl["FLUX"] * 1e6         # e.g. Jy → µJy
     err_ujy  = tbl["ERROR"] * 1e6
 
+# If the grating is known, pass it so R is looked up automatically.
+# Otherwise, omit it and R will be estimated from pixel spacing.
 spec = jwspecfit.read_dict(
     {"wave": wave_um, "flux": flux_ujy, "err": err_ujy},
     z=3.0, grating="G395M",
@@ -172,7 +187,10 @@ spec = Spectrum(
     err_ujy=err_ujy,
     grating=None,       # or "PRISM", "G395M", etc.
     z=4.5,
-    R=150.0,            # constant R, or a callable R(lam_um)
+    # R is optional — if omitted, fit_lines() estimates it from pixel spacing.
+    # Set it explicitly only if you know the true resolving power:
+    # R=150.0,          # constant R
+    # R=R_callable,     # or a callable R(lam_um) → array
     meta={"source": "my_pipeline", "target": "GN-z11"},
 )
 ```
@@ -184,8 +202,9 @@ spec = Spectrum(
 | `wave_um` | µm | Observed-frame wavelength |
 | `flux_ujy` | µJy | f_ν flux density |
 | `err_ujy` | µJy | 1σ uncertainty (same units as flux) |
-| `R` | dimensionless | λ/Δλ; float or callable `R(lam_um)` |
 | `z` | dimensionless | Source redshift (0.0 for rest-frame stacks) |
+| `grating` | str or None | If set, R is looked up automatically |
+| `R` | dimensionless | Optional override; estimated from pixels if omitted |
 
 ---
 

@@ -46,6 +46,11 @@ class Spectrum:
 | `flux_ujy` | µJy | f_ν flux density |
 | `err_ujy` | µJy | 1σ uncertainty (same units as flux) |
 
+**Resolving power** is determined automatically: from the grating header
+for FITS files, or estimated from pixel spacing (`R ≈ λ / 2Δλ`) when
+neither `grating` nor `R` is set.  You only need to set `R` explicitly
+if you know the true resolving power and want to override the estimate.
+
 If your data uses different units, convert before constructing a `Spectrum`:
 
 ```python
@@ -59,10 +64,10 @@ flux_ujy = flux_flam * (wave_angstrom ** 2) / c_cgs * 1e29
 # Jy → µJy
 flux_ujy = flux_jy * 1e6
 
-# Direct construction
+# Direct construction — R is optional (auto-estimated if omitted)
 spec = Spectrum(
     wave_um=wave_um, flux_ujy=flux_ujy, err_ujy=err_ujy,
-    z=4.5, R=150.0,
+    z=4.5,
 )
 ```
 
