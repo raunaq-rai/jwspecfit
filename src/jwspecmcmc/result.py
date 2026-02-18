@@ -4,6 +4,9 @@
 quantities.  :meth:`MCMCResult.to_fit_result` converts the median
 posterior to a :class:`jwspecfit.fitter.FitResult` for compatibility
 with :func:`jwspecfit.plotting.plot_fit`.
+
+:class:`MCMCBroadFitResult` wraps an :class:`MCMCResult` with BIC
+model-selection metadata for broad Balmer component fitting.
 """
 
 from __future__ import annotations
@@ -220,3 +223,96 @@ class MCMCResult:
         with np.errstate(divide="ignore", invalid="ignore"):
             ratio = np.where(flux_b > 0, flux_a / flux_b, np.nan)
         return ratio
+
+
+@dataclass
+class MCMCBroadFitResult:
+    """MCMC result with BIC-based broad Balmer component selection.
+
+    Wraps an :class:`MCMCResult` (full MCMC posteriors on the winning
+    model) together with BIC model-selection metadata.
+
+    Parameters
+    ----------
+    mcmc_result : MCMCResult
+        Full MCMC posteriors for the selected model.
+    selected_model : str
+        Model name: ``"narrow"``, ``"broad1"``, ``"broad2"``, or ``"both"``.
+    bic_narrow : float
+        BIC for narrow-only model.
+    bic_broad1 : float
+        BIC for narrow + intermediate broad model (NaN if not attempted).
+    bic_broad2 : float
+        BIC for narrow + very broad model (NaN if not attempted).
+    bic_both : float
+        BIC for narrow + both broad components (NaN if not attempted).
+    """
+
+    mcmc_result: MCMCResult
+    selected_model: str
+    bic_narrow: float
+    bic_broad1: float
+    bic_broad2: float
+    bic_both: float
+
+    # Delegate common attributes to the inner MCMCResult.
+
+    @property
+    def lines(self) -> dict[str, MCMCLineResult]:
+        """Per-line posterior summaries."""
+        return self.mcmc_result.lines
+
+    @property
+    def flat_chains(self) -> np.ndarray:
+        """Flattened posterior samples (full parameter space)."""
+        return self.mcmc_result.flat_chains
+
+    @property
+    def flat_log_prob(self) -> np.ndarray:
+        """Log-posterior for each sample."""
+        return self.mcmc_result.flat_log_prob
+
+    @property
+    def spectrum(self) -> Spectrum:
+        """Input spectrum."""
+        return self.mcmc_result.spectrum
+
+    @property
+    def line_names(self) -> list[str]:
+        """Ordered line names."""
+        return self.mcmc_result.line_names
+
+    @property
+    def convergence(self) -> dict[str, Any]:
+        """Convergence diagnostics."""
+        return self.mcmc_result.convergence
+
+    def to_fit_result(self) -> FitResult:
+        """Convert to a :class:`jwspecfit.fitter.FitResult`.
+
+        Delegates to :meth:`MCMCResult.to_fit_result`.
+
+        Returns
+        -------
+        FitResult
+        """
+        return self.mcmc_result.to_fit_result()
+
+    def flux_ratio_posterior(self, line_a: str, line_b: str) -> np.ndarray:
+        """Compute the posterior distribution of a flux ratio.
+
+        Delegates to :meth:`MCMCResult.flux_ratio_posterior`.
+
+        Parameters
+        ----------
+        line_a : str
+            Numerator line name.
+        line_b : str
+            Denominator line name.
+
+        Returns
+        -------
+        np.ndarray
+            Posterior samples of ``flux(line_a) / flux(line_b)``.
+        """
+        return self.mcmc_result.flux_ratio_posterior(line_a, line_b)
