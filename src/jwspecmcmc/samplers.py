@@ -236,7 +236,7 @@ def run_nautilus(
         "Running nautilus: %d live points, target n_eff=%d, %d dims",
         n_live, n_eff, n_dim,
     )
-    sampler.run(min_eff=n_eff, verbose=progress)
+    sampler.run(n_eff=n_eff, verbose=progress)
 
     points, log_w, log_l = sampler.posterior()
     # Resample to equally-weighted samples.
