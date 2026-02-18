@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from math import sqrt, pi
+from pathlib import Path
 from typing import Callable
 
 import numpy as np
@@ -160,6 +161,7 @@ def fit_lines(
     n_boot: int = 200,
     clip_sigma: float = 2.5,
     n_jobs: int = -1,
+    save_path: str | Path | None = None,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -190,6 +192,8 @@ def fit_lines(
     n_jobs : int
         Number of parallel jobs for bootstrap. ``-1`` uses all cores,
         ``1`` runs sequentially. Default ``-1``.
+    save_path : str or Path, optional
+        If given, export per-line measurements to this text file after fitting.
 
     Returns
     -------
@@ -469,7 +473,7 @@ def fit_lines(
             snr=snr,
         )
 
-    return FitResult(
+    fit_result = FitResult(
         lines=line_results,
         params=p_best,
         model_flux=model_ujy,
@@ -481,6 +485,12 @@ def fit_lines(
         constraints=constraints,
         success=bool(result.success),
     )
+
+    if save_path is not None:
+        from .io import export_lines_txt
+        export_lines_txt(fit_result, save_path, z=z)
+
+    return fit_result
 
 
 def _analytic_flux_err(

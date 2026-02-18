@@ -69,6 +69,7 @@ result = jwspecfit.fit_lines(
     deg=2,                       # Continuum polynomial degree
     n_boot=200,                  # Bootstrap iterations (0 for analytic errors)
     clip_sigma=2.5,              # Sigma-clipping threshold for continuum
+    save_path=None,              # Export line measurements to this text file
 )
 ```
 
@@ -83,6 +84,7 @@ result = jwspecfit.fit_lines(
 | `deg` | `int` | `2` | Polynomial degree for continuum fitting |
 | `n_boot` | `int` | `200` | Number of bootstrap iterations. Set to 0 for fast analytic error estimates |
 | `clip_sigma` | `float` | `2.5` | Sigma-clipping threshold for iterative continuum fitting |
+| `save_path` | `str \| Path \| None` | `None` | If given, automatically export per-line measurements to this text file path after fitting |
 
 Returns a `FitResult`.
 
@@ -339,9 +341,15 @@ loaded = jwspecfit.load_result("fit_result.npz")
 fig = jwspecfit.plot_fit(loaded)
 
 # Export line measurements as a text table
-# Columns: name, rest_wave_A, centroid_A, flux, flux_err, EW_A,
-#          sigma_v_kms, SNR_integrated, SNR_peak
+# Columns: name, rest_wave_A, centroid_A, flux (erg/s/cm2), flux_err,
+#          EW_A (rest-frame), sigma_v_kms, SNR_integrated, SNR_peak
 jwspecfit.export_lines_txt(result, "lines.txt")
+
+# Or export automatically during fitting via save_path:
+result = jwspecfit.fit_lines(spec, z=6.0, save_path="lines.txt")
+
+# Save the plot directly:
+fig = jwspecfit.plot_fit(result, save_path="fit.pdf")
 ```
 
 ---
@@ -358,11 +366,16 @@ is shaded.  Broad components are hatched.
 fig = jwspecfit.plot_fit(
     result,
     wave_unit="A",               # "A" (Angstroms) or "um" (microns)
+    flux_unit="fnu",             # "fnu" (µJy) or "flam" (erg/s/cm²/Å)
     show_residuals=True,         # Show residual panel below
     show_components=True,        # Show individual Gaussian components
     label_lines=True,            # Annotate line names
     y_pad=1.3,                   # Y-axis padding above tallest line peak
+    save_path=None,              # Save figure to file (e.g. "fit.pdf")
 )
+
+# Plot in f_lambda units:
+fig = jwspecfit.plot_fit(result, flux_unit="flam")
 ```
 
 ### `plot_fit_interactive()` — plotly
@@ -374,6 +387,7 @@ region.  Hover to see the flux of each component at any wavelength.
 fig = jwspecfit.plot_fit_interactive(
     result,
     wave_unit="A",               # "A" (Angstroms) or "um" (microns)
+    flux_unit="fnu",             # "fnu" (µJy) or "flam" (erg/s/cm²/Å)
     show_components=True,        # Show individual line components
     y_pad=1.3,                   # Y-axis padding above tallest line peak
 )

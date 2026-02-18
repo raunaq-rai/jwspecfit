@@ -356,6 +356,7 @@ def export_lines_txt(result: "FitResult", path: str | Path, z: float | None = No
     with open(path, "w") as f:
         f.write(
             f"# jwspecfit line measurements  z={z:.6f}\n"
+            f"# flux units: erg/s/cm2  |  EW units: rest-frame Angstrom\n"
             f"# {'name':<18s} {'rest_A':>10s} {'centroid_A':>12s} "
             f"{'flux':>14s} {'flux_err':>14s} {'EW_A':>10s} "
             f"{'sigma_v_kms':>12s} {'SNR_int':>10s} {'SNR_peak':>10s}\n"

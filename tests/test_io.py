@@ -119,8 +119,10 @@ class TestExportLinesTxt:
         assert outfile.exists()
         lines = outfile.read_text().strip().split("\n")
         # Header + data lines
-        assert len(lines) >= 3  # 2 header + at least 1 line
+        assert len(lines) >= 4  # 3 header + at least 1 line
         # Check header contains expected columns
-        assert "flux" in lines[1]
-        assert "EW_A" in lines[1]
-        assert "SNR_peak" in lines[1]
+        assert "flux" in lines[2]
+        assert "EW_A" in lines[2]
+        assert "SNR_peak" in lines[2]
+        # Check units header
+        assert "erg/s/cm2" in lines[1]

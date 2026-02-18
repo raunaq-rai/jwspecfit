@@ -18,10 +18,12 @@ def plot_fit(
     *,
     fig: "Figure | None" = None,
     wave_unit: str = "A",
+    flux_unit: str = "fnu",
     show_residuals: bool = True,
     show_components: bool = True,
     label_lines: bool = True,
     y_pad: float = 1.3,
+    save_path: str | None = None,
 ) -> "Figure":
     """Plot a spectral fit with data, model, continuum, and residuals.
 
@@ -36,7 +38,9 @@ def plot_fit(
     fig : Figure, optional
         Matplotlib figure to draw on.  If ``None``, creates a new one.
     wave_unit : str
-        ``"um"`` for microns (default) or ``"A"`` for Angstroms.
+        ``"A"`` for Angstroms (default) or ``"um"`` for microns.
+    flux_unit : str
+        ``"fnu"`` for µJy (default) or ``"flam"`` for erg/s/cm²/Å.
     show_residuals : bool
         Show residual panel below the main plot (default True).
     show_components : bool
@@ -46,6 +50,8 @@ def plot_fit(
         Annotate line identifications (default True).
     y_pad : float
         Multiplicative padding above the tallest line peak (default 1.3).
+    save_path : str, optional
+        If given, save the figure to this file path (e.g. ``"fit.pdf"``).
 
     Returns
     -------
@@ -54,7 +60,7 @@ def plot_fit(
     """
     import matplotlib.pyplot as plt
     from .models import build_model
-    from .io import _flam_to_ujy
+    from .io import _flam_to_ujy, _ujy_to_flam
 
     spec = result.spectrum
 
@@ -65,11 +71,20 @@ def plot_fit(
         wave = spec.wave_um
         xlabel = r"Wavelength [$\mu$m]"
 
-    flux = spec.flux_ujy
-    err = spec.err_ujy
-    cont = result.continuum
-    model_total = result.model_flux + cont
-    resid = result.residuals
+    use_flam = flux_unit.lower() == "flam"
+
+    if use_flam:
+        flux = _ujy_to_flam(spec.flux_ujy, spec.wave_um)
+        err = _ujy_to_flam(spec.err_ujy, spec.wave_um)
+        cont = _ujy_to_flam(result.continuum, spec.wave_um)
+        model_total = _ujy_to_flam(result.model_flux + result.continuum, spec.wave_um)
+        resid = _ujy_to_flam(result.residuals, spec.wave_um)
+    else:
+        flux = spec.flux_ujy
+        err = spec.err_ujy
+        cont = result.continuum
+        model_total = result.model_flux + cont
+        resid = result.residuals
 
     # Figure setup.
     if fig is None:
@@ -116,7 +131,10 @@ def plot_fit(
             p_single[nL + i] = result.params[nL + i]
             p_single[2 * nL + i] = result.params[2 * nL + i]
             comp_flam = build_model(p_single, edges, nL)
-            comp_ujy = _flam_to_ujy(comp_flam, spec.wave_um) + cont
+            if use_flam:
+                comp_plot = comp_flam + _ujy_to_flam(result.continuum, spec.wave_um)
+            else:
+                comp_plot = _flam_to_ujy(comp_flam, spec.wave_um) + cont
 
             is_broad = "BROAD" in name
 
@@ -130,22 +148,22 @@ def plot_fit(
                 colour = broad_colours[n_broad % len(broad_colours)]
                 n_broad += 1
                 ax_main.fill_between(
-                    wave, cont, comp_ujy,
+                    wave, cont, comp_plot,
                     alpha=0.25, color=colour, hatch="//", linewidth=0,
                 )
-                ax_main.plot(wave, comp_ujy, "-", color=colour, lw=1.2, alpha=0.8)
+                ax_main.plot(wave, comp_plot, "-", color=colour, lw=1.2, alpha=0.8)
             else:
                 colour = narrow_colours[n_narrow % len(narrow_colours)]
                 n_narrow += 1
                 ax_main.fill_between(
-                    wave, cont, comp_ujy,
+                    wave, cont, comp_plot,
                     alpha=0.20, color=colour, linewidth=0,
                 )
-                ax_main.plot(wave, comp_ujy, "-", color=colour, lw=0.8, alpha=0.7)
+                ax_main.plot(wave, comp_plot, "-", color=colour, lw=0.8, alpha=0.7)
 
             # Uncertainty shading (±1σ on the Gaussian profile).
             if frac_err > 0:
-                line_only = comp_ujy - cont
+                line_only = comp_plot - cont
                 comp_hi = cont + line_only * (1.0 + frac_err)
                 comp_lo = cont + line_only * max(1.0 - frac_err, 0.0)
                 ax_main.fill_between(
@@ -159,7 +177,7 @@ def plot_fit(
                     x_label = centroid_A
                 else:
                     x_label = centroid_A * 1e-4
-                y_label = comp_ujy[np.argmin(np.abs(spec.wave_A - centroid_A))]
+                y_label = comp_plot[np.argmin(np.abs(spec.wave_A - centroid_A))]
                 display_name = name.replace("_", " ")
                 ax_main.annotate(
                     display_name,
@@ -187,7 +205,8 @@ def plot_fit(
     ax_main.step(wave, model_total, where="mid", color="C3", lw=1.2,
                  alpha=0.5, label="Model", zorder=5)
 
-    ax_main.set_ylabel(r"Flux density [$\mu$Jy]")
+    ylabel = r"$f_\lambda$ [erg s$^{-1}$ cm$^{-2}$ $\mathrm{\AA}^{-1}$]" if use_flam else r"Flux density [$\mu$Jy]"
+    ax_main.set_ylabel(ylabel)
     ax_main.legend(fontsize=8, loc="upper right")
     ax_main.xaxis.set_major_formatter(sfmt)
 
@@ -222,6 +241,10 @@ def plot_fit(
         fig.tight_layout()
     except Exception:
         pass
+
+    if save_path is not None:
+        fig.savefig(save_path, dpi=200, bbox_inches="tight")
+
     return fig
 
 
@@ -229,6 +252,7 @@ def plot_fit_interactive(
     result: "FitResult",
     *,
     wave_unit: str = "A",
+    flux_unit: str = "fnu",
     show_components: bool = True,
     y_pad: float = 1.3,
 ) -> "go.Figure":
@@ -240,6 +264,8 @@ def plot_fit_interactive(
         Output of :func:`~jwspecfit.fitter.fit_lines`.
     wave_unit : str
         ``"A"`` for Angstroms (default) or ``"um"`` for microns.
+    flux_unit : str
+        ``"fnu"`` for µJy (default) or ``"flam"`` for erg/s/cm²/Å.
     show_components : bool
         Show individual line components (default True).
     y_pad : float
@@ -251,7 +277,7 @@ def plot_fit_interactive(
     """
     import plotly.graph_objects as go
     from .models import build_model
-    from .io import _flam_to_ujy
+    from .io import _flam_to_ujy, _ujy_to_flam
 
     spec = result.spectrum
     if wave_unit == "A":
@@ -261,10 +287,20 @@ def plot_fit_interactive(
         wave = spec.wave_um
         xlabel = "Wavelength [µm]"
 
-    flux = spec.flux_ujy
-    err = spec.err_ujy
-    cont = result.continuum
-    model_total = result.model_flux + cont
+    use_flam = flux_unit.lower() == "flam"
+
+    if use_flam:
+        flux = _ujy_to_flam(spec.flux_ujy, spec.wave_um)
+        err = _ujy_to_flam(spec.err_ujy, spec.wave_um)
+        cont = _ujy_to_flam(result.continuum, spec.wave_um)
+        model_total = _ujy_to_flam(result.model_flux + result.continuum, spec.wave_um)
+        flux_label = "erg/s/cm²/Å"
+    else:
+        flux = spec.flux_ujy
+        err = spec.err_ujy
+        cont = result.continuum
+        model_total = result.model_flux + cont
+        flux_label = "µJy"
     valid = spec.mask_valid()
 
     fig = go.Figure()
@@ -293,7 +329,10 @@ def plot_fit_interactive(
             p_single[nL + i] = result.params[nL + i]
             p_single[2 * nL + i] = result.params[2 * nL + i]
             comp_flam = build_model(p_single, edges, nL)
-            comp_ujy = _flam_to_ujy(comp_flam, spec.wave_um) + cont
+            if use_flam:
+                comp_plot = comp_flam + _ujy_to_flam(result.continuum, spec.wave_um)
+            else:
+                comp_plot = _flam_to_ujy(comp_flam, spec.wave_um) + cont
 
             is_broad = "BROAD" in name
             colour = "rgba(255,140,0,0.6)" if is_broad else palette[i % len(palette)]
@@ -307,7 +346,7 @@ def plot_fit_interactive(
                 frac_err = lr.flux_err / lr.flux
 
             if frac_err > 0:
-                line_only = comp_ujy - cont
+                line_only = comp_plot - cont
                 comp_hi = cont + line_only * (1.0 + frac_err)
                 comp_lo = cont + line_only * max(1.0 - frac_err, 0.0)
                 # Shaded band (smooth).
@@ -321,10 +360,10 @@ def plot_fit_interactive(
 
             # Smooth Gaussian line.
             fig.add_trace(go.Scatter(
-                x=wave, y=comp_ujy,
+                x=wave, y=comp_plot,
                 mode="lines", name=f"{'[B] ' if is_broad else ''}{display_name}",
                 line=dict(color=colour, width=1.5, dash=dash),
-                hovertemplate=f"{display_name}<br>λ=%{{x:.1f}}<br>flux=%{{y:.4f}} µJy<extra></extra>",
+                hovertemplate=f"{display_name}<br>λ=%{{x:.1f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
             ))
 
     # Data (steps).
@@ -332,7 +371,7 @@ def plot_fit_interactive(
         x=wave[valid], y=flux[valid],
         mode="lines", name="Data",
         line=dict(color="grey", width=0.8, shape="hvh"),
-        hovertemplate="Data<br>λ=%{x:.1f}<br>flux=%{y:.4f} µJy<extra></extra>",
+        hovertemplate=f"Data<br>λ=%{{x:.1f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
     ))
 
     # Continuum (steps).
@@ -347,7 +386,7 @@ def plot_fit_interactive(
         x=wave, y=model_total,
         mode="lines", name="Model",
         line=dict(color="rgba(255,0,0,0.4)", width=1.5, shape="hvh"),
-        hovertemplate="Model<br>λ=%{x:.1f}<br>flux=%{y:.4f} µJy<extra></extra>",
+        hovertemplate=f"Model<br>λ=%{{x:.1f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
     ))
 
     # Y limits.
@@ -363,7 +402,7 @@ def plot_fit_interactive(
     fig.update_layout(
         title=title,
         xaxis_title=xlabel,
-        yaxis_title="Flux density [µJy]",
+        yaxis_title=f"fλ [{flux_label}]" if use_flam else f"Flux density [{flux_label}]",
         yaxis_range=[y_lower, y_upper],
         xaxis=dict(exponentformat="none"),
         template="plotly_white",
