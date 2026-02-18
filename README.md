@@ -320,6 +320,88 @@ model = lya_model(lam_left, lam_right, z, amplitude, mu, sigma, skew)
 
 ---
 
+## MCMC fitting with `jwspecmcmc`
+
+`jwspecmcmc` is a companion package that replaces bootstrap uncertainties
+with full Bayesian posterior sampling via **emcee** or **nautilus**.
+It reuses the same `Spectrum`, line database, and plotting infrastructure
+from `jwspecfit`.
+
+Key capabilities:
+
+- **Drop-in MCMC replacement** — `jwspecmcmc.fit_lines()` mirrors the
+  `jwspecfit` API but returns full posterior chains.
+- **BIC broad selection + MCMC** — by default (`mode="auto"`), performs
+  fast least-squares BIC model selection, then runs MCMC on the winning model.
+- **Asymmetric credible intervals** — proper (16th, 84th) percentile errors
+  for flux, centroid, and sigma.
+- **Flux-ratio posteriors** — `result.flux_ratio_posterior("OIII_5007", "HBETA")`
+  for line-ratio diagnostics with full uncertainty propagation.
+- **Convergence diagnostics** — Gelman–Rubin R-hat and effective sample
+  size (ESS) computed automatically.
+- **Custom priors** — override default uniform priors with `GaussianPrior`,
+  `LogUniformPrior`, or any custom `Prior` subclass.
+- **Diagnostic plots** — corner plots, trace plots, and flux posterior
+  histograms.
+- **Sampler choice** — `"emcee"` for MCMC or `"nautilus"` for nested sampling.
+
+### Quick start
+
+```python
+import jwspecfit
+import jwspecmcmc
+
+spec = jwspecfit.read_fits("spectrum.fits", z=6.0)
+
+# MCMC fit — BIC broad selection is on by default
+result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="emcee", n_steps=2000)
+
+print(result.selected_model)                # "narrow", "broad1", "broad2", or "both"
+print(result.lines["OIII_5007"].flux_err)   # asymmetric (lo, hi) 68% CI
+
+# Flux-ratio posterior for metallicity diagnostics
+ratio = result.flux_ratio_posterior("OIII_5007", "HBETA")
+
+# Convergence diagnostics
+print(result.convergence)  # {'r_hat_max': ..., 'ess_min': ..., 'converged': ...}
+
+# Diagnostic plots
+jwspecmcmc.plot_traces(result, params=["A_OIII_5007", "A_HBETA"])
+jwspecmcmc.plot_corner(result, params=["A_OIII_5007", "A_HBETA"])
+jwspecmcmc.plot_flux_posterior(result, "OIII_5007")
+
+# Convert to FitResult for jwspecfit plotting
+fig = jwspecfit.plot_fit(result.to_fit_result())
+```
+
+### Custom priors
+
+```python
+from jwspecmcmc import GaussianPrior
+
+result = jwspecmcmc.fit_lines(
+    spec, z=6.0,
+    mode="off",
+    prior_overrides={
+        "A_OIII_5007": GaussianPrior(mean=8e-18, std=2e-18, lo=0, hi=1e-15),
+    },
+)
+```
+
+### Nautilus nested sampling
+
+```python
+result = jwspecmcmc.fit_lines(
+    spec, z=6.0,
+    sampler="nautilus",
+    mode="off",
+    n_live=1000,
+    n_eff=5000,
+)
+```
+
+---
+
 ## Example notebooks
 
 See `docs/notebooks/` for worked examples:
@@ -329,10 +411,15 @@ See `docs/notebooks/` for worked examples:
 | `01_prism_fit.ipynb` | Basic prism fitting, save/load, text export, plotly |
 | `02_grating_broad.ipynb` | G395M grating with BIC broad-line detection |
 | `03_stacked_spectrum.ipynb` | Stacked spectrum with custom R, IGM demo |
+| `04_mcmc_prism.ipynb` | MCMC fitting on a PRISM spectrum with emcee |
+| `05_mcmc_grating.ipynb` | MCMC fitting on a G395M grating spectrum, nautilus demo |
+| `06_mcmc_stack.ipynb` | MCMC fitting on a stacked spectrum with R estimation |
 
 ---
 
 ## Modules
+
+### `jwspecfit`
 
 | Module | Description |
 |--------|-------------|
@@ -346,6 +433,19 @@ See `docs/notebooks/` for worked examples:
 | `broad` | Broad component fitting + BIC model selection |
 | `lyman_alpha` | Skewed Gaussian + IGM absorption |
 | `plotting` | Static and interactive visualisation |
+
+### `jwspecmcmc`
+
+| Module | Description |
+|--------|-------------|
+| `__init__` | Public API: `fit_lines()`, `fit_with_broad()`, plotting wrappers |
+| `_engine` | MCMC fitting engine (emcee / nautilus backends) |
+| `samplers` | `run_emcee()`, `run_nautilus()` sampler wrappers |
+| `likelihood` | Log-likelihood for Gaussian emission-line models |
+| `priors` | `UniformPrior`, `GaussianPrior`, `LogUniformPrior`, `PriorSet` |
+| `result` | `MCMCResult`, `MCMCBroadFitResult`, `MCMCLineResult` |
+| `diagnostics` | Gelman–Rubin R-hat, effective sample size (ESS) |
+| `plotting` | Corner plots, trace plots, flux posterior histograms |
 
 See [`docs/api.md`](docs/api.md) for the full API reference.
 
