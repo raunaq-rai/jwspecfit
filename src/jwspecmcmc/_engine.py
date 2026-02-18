@@ -47,7 +47,7 @@ def _fit_lines_mcmc(
     init_from_mle: bool = True,
     prior_overrides: dict[str, Any] | None = None,
     # emcee options
-    n_walkers: int = 64,
+    n_walkers: int | str = "auto",
     n_steps: int = 2000,
     n_burn: int | None = None,
     # nautilus options
@@ -86,8 +86,9 @@ def _fit_lines_mcmc(
         Per-parameter prior overrides.  Keys are parameter names like
         ``"A_OIII_5007"`` or ``"sigma_Ha"``, values are
         :class:`~jwspecmcmc.priors.Prior` instances.
-    n_walkers : int
-        Number of emcee walkers (ignored for nautilus).
+    n_walkers : int or ``"auto"``
+        Number of emcee walkers (ignored for nautilus).  ``"auto"``
+        (default) picks a value based on ``n_dim`` and CPU cores.
     n_steps : int
         Number of emcee MCMC steps (ignored for nautilus).
     n_burn : int or None
@@ -477,7 +478,7 @@ def _fit_with_broad_mcmc(
     bic_delta: float = 6.0,
     prior_overrides: dict[str, Any] | None = None,
     # emcee options
-    n_walkers: int = 64,
+    n_walkers: int | str = "auto",
     n_steps: int = 2000,
     n_burn: int | None = None,
     # nautilus options

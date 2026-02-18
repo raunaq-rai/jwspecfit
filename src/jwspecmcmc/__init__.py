@@ -58,7 +58,7 @@ def fit_lines(
     clip_sigma: float = 2.5,
     init_from_mle: bool = True,
     prior_overrides: dict[str, Any] | None = None,
-    n_walkers: int = 64,
+    n_walkers: int | str = "auto",
     n_steps: int = 2000,
     n_burn: int | None = None,
     n_live: int = 2000,
@@ -103,7 +103,7 @@ def fit_lines(
         Per-parameter prior overrides keyed by name, e.g.
         ``{"A_OIII_5007": GaussianPrior(1e-17, 1e-18, 0, 1e-15)}``.
     n_walkers : int
-        Emcee walkers (default 64).
+        Emcee walkers.  ``"auto"`` (default) picks based on n_dim and CPU cores.
     n_steps : int
         Emcee steps (default 2000).
     n_burn : int or None
@@ -204,7 +204,7 @@ def fit_with_broad(
     snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
     prior_overrides: dict[str, Any] | None = None,
-    n_walkers: int = 64,
+    n_walkers: int | str = "auto",
     n_steps: int = 2000,
     n_burn: int | None = None,
     n_live: int = 2000,
@@ -252,7 +252,7 @@ def fit_with_broad(
     prior_overrides : dict, optional
         Per-parameter prior overrides for MCMC.
     n_walkers : int
-        Emcee walkers (default 64).
+        Emcee walkers.  ``"auto"`` (default) picks based on n_dim and CPU cores.
     n_steps : int
         Emcee steps (default 2000).
     n_burn : int or None

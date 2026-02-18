@@ -18,12 +18,45 @@ from .priors import PriorSet
 logger = logging.getLogger(__name__)
 
 
+def _auto_n_walkers(n_dim: int) -> int:
+    """Choose n_walkers from n_dim and available CPU cores.
+
+    The number of walkers must satisfy ``n_walkers >= 2 * n_dim`` for
+    emcee's stretch move.  We round up to the nearest multiple of
+    ``n_cores`` so that future pool-based parallelisation distributes
+    likelihood evaluations evenly across cores.
+
+    Parameters
+    ----------
+    n_dim : int
+        Number of free parameters.
+
+    Returns
+    -------
+    int
+        Even number of walkers.
+    """
+    import os
+
+    n_cores = os.cpu_count() or 4
+    min_walkers = 2 * n_dim + 2
+    # Round up to nearest multiple of n_cores.
+    n_walkers = max(min_walkers, n_cores)
+    remainder = n_walkers % n_cores
+    if remainder:
+        n_walkers += n_cores - remainder
+    # Ensure even (emcee requirement).
+    if n_walkers % 2:
+        n_walkers += 1
+    return n_walkers
+
+
 def run_emcee(
     spec: LikelihoodSpec,
     prior_set: PriorSet,
     p0_free: np.ndarray,
     *,
-    n_walkers: int = 64,
+    n_walkers: int | str = "auto",
     n_steps: int = 2000,
     n_burn: int | None = None,
     progress: bool = True,
@@ -40,8 +73,9 @@ def run_emcee(
         Prior distributions.
     p0_free : np.ndarray
         MLE estimate in free-parameter space (used to initialise walkers).
-    n_walkers : int
-        Number of walkers (default 64).
+    n_walkers : int or ``"auto"``
+        Number of walkers.  ``"auto"`` (default) picks a value based
+        on ``n_dim`` and the number of CPU cores.
     n_steps : int
         Number of MCMC steps (default 2000).
     n_burn : int or None
@@ -69,6 +103,11 @@ def run_emcee(
     from .priors import GaussianPrior, LogUniformPrior, UniformPrior
 
     n_dim = prior_set.n_dim
+
+    if n_walkers == "auto":
+        n_walkers = _auto_n_walkers(n_dim)
+        logger.info("Auto n_walkers=%d (n_dim=%d, n_cores=%d).",
+                     n_walkers, n_dim, __import__("os").cpu_count() or 4)
 
     # emcee requires n_walkers >= 2 * n_dim for the stretch move.
     min_walkers = 2 * n_dim + 2  # +2 for safety (must be even)
