@@ -53,6 +53,7 @@ REST_LINES_A: dict[str, float] = {
 # Prism: doublets are merged; grating: doublets resolved.
 _PRISM_LINES = [
     "Lya",
+    "NV_doublet",
     "CIV_doublet",
     "CIII]",
     "OII_doublet",
@@ -147,15 +148,16 @@ def observable_lines(
     lo = wave_min_um + margin
     hi = wave_max_um - margin
 
-    # Exclude lines at or blueward of Lyman-alpha (IGM-absorbed).
-    # Lya itself needs special treatment (see lyman_alpha module) and
-    # should never be fitted as a regular Gaussian.
-    lya_obs_um = REST_LINES_A["Lya"] * (1 + z) * 1e-4
+    # Exclude lines blueward of NV (IGM-absorbed region).
+    # Lya needs special treatment (see lyman_alpha module) and should
+    # never be fitted as a regular Gaussian.  NV is the bluest line
+    # that can be reliably fitted.
+    nv_obs_um = REST_LINES_A["NV_1"] * (1 + z) * 1e-4
 
     out = []
     for name in line_names:
         lam_obs_um = REST_LINES_A[name] * (1 + z) * 1e-4
-        if lam_obs_um <= lya_obs_um:
+        if lam_obs_um < nv_obs_um:
             continue
         if lo <= lam_obs_um <= hi:
             out.append(name)
