@@ -67,7 +67,7 @@ result = jwspecfit.fit_lines(
     lines=None,                  # List of line names to fit (None = auto-detect)
     wave_range_A=None,           # (lo, hi) observed wavelength window in Å
     deg=2,                       # Continuum polynomial degree
-    n_boot=200,                  # Bootstrap iterations (0 for analytic errors)
+    n_boot=1000,                 # Bootstrap iterations (0 for analytic errors)
     clip_sigma=2.5,              # Sigma-clipping threshold for continuum
     save_path=None,              # Export line measurements to this text file
 )
@@ -82,7 +82,7 @@ result = jwspecfit.fit_lines(
 | `lines` | `list[str] \| None` | `None` | Lines to fit (keys of `REST_LINES_A`). If `None`, auto-detected from grating and wavelength coverage |
 | `wave_range_A` | `tuple[float, float] \| None` | `None` | Restrict fitting to this observed wavelength window (Angstroms). Pixels outside are excluded from continuum and line fitting |
 | `deg` | `int` | `2` | Polynomial degree for continuum fitting |
-| `n_boot` | `int` | `200` | Number of bootstrap iterations. Set to 0 for fast analytic error estimates |
+| `n_boot` | `int` | `1000` | Number of bootstrap iterations. Set to 0 for fast analytic error estimates |
 | `clip_sigma` | `float` | `2.5` | Sigma-clipping threshold for iterative continuum fitting |
 | `save_path` | `str \| Path \| None` | `None` | If given, automatically export per-line measurements to this text file path after fitting |
 
@@ -139,7 +139,7 @@ result = jwspecfit.fit_with_broad(
     lines=None,                  # Narrow line list
     deg=2,                       # Continuum polynomial degree
     mode="auto",                 # "auto", "off", "broad1", "broad2", "both"
-    n_boot=200,                  # Bootstrap iterations for the winning model
+    n_boot=1000,                 # Bootstrap iterations for the winning model
     snr_threshold=5.0,           # Minimum Ha SNR to attempt broad fitting
     bic_delta=6.0,               # ΔBIC threshold for accepting a more complex model
 )
@@ -253,8 +253,8 @@ amplitudes (>= 0), centroids, and widths.  Pixel weighting:
 
 ## Uncertainties
 
-**Bootstrap (default, `n_boot=200`):** the spectrum is perturbed by its error
-array 200 times and refit, giving the standard deviation of recovered fluxes
+**Bootstrap (default, `n_boot=1000`):** the spectrum is perturbed by its error
+array 1000 times and refit, giving the standard deviation of recovered fluxes
 as the uncertainty.  A `tqdm` progress bar shows progress.
 
 **Analytic (`n_boot=0`):** local noise RMS scaled by the effective line width.

@@ -158,7 +158,7 @@ def fit_lines(
     lines: list[str] | None = None,
     wave_range_A: tuple[float, float] | None = None,
     deg: int = 2,
-    n_boot: int = 200,
+    n_boot: int = 1000,
     clip_sigma: float = 2.5,
     n_jobs: int = -1,
     save_path: str | Path | None = None,
