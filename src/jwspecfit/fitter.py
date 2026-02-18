@@ -283,6 +283,10 @@ def fit_lines(
 
     valid = np.isfinite(flam) & np.isfinite(flam_err) & (flam_err > 0)
 
+    # Exclude pixels blueward of NV (IGM-absorbed / Lyman-break region).
+    nv_obs_A = REST_LINES_A["NV_1"] * (1.0 + z)
+    valid &= spec.wave_A >= nv_obs_A
+
     # Pixel info.
     edges = spec.wave_edges_A
     dlam = spec.dlam_A
@@ -419,6 +423,7 @@ def fit_lines(
         max_nfev=80000,
         xtol=1e-8,
         ftol=1e-8,
+        x_scale="jac",
     )
 
     p_best = constraints.expand_free_to_full(result.x)
@@ -573,6 +578,7 @@ def _run_single_bootstrap(
         res_b = least_squares(
             residual_b, p0_free, bounds=(lb_free, ub_free),
             max_nfev=20000, xtol=1e-6, ftol=1e-6,
+            x_scale="jac",
         )
         p_full_b = constraints.expand_free_to_full(res_b.x)
         return p_full_b[:nL]
