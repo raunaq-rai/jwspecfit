@@ -66,18 +66,38 @@ def run_emcee(
     """
     import emcee
 
+    from .priors import GaussianPrior, LogUniformPrior, UniformPrior
+
     n_dim = prior_set.n_dim
+
+    # emcee requires n_walkers >= 2 * n_dim for the stretch move.
+    min_walkers = 2 * n_dim + 2  # +2 for safety (must be even)
+    if n_walkers < min_walkers:
+        n_walkers = min_walkers + (min_walkers % 2)  # ensure even
+        logger.info("Increased n_walkers to %d (>= 2 * n_dim = %d).", n_walkers, 2 * n_dim)
+
     rng = np.random.default_rng(seed)
 
-    # Initialise walkers as a small Gaussian ball around the MLE.
-    scale = np.maximum(np.abs(p0_free) * 1e-4, 1e-30)
+    # Initialise walkers as a Gaussian ball around the MLE.
+    # Use 1% of the prior range as the scatter scale to ensure walkers
+    # are spread enough to be linearly independent while staying close
+    # to the MLE.
+    scale = np.zeros(n_dim)
+    for i, prior in enumerate(prior_set.priors):
+        if isinstance(prior, (UniformPrior, LogUniformPrior)):
+            scale[i] = 0.01 * (prior.hi - prior.lo)
+        elif isinstance(prior, GaussianPrior):
+            scale[i] = 0.01 * prior.std
+        else:
+            scale[i] = max(np.abs(p0_free[i]) * 1e-3, 1e-30)
+    scale = np.maximum(scale, 1e-30)
+
     p0 = p0_free[np.newaxis, :] + scale[np.newaxis, :] * rng.standard_normal(
         (n_walkers, n_dim)
     )
 
     # Clip to prior support to avoid -inf at start.
     for i, prior in enumerate(prior_set.priors):
-        from .priors import UniformPrior, GaussianPrior, LogUniformPrior
         if isinstance(prior, (UniformPrior, LogUniformPrior)):
             lo, hi = prior.lo, prior.hi
             p0[:, i] = np.clip(p0[:, i], lo + 1e-30, hi - 1e-30)
@@ -99,7 +119,10 @@ def run_emcee(
         "Running emcee: %d walkers, %d steps, %d dims",
         n_walkers, n_steps, n_dim,
     )
-    sampler.run_mcmc(p0, n_steps, progress=progress)
+    # skip_initial_state_check: emcee's condition number check can fail
+    # when parameters span many orders of magnitude (e.g. amplitude ~1e-18,
+    # centroid ~30000 Å).  This is cosmetic — the sampling is fine.
+    sampler.run_mcmc(p0, n_steps, progress=progress, skip_initial_state_check=True)
 
     # Determine burn-in.
     if n_burn is None:
