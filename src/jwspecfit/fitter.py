@@ -461,10 +461,23 @@ def fit_lines(
         snr = flux_line / f_err if f_err > 0 else 0.0
 
         # Equivalent width (rest-frame).
+        # Use continuum at the line centroid.  If the polynomial continuum
+        # is unreliable (near-zero or negative), fall back to the local
+        # median flux in a ±5σ window around the line.  If that is also
+        # non-positive, report EW as NaN.
         lam_rest_A = REST_LINES_A[name]
         idx_cont = np.argmin(np.abs(spec.wave_A - mu))
-        cont_at_line = cont_flam[idx_cont] if cont_flam[idx_cont] > 0 else 1e-30
-        ew_rest = flux_line / cont_at_line / (1.0 + z)
+        cont_at_line = cont_flam[idx_cont]
+        if cont_at_line <= 0:
+            near_mask = np.abs(spec.wave_A - mu) < 5.0 * sig
+            near_valid = near_mask & valid
+            if np.any(near_valid):
+                local_median_ujy = np.nanmedian(spec.flux_ujy[near_valid])
+                cont_at_line = _ujy_to_flam(
+                    np.array([max(local_median_ujy, 0.0)]),
+                    np.array([spec.wave_um[idx_cont]]),
+                )[0]
+        ew_rest = flux_line / cont_at_line / (1.0 + z) if cont_at_line > 0 else np.nan
 
         line_results[name] = LineResult(
             name=name,
