@@ -25,7 +25,7 @@ from jwspecfit.resolution import resolve_R, sigma_inst_A
 from .diagnostics import summarise_convergence
 from .likelihood import LikelihoodSpec
 from .priors import GaussianPrior, PriorSet, UniformPrior, priors_from_bounds
-from .result import MCMCLineResult, MCMCResult
+from .result import MCMCBroadFitResult, MCMCLineResult, MCMCResult
 from .samplers import run_emcee, run_nautilus
 
 logger = logging.getLogger(__name__)
@@ -456,4 +456,162 @@ def _fit_lines_mcmc(
         convergence=convergence,
         sampler_name=sampler_result["sampler_name"],
         sampler_meta=sampler_result["sampler_meta"],
+    )
+
+
+def _fit_with_broad_mcmc(
+    spectrum: Spectrum,
+    z: float,
+    *,
+    sampler: str = "emcee",
+    grating: str | None = None,
+    R: float | Callable | None = None,
+    lines: list[str] | None = None,
+    wave_range_A: tuple[float, float] | None = None,
+    deg: int = 2,
+    clip_sigma: float = 2.5,
+    mode: str = "auto",
+    n_boot_bic: int = 100,
+    n_jobs: int = -1,
+    snr_threshold: float = 5.0,
+    bic_delta: float = 6.0,
+    prior_overrides: dict[str, Any] | None = None,
+    # emcee options
+    n_walkers: int = 64,
+    n_steps: int = 2000,
+    n_burn: int | None = None,
+    # nautilus options
+    n_live: int = 2000,
+    n_eff: int = 10000,
+    # common options
+    progress: bool = True,
+    seed: int = 42,
+) -> MCMCBroadFitResult:
+    """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
+
+    Phase 1 uses :func:`jwspecfit.fit_with_broad` (fast least-squares)
+    for BIC model selection.  Phase 2 runs MCMC on the winning model's
+    line list, seeded from the MLE parameters.
+
+    Parameters
+    ----------
+    spectrum : Spectrum
+        Input spectrum.
+    z : float
+        Source redshift.
+    sampler : str
+        ``"emcee"`` (default) or ``"nautilus"``.
+    grating : str, optional
+        Grating name.
+    R : float or callable, optional
+        Resolving power.
+    lines : list of str, optional
+        Narrow line list (broad entries are added automatically).
+    wave_range_A : tuple, optional
+        Observed wavelength range (Angstrom).
+    deg : int
+        Continuum polynomial degree.
+    clip_sigma : float
+        Continuum sigma-clipping threshold.
+    mode : str
+        Broad component mode: ``"auto"`` (BIC selection, default),
+        ``"off"`` (narrow only), ``"broad1"``, ``"broad2"``, ``"both"``.
+    n_boot_bic : int
+        Bootstrap iterations for BIC model selection (default 100).
+        Set to 0 for single-point BIC.
+    n_jobs : int
+        Parallel jobs for BIC bootstrap (default ``-1`` = all cores).
+    snr_threshold : float
+        Minimum Ha SNR to attempt broad fitting (default 5.0).
+    bic_delta : float
+        ΔBIC threshold for accepting a more complex model (default 6.0).
+    prior_overrides : dict, optional
+        Per-parameter prior overrides for MCMC.
+    n_walkers : int
+        Emcee walkers (default 64).
+    n_steps : int
+        Emcee steps (default 2000).
+    n_burn : int or None
+        Emcee burn-in (auto if ``None``).
+    n_live : int
+        Nautilus live points (default 2000).
+    n_eff : int
+        Nautilus target effective samples (default 10000).
+    progress : bool
+        Show progress bar.
+    seed : int
+        Random seed.
+
+    Returns
+    -------
+    MCMCBroadFitResult
+    """
+    from jwspecfit.broad import fit_with_broad as _fit_with_broad_mle
+
+    # ------------------------------------------------------------------
+    # Phase 1: BIC model selection via fast least-squares
+    # ------------------------------------------------------------------
+    logger.info("Phase 1: BIC model selection via jwspecfit.fit_with_broad(mode=%r)", mode)
+
+    bic_result = _fit_with_broad_mle(
+        spectrum, z,
+        grating=grating, R=R, lines=lines,
+        deg=deg, mode=mode,
+        n_boot=0,
+        n_boot_bic=n_boot_bic,
+        n_jobs=n_jobs,
+        snr_threshold=snr_threshold,
+        bic_delta=bic_delta,
+    )
+
+    selected_model = bic_result.selected_model
+    best_mle = bic_result.best_fit
+    winning_lines = best_mle.line_names
+
+    logger.info(
+        "BIC selected model: %s (%d lines: %s)",
+        selected_model, len(winning_lines), winning_lines,
+    )
+
+    # Build _p0_hint from the MLE best-fit parameters.
+    nL_mle = len(best_mle.line_names)
+    p0_hint: dict[str, tuple[float, float, float]] = {}
+    for i, name in enumerate(best_mle.line_names):
+        p0_hint[name] = (
+            best_mle.params[i],                # amplitude
+            best_mle.params[nL_mle + i],       # centroid
+            best_mle.params[2 * nL_mle + i],   # sigma
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 2: MCMC on the winning model
+    # ------------------------------------------------------------------
+    logger.info("Phase 2: MCMC sampling on %s model", selected_model)
+
+    mcmc_result = _fit_lines_mcmc(
+        spectrum, z,
+        sampler=sampler,
+        grating=grating, R=R,
+        lines=winning_lines,
+        wave_range_A=wave_range_A,
+        deg=deg,
+        clip_sigma=clip_sigma,
+        init_from_mle=True,
+        prior_overrides=prior_overrides,
+        n_walkers=n_walkers,
+        n_steps=n_steps,
+        n_burn=n_burn,
+        n_live=n_live,
+        n_eff=n_eff,
+        progress=progress,
+        seed=seed,
+    )
+
+    return MCMCBroadFitResult(
+        mcmc_result=mcmc_result,
+        selected_model=selected_model,
+        bic_narrow=bic_result.bic_narrow,
+        bic_broad1=bic_result.bic_broad1,
+        bic_broad2=bic_result.bic_broad2,
+        bic_both=bic_result.bic_both,
     )
