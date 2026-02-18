@@ -3,12 +3,15 @@
 A companion to ``jwspecfit`` that replaces bootstrap uncertainties with
 full Bayesian posterior sampling via **emcee** or **nautilus**.
 
+By default, ``fit_lines()`` performs BIC-based broad Balmer component
+selection before MCMC sampling.  Set ``mode="off"`` for narrow-only.
+
 Example
 -------
->>> import jwspecfit
->>> import jwspecmcmc
+>>> import jwspecfit, jwspecmcmc
 >>> spec = jwspecfit.read_fits("spectrum.fits")
 >>> result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="emcee", n_steps=2000)
+>>> result.selected_model          # "narrow", "broad1", "broad2", or "both"
 >>> result.lines["OIII_5007"].flux_err  # asymmetric 68% CI
 >>> ratio = result.flux_ratio_posterior("OIII_5007", "HBETA")
 """
@@ -62,11 +65,17 @@ def fit_lines(
     n_eff: int = 10000,
     progress: bool = True,
     seed: int = 42,
-) -> MCMCResult:
+    mode: str = "auto",
+    n_boot_bic: int = 100,
+    n_jobs: int = -1,
+    snr_threshold: float = 5.0,
+    bic_delta: float = 6.0,
+) -> MCMCResult | MCMCBroadFitResult:
     """Fit emission lines using MCMC sampling.
 
-    Thin wrapper around the internal engine; see
-    :func:`jwspecmcmc._engine._fit_lines_mcmc` for full documentation.
+    By default (``mode="auto"``), performs BIC-based broad Balmer
+    component selection before MCMC.  Set ``mode="off"`` for
+    narrow-only fitting.
 
     Parameters
     ----------
@@ -107,12 +116,53 @@ def fit_lines(
         Show progress bar.
     seed : int
         Random seed.
+    mode : str
+        Broad component mode (default ``"auto"``):
+        - ``"auto"``: BIC-based selection.
+        - ``"off"``: Narrow-only (no broad component search).
+        - ``"broad1"``: Force intermediate broad.
+        - ``"broad2"``: Force very broad.
+        - ``"both"``: Force both broad components.
+    n_boot_bic : int
+        Bootstrap iterations for BIC model selection (default 100).
+        Only used when ``mode != "off"``.
+    n_jobs : int
+        Parallel jobs for BIC bootstrap (default ``-1``).
+    snr_threshold : float
+        Minimum Ha SNR to attempt broad fitting (default 5.0).
+    bic_delta : float
+        ΔBIC threshold for model selection (default 6.0).
 
     Returns
     -------
+    MCMCBroadFitResult
+        When ``mode != "off"``.  Delegates all :class:`MCMCResult`
+        attributes via properties.
     MCMCResult
+        When ``mode="off"``.
     """
-    return _fit_lines_mcmc(
+    if mode == "off":
+        return _fit_lines_mcmc(
+            spectrum, z,
+            sampler=sampler,
+            grating=grating,
+            R=R,
+            lines=lines,
+            wave_range_A=wave_range_A,
+            deg=deg,
+            clip_sigma=clip_sigma,
+            init_from_mle=init_from_mle,
+            prior_overrides=prior_overrides,
+            n_walkers=n_walkers,
+            n_steps=n_steps,
+            n_burn=n_burn,
+            n_live=n_live,
+            n_eff=n_eff,
+            progress=progress,
+            seed=seed,
+        )
+
+    return _fit_with_broad_mcmc(
         spectrum, z,
         sampler=sampler,
         grating=grating,
@@ -121,7 +171,11 @@ def fit_lines(
         wave_range_A=wave_range_A,
         deg=deg,
         clip_sigma=clip_sigma,
-        init_from_mle=init_from_mle,
+        mode=mode,
+        n_boot_bic=n_boot_bic,
+        n_jobs=n_jobs,
+        snr_threshold=snr_threshold,
+        bic_delta=bic_delta,
         prior_overrides=prior_overrides,
         n_walkers=n_walkers,
         n_steps=n_steps,
