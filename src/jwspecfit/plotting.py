@@ -326,7 +326,6 @@ def plot_fit_interactive(
     """
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
-    from .models import build_model
     from .io import _flam_to_ujy, _ujy_to_flam
 
     spec = result.spectrum
@@ -397,28 +396,56 @@ def plot_fit_interactive(
         line=dict(width=0), showlegend=False, hoverinfo="skip",
     ), row=1)
 
-    # Individual line components (smooth Gaussians).
+    # Individual line components as smooth analytical Gaussians.
     if show_components and len(result.line_names) > 0:
-        edges = spec.wave_edges_A
+        from math import sqrt, pi
         nL = len(result.line_names)
 
         import plotly.express as px
         palette = px.colors.qualitative.Set2
 
+        # Interpolate continuum onto a fine grid for smooth component curves.
+        cont_interp_fn = np.interp
+
         for i, name in enumerate(result.line_names):
             amp = result.params[i]
+            mu_A = result.params[nL + i]
+            sig_A = result.params[2 * nL + i]
 
-            p_single = np.zeros(3 * nL)
-            p_single[i] = amp
-            p_single[nL + i] = result.params[nL + i]
-            p_single[2 * nL + i] = result.params[2 * nL + i]
-            comp_flam = build_model(p_single, edges, nL)
+            if amp <= 0 or sig_A <= 0:
+                continue
+
+            # Fine wavelength grid around ±5σ of the line.
+            w_lo = max(mu_A - 5 * sig_A, spec.wave_A.min())
+            w_hi = min(mu_A + 5 * sig_A, spec.wave_A.max())
+            n_fine = max(int((w_hi - w_lo) / (sig_A / 5)), 100)
+            wave_fine_A = np.linspace(w_lo, w_hi, n_fine)
+            wave_fine_um = wave_fine_A * 1e-4
+
+            # Analytical Gaussian in F_λ: G(λ) = A / (√(2π) σ) × exp(...)
+            gauss_flam = (amp / (sqrt(2 * pi) * sig_A)) * np.exp(
+                -0.5 * ((wave_fine_A - mu_A) / sig_A) ** 2
+            )
+
+            # Continuum at fine grid points (interpolated).
+            cont_fine_ujy = np.interp(wave_fine_um, spec.wave_um, result.continuum)
+
             if use_flam:
-                comp_plot = comp_flam + _ujy_to_flam(result.continuum, spec.wave_um)
+                gauss_plot = gauss_flam + _ujy_to_flam(cont_fine_ujy, wave_fine_um)
+                cont_fine = _ujy_to_flam(cont_fine_ujy, wave_fine_um)
             else:
-                comp_plot = _flam_to_ujy(comp_flam, spec.wave_um) + cont
+                gauss_plot = _flam_to_ujy(gauss_flam, wave_fine_um) + cont_fine_ujy
+                cont_fine = cont_fine_ujy
 
-            comp_k = _nan_mask(comp_plot, keep)
+            # Convert to the chosen wave unit.
+            wave_fine = wave_fine_A if wave_unit == "A" else wave_fine_um
+
+            # Apply exclusion mask.
+            keep_fine = _build_exclude_mask(wave_fine_A, exclude_wave_A)
+            gauss_masked = gauss_plot.copy()
+            gauss_masked[~keep_fine] = np.nan
+            cont_fine_masked = cont_fine.copy()
+            cont_fine_masked[~keep_fine] = np.nan
 
             is_broad = "BROAD" in name
             colour = "rgba(255,140,0,0.6)" if is_broad else palette[i % len(palette)]
@@ -432,20 +459,20 @@ def plot_fit_interactive(
                 frac_err = lr.flux_err / lr.flux
 
             if frac_err > 0:
-                line_only = comp_plot - cont
-                comp_hi = _nan_mask(cont + line_only * (1.0 + frac_err), keep)
-                comp_lo = _nan_mask(cont + line_only * max(1.0 - frac_err, 0.0), keep)
+                line_only = gauss_masked - cont_fine_masked
+                comp_hi = cont_fine_masked + line_only * (1.0 + frac_err)
+                comp_lo = cont_fine_masked + line_only * max(1.0 - frac_err, 0.0)
                 _add(go.Scatter(
-                    x=np.concatenate([wave, wave[::-1]]),
+                    x=np.concatenate([wave_fine, wave_fine[::-1]]),
                     y=np.concatenate([comp_hi, comp_lo[::-1]]),
                     fill="toself", fillcolor=colour.replace("0.6", "0.12")
                     if "rgba" in colour else f"rgba(150,150,150,0.12)",
                     line=dict(width=0), showlegend=False, hoverinfo="skip",
                 ), row=1)
 
-            # Smooth Gaussian line.
+            # Smooth Gaussian curve.
             _add(go.Scatter(
-                x=wave_k, y=comp_k,
+                x=wave_fine, y=gauss_masked,
                 mode="lines", name=f"{'[B] ' if is_broad else ''}{display_name}",
                 line=dict(color=colour, width=1.5, dash=dash),
                 hovertemplate=f"{display_name}<br>λ=%{{x:.1f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
