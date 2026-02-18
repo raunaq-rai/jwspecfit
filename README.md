@@ -90,6 +90,103 @@ The `Spectrum` container holds wavelength (µm), flux (µJy), uncertainty (µJy)
 and metadata.  Properties include `wave_A`, `dlam_A`, `wave_edges_A`,
 `flux_flam`, `err_flam`, and `mask_valid()`.
 
+### Loading non-standard formats
+
+`jwspecfit` internally requires wavelength in **microns (µm)** and
+flux / error in **micro-Jansky (µJy)**.  If your data uses different
+units or file formats, convert before passing to `read_dict()` or
+constructing a `Spectrum` directly.
+
+**Wavelength conversions:**
+
+```python
+from jwspecfit.io import Spectrum
+
+# Angstroms → microns
+wave_um = wave_angstrom * 1e-4
+
+# Nanometres → microns
+wave_um = wave_nm * 1e-3
+```
+
+**Flux conversions:**
+
+```python
+# Jansky → µJy
+flux_ujy = flux_jy * 1e6
+
+# erg/s/cm²/Å (F_λ) → µJy
+#   F_ν = F_λ × λ² / c  (CGS),  then → µJy
+c_cgs = 2.99792458e18   # Å/s
+flux_ujy = flux_flam * (wave_angstrom ** 2) / c_cgs * 1e29
+err_ujy  = err_flam  * (wave_angstrom ** 2) / c_cgs * 1e29
+
+# erg/s/cm²/Hz (F_ν in CGS) → µJy
+flux_ujy = flux_fnu * 1e29
+```
+
+**Loading from a CSV or ASCII table:**
+
+```python
+import numpy as np
+
+data = np.genfromtxt("spectrum.csv", delimiter=",", names=True)
+
+# Suppose columns are: wavelength_A, flux_flam, err_flam
+wave_um = data["wavelength_A"] * 1e-4
+c_cgs = 2.99792458e18
+flux_ujy = data["flux_flam"] * (data["wavelength_A"] ** 2) / c_cgs * 1e29
+err_ujy  = data["err_flam"]  * (data["wavelength_A"] ** 2) / c_cgs * 1e29
+
+spec = jwspecfit.read_dict(
+    {"wave": wave_um, "flux": flux_ujy, "err": err_ujy},
+    z=2.5, R=1000.0,
+)
+```
+
+**Loading from a non-standard FITS file:**
+
+```python
+from astropy.io import fits
+
+with fits.open("other_pipeline.fits") as hdul:
+    tbl = hdul[1].data
+    wave_um = tbl["WAVELENGTH"] * 1e-4   # e.g. Å → µm
+    flux_ujy = tbl["FLUX"] * 1e6         # e.g. Jy → µJy
+    err_ujy  = tbl["ERROR"] * 1e6
+
+spec = jwspecfit.read_dict(
+    {"wave": wave_um, "flux": flux_ujy, "err": err_ujy},
+    z=3.0, grating="G395M",
+)
+```
+
+**Building a `Spectrum` directly (maximum control):**
+
+```python
+from jwspecfit.io import Spectrum
+
+spec = Spectrum(
+    wave_um=wave_um,
+    flux_ujy=flux_ujy,
+    err_ujy=err_ujy,
+    grating=None,       # or "PRISM", "G395M", etc.
+    z=4.5,
+    R=150.0,            # constant R, or a callable R(lam_um)
+    meta={"source": "my_pipeline", "target": "GN-z11"},
+)
+```
+
+**Summary of expected units:**
+
+| Field | Unit | Notes |
+|-------|------|-------|
+| `wave_um` | µm | Observed-frame wavelength |
+| `flux_ujy` | µJy | f_ν flux density |
+| `err_ujy` | µJy | 1σ uncertainty (same units as flux) |
+| `R` | dimensionless | λ/Δλ; float or callable `R(lam_um)` |
+| `z` | dimensionless | Source redshift (0.0 for rest-frame stacks) |
+
 ---
 
 ## Fitting emission lines

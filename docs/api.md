@@ -38,6 +38,34 @@ class Spectrum:
 | `mask_valid()` | `np.ndarray[bool]` | True where flux and err are finite and err > 0 |
 | `copy()` | `Spectrum` | Shallow copy with copied arrays |
 
+**Required units:**
+
+| Field | Unit | Notes |
+|-------|------|-------|
+| `wave_um` | µm | Observed-frame wavelength |
+| `flux_ujy` | µJy | f_ν flux density |
+| `err_ujy` | µJy | 1σ uncertainty (same units as flux) |
+
+If your data uses different units, convert before constructing a `Spectrum`:
+
+```python
+# Angstroms → µm
+wave_um = wave_angstrom * 1e-4
+
+# erg/s/cm²/Å → µJy
+c_cgs = 2.99792458e18   # Å/s
+flux_ujy = flux_flam * (wave_angstrom ** 2) / c_cgs * 1e29
+
+# Jy → µJy
+flux_ujy = flux_jy * 1e6
+
+# Direct construction
+spec = Spectrum(
+    wave_um=wave_um, flux_ujy=flux_ujy, err_ujy=err_ujy,
+    z=4.5, R=150.0,
+)
+```
+
 ---
 
 ### `read_fits(path, z=None)`
