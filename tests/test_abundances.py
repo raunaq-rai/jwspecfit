@@ -439,3 +439,259 @@ class TestAbundanceResult:
         assert res.Te_high is None
         assert res.ionic is None
         assert res.ratios_used is None
+
+
+# -----------------------------------------------------------------------
+# Broad component summation tests
+# -----------------------------------------------------------------------
+
+class TestBroadComponentSummation:
+    """Tests for narrow + broad Balmer component summation."""
+
+    def _make_mock_result(self, lines_dict):
+        """Create a minimal mock result with given lines."""
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockLineResult:
+            name: str
+            flux: float
+            flux_err: float
+            snr: float
+
+        @dataclass
+        class MockFitResult:
+            lines: dict
+
+        lines = {}
+        for name, (flux, err) in lines_dict.items():
+            lines[name] = MockLineResult(
+                name=name, flux=flux, flux_err=err,
+                snr=flux / err if err > 0 else 0.0,
+            )
+        return MockFitResult(lines=lines)
+
+    def test_broad_added_to_narrow(self):
+        """Broad Balmer flux should be summed into the narrow line."""
+        from jwspecabund._core import _extract_fluxes
+
+        result = self._make_mock_result({
+            "Ha": (3.0, 0.1),
+            "Ha_BROAD": (1.0, 0.2),
+            "HBETA": (1.0, 0.05),
+            "OIII_5007": (5.0, 0.1),
+        })
+
+        fluxes, errors, _ = _extract_fluxes(result)
+
+        assert fluxes["Ha"] == pytest.approx(4.0)
+        assert errors["Ha"] == pytest.approx(np.sqrt(0.1**2 + 0.2**2))
+        # Non-Balmer lines unaffected.
+        assert fluxes["OIII_5007"] == pytest.approx(5.0)
+
+    def test_broad_without_narrow_ignored(self):
+        """Broad component should be ignored if no narrow counterpart."""
+        from jwspecabund._core import _extract_fluxes
+
+        result = self._make_mock_result({
+            "Ha_BROAD": (1.0, 0.2),
+            "HBETA": (1.0, 0.05),
+        })
+
+        fluxes, _, _ = _extract_fluxes(result)
+
+        assert "Ha" not in fluxes
+        assert "Ha_BROAD" not in fluxes
+
+    def test_non_balmer_broad_ignored(self):
+        """Broad component of non-Balmer lines should not be summed."""
+        from jwspecabund._core import _extract_fluxes
+
+        result = self._make_mock_result({
+            "OIII_5007": (5.0, 0.1),
+            "OIII_5007_BROAD": (1.0, 0.2),
+            "HBETA": (1.0, 0.05),
+        })
+
+        fluxes, _, _ = _extract_fluxes(result)
+
+        assert fluxes["OIII_5007"] == pytest.approx(5.0)
+
+
+# -----------------------------------------------------------------------
+# Forward model tests (require PyNEB + emcee)
+# -----------------------------------------------------------------------
+
+class TestForwardModel:
+    """Tests for forward.py Bayesian forward model."""
+
+    @pytest.fixture(autouse=True)
+    def _check_deps(self):
+        """Skip if PyNEB or emcee not installed."""
+        pytest.importorskip("pyneb")
+        pytest.importorskip("emcee")
+
+    def test_hbeta_emissivity_aller84(self):
+        """Aller (1984) Hbeta emissivity should be positive and decrease with T."""
+        from jwspecabund.forward import hbeta_emissivity_aller84
+
+        eps_1e4 = hbeta_emissivity_aller84(1e4)
+        eps_3e4 = hbeta_emissivity_aller84(3e4)
+        eps_5e4 = hbeta_emissivity_aller84(5e4)
+
+        assert eps_1e4 > 0
+        assert eps_1e4 > eps_3e4 > eps_5e4  # decreases with T
+
+    def test_build_observables(self):
+        """Should construct correct line/Hb ratios."""
+        from jwspecabund.forward import _build_observables
+
+        fluxes = {"HBETA": 1.0, "OIII_5007": 5.0, "OIII_4363": 0.05}
+        errors = {"HBETA": 0.02, "OIII_5007": 0.1, "OIII_4363": 0.01}
+
+        names, obs, errs, comps = _build_observables(fluxes, errors)
+
+        assert len(names) == 2
+        assert "OIII_5007/Hb" in names
+        assert "OIII_4363/Hb" in names
+        np.testing.assert_allclose(obs[names.index("OIII_5007/Hb")], 5.0)
+
+    def test_determine_free_params(self):
+        """Should add Te, ne, and one param per detected ion."""
+        from jwspecabund.forward import _build_observables, _determine_free_params
+
+        fluxes = {"HBETA": 1.0, "OIII_5007": 5.0, "NeIII_3869": 0.3}
+        errors = {"HBETA": 0.02, "OIII_5007": 0.1, "NeIII_3869": 0.05}
+
+        _, _, _, comps = _build_observables(fluxes, errors)
+        params = _determine_free_params(comps)
+
+        assert "log_Te" in params
+        assert "log_ne" in params
+        assert "log_Opp" in params
+        assert "log_Nepp" in params
+        assert len(params) == 4
+
+    def test_predict_ratios(self):
+        """Predicted ratios should be positive for valid parameters."""
+        import pyneb as pn
+
+        from jwspecabund.forward import (
+            _build_observables,
+            _determine_free_params,
+            _predict_ratios,
+        )
+
+        fluxes = {"HBETA": 1.0, "OIII_5007": 5.0, "OIII_4363": 0.05}
+        errors = {"HBETA": 0.02, "OIII_5007": 0.1, "OIII_4363": 0.01}
+
+        _, _, _, comps = _build_observables(fluxes, errors)
+        params = _determine_free_params(comps)
+
+        pyneb_atoms = {("O", 3): pn.Atom("O", 3)}
+        # theta: log_Te=4.2, log_ne=2.0, log_Opp=-4.0
+        theta = np.array([4.2, 2.0, -4.0])
+
+        pred = _predict_ratios(theta, params, comps, pyneb_atoms)
+        assert pred.shape == (2,)
+        assert np.all(pred > 0)
+        assert np.all(np.isfinite(pred))
+
+    def test_forward_model_runs(self):
+        """Smoke test: forward_model should run and return sensible output."""
+        from jwspecabund.forward import forward_model
+
+        fluxes = {
+            "HBETA": 1.0,
+            "OIII_5007": 5.0,
+            "OIII_4363": 0.05,
+        }
+        errors = {k: 0.05 * abs(v) for k, v in fluxes.items()}
+
+        res = forward_model(
+            fluxes, errors,
+            sampler="emcee",
+            n_walkers=16,
+            n_steps=500,
+            n_burn=200,
+            seed=42,
+            progress=False,
+        )
+
+        assert "OH" in res
+        assert "Te" in res
+        assert "samples" in res
+        assert res["samples"].shape[1] == 3  # log_Te, log_ne, log_Opp
+        assert 5.0 < res["OH"] < 10.0
+        assert res["Te"] > 5000
+
+    def test_forward_model_with_neon(self):
+        """Forward model with [NeIII] should have 4 free parameters."""
+        from jwspecabund.forward import forward_model
+
+        fluxes = {
+            "HBETA": 1.0,
+            "OIII_5007": 5.0,
+            "OIII_4363": 0.05,
+            "NeIII_3869": 0.3,
+        }
+        errors = {k: 0.05 * abs(v) for k, v in fluxes.items()}
+
+        res = forward_model(
+            fluxes, errors,
+            sampler="emcee",
+            n_walkers=16,
+            n_steps=500,
+            n_burn=200,
+            seed=42,
+            progress=False,
+        )
+
+        assert res["samples"].shape[1] == 4  # log_Te, log_ne, log_Opp, log_Nepp
+        assert "NeO" in res
+        assert res["NeO"] is not None
+
+    def test_compute_abundances_forward_method(self):
+        """compute_abundances(method='forward') should dispatch correctly."""
+        from jwspecabund import compute_abundances
+
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockLineResult:
+            name: str
+            flux: float
+            flux_err: float
+            snr: float
+
+        @dataclass
+        class MockFitResult:
+            lines: dict
+
+        line_data = {
+            "OIII_4363": (0.05, 0.01),
+            "OIII_5007": (5.0, 0.1),
+            "HBETA": (1.0, 0.02),
+        }
+        lines = {}
+        for name, (flux, err) in line_data.items():
+            lines[name] = MockLineResult(
+                name=name, flux=flux, flux_err=err,
+                snr=flux / err if err > 0 else 0.0,
+            )
+        result = MockFitResult(lines=lines)
+
+        abund = compute_abundances(
+            result, z=6.0, method="forward",
+            dust_correct=False,
+            forward_n_walkers=16,
+            forward_n_steps=500,
+            forward_n_burn=200,
+            forward_seed=42,
+            forward_progress=False,
+        )
+
+        assert abund.method == "forward"
+        assert 5.0 < abund.OH < 10.0
+        assert abund.Te_high is not None
+        assert abund._forward_result is not None
