@@ -12,7 +12,9 @@ REST_LINES_A: dict[str, float] = {
     "NV_1": 1238.821,
     "NV_2": 1242.804,
     "NV_doublet": 1240.81,
+    "NIV_1483": 1483.321,
     "NIV_1": 1486.496,
+    "NIV_doublet": 1484.91,
     "NIII_1749": 1748.646,
     "NIII_1752": 1752.160,
     "NIII_doublet": 1750.40,
@@ -23,6 +25,7 @@ REST_LINES_A: dict[str, float] = {
     "OIII_1663": 1663.48,
     "SiIII_1": 1882.71,
     "SiIII_2": 1892.03,
+    "CIII]_1907": 1906.683,
     "CIII]": 1908.734,
     # Semi-forbidden / weak
     "OIII]_2321": 2322.41306535397,
@@ -51,6 +54,10 @@ REST_LINES_A: dict[str, float] = {
     "SII_6718": 6720.149693980653,
     "SII_6732": 6734.532561984591,
     # Additional diagnostic lines (opt-in; not in default grating lists)
+    "HeI_4472": 4472.73,     # TODO: verify vacuum wavelength (air 4471.480)
+    "HeII_4687": 4687.02,    # TODO: verify vacuum wavelength (air 4685.710)
+    "ArIV_4713": 4712.58,    # TODO: verify vacuum wavelength (air 4711.260)
+    "ArIV_4741": 4741.48,    # TODO: verify vacuum wavelength (air 4740.170)
     "NeIII_3869": 3870.16,   # TODO: verify vacuum wavelength (air 3868.760)
     "SIII_6312": 6313.81,    # TODO: verify vacuum wavelength (air 6312.060)
     "OII_7320": 7322.01,     # TODO: verify vacuum wavelength (air 7319.990)
