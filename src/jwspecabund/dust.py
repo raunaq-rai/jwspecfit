@@ -292,12 +292,8 @@ def compute_Av_from_balmer(
 
     observed_ratio = flux_num / flux_den
 
-    # If observed ratio is below the intrinsic value, no dust correction.
-    if observed_ratio <= intrinsic_ratio:
-        return 0.0, 0.0
-
     # Compute differential attenuation per unit Av at the two wavelengths.
-    # A(lambda) = Av * f(lambda), so we compute f(Ha) - f(Hb).
+    # A(lambda) = Av * f(lambda), where f = A(lambda)/A_V.
     Av_test = 1.0
     waves = np.array([wave_num_A, wave_den_A])
     if law == "salim":
