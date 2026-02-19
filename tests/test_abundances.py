@@ -270,6 +270,20 @@ class TestDirect:
         totals = compute_total_abundances(ionic)
         np.testing.assert_allclose(totals["O/H"], 6e-5)
 
+    def test_ionic_abundance_high_Te(self):
+        """Ionic abundances should work at T > 30,000 K (PyNEB HI limit)."""
+        from jwspecabund.direct import compute_ionic_abundances
+
+        fluxes = {
+            "OIII_5007": 5.0,
+            "HBETA": 1.0,
+        }
+        # T_e = 36,000 K exceeds PyNEB's H I tables; the fallback should handle it.
+        ionic = compute_ionic_abundances(fluxes, Te_high=36000.0, Te_low=26500.0, ne=100.0)
+        assert "O++/H+" in ionic
+        assert ionic["O++/H+"] > 0
+        assert 6.0 < 12 + np.log10(ionic["O++/H+"]) < 9.0
+
 
 # -----------------------------------------------------------------------
 # Orchestrator tests

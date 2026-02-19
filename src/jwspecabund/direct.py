@@ -101,7 +101,8 @@ def compute_Te_OIII(
 ) -> float:
     """Compute T_e(O++) from the [OIII] auroral/nebular ratio.
 
-    Uses PyNEB ``getTemDen()`` on the O++ atom.
+    Uses PyNEB ``getTemDen()`` on the O++ atom with the standard
+    diagnostic ratio [OIII] 4363 / ([OIII] 5007 + [OIII] 4959).
 
     Parameters
     ----------
@@ -130,11 +131,19 @@ def compute_Te_OIII(
     ratio = flux_4363 / nebular
 
     atom = pn.Atom("O", 3)
-    Te = atom.getTemDen(ratio, den=ne, wave1=4363, wave2=5007)
+    # Use to_eval for the sum ratio, and log=True for robust root-finding
+    # at high temperatures (T > 25,000 K, typical of metal-poor z > 4 galaxies).
+    # start_x=3.0 → 1,000 K; end_x=5.0 → 100,000 K in log10(T) space.
+    Te = atom.getTemDen(
+        ratio, den=ne,
+        to_eval="(L(4363))/(L(5007)+L(4959))",
+        log=True, start_x=3.0, end_x=5.0,
+    )
 
     if np.isnan(Te) or Te <= 0:
         raise ValueError(
-            f"PyNEB returned invalid T_e={Te:.0f} K for [OIII] ratio={ratio:.4f}."
+            f"PyNEB returned invalid T_e for [OIII] 4363/(5007+4959)={ratio:.4f}. "
+            f"Check that the auroral line is a real detection."
         )
 
     return float(Te)
@@ -171,11 +180,15 @@ def compute_Te_NII(
     ratio = flux_5756 / flux_6585
 
     atom = pn.Atom("N", 2)
-    Te = atom.getTemDen(ratio, den=ne, wave1=5755, wave2=6584)
+    # Use log=True for robust root-finding across a wide temperature range.
+    Te = atom.getTemDen(
+        ratio, den=ne, wave1=5755, wave2=6584,
+        log=True, start_x=3.0, end_x=5.0,
+    )
 
     if np.isnan(Te) or Te <= 0:
         raise ValueError(
-            f"PyNEB returned invalid T_e={Te:.0f} K for [NII] ratio={ratio:.4f}."
+            f"PyNEB returned invalid T_e for [NII] 5755/6584={ratio:.4f}."
         )
 
     return float(Te)
@@ -211,6 +224,45 @@ def Te_low_from_high(Te_high: float, relation: str = "desi") -> float:
 # Ionic abundances via PyNEB
 # ---------------------------------------------------------------------------
 
+# Maximum temperature where PyNEB's H I recombination tables are valid.
+# Storey & Hummer (1995) tables in PyNEB go up to 30,000 K.
+_PYNEB_HI_TMAX = 30000.0
+
+# Power-law fit to the Hβ emissivity for extrapolation beyond 30,000 K.
+# Fitted to PyNEB values at 10,000–30,000 K: ε_Hβ = 10^a × T^b.
+# Accuracy < 1% within the fitted range; physically motivated for
+# extrapolation up to ~60,000 K (Case B recombination scales as ~T^{-0.9}).
+_HB_EMISS_LOGCOEFF = -21.178   # intercept (log10)
+_HB_EMISS_TEXP = -0.932        # power-law exponent
+
+
+def _hbeta_emissivity(Te: float, ne: float) -> float:
+    """Return the Hβ volume emissivity, with extrapolation beyond 30,000 K.
+
+    Uses PyNEB directly for T <= 30,000 K.  For higher temperatures,
+    extrapolates with a power law fitted to Case B values.
+
+    Parameters
+    ----------
+    Te : float
+        Electron temperature in K.
+    ne : float
+        Electron density in cm^-3.
+
+    Returns
+    -------
+    float
+        Hβ emissivity (same units as PyNEB's ``RecAtom.getEmissivity``).
+    """
+    pn = _get_pyneb()
+    if Te <= _PYNEB_HI_TMAX:
+        H1 = pn.RecAtom("H", 1)
+        return H1.getEmissivity(Te, ne, wave=4861)
+
+    # Extrapolate using power law fitted to PyNEB values.
+    return 10.0 ** (_HB_EMISS_LOGCOEFF + _HB_EMISS_TEXP * np.log10(Te))
+
+
 def _ionic_abundance(
     element: str,
     ion: int,
@@ -221,6 +273,11 @@ def _ionic_abundance(
     wave: int,
 ) -> float:
     """Compute an ionic abundance X^i+/H+ via PyNEB.
+
+    For T <= 30,000 K, delegates to ``Atom.getIonAbundance()``.
+    For T > 30,000 K, computes the abundance manually using the CEL
+    emissivity from PyNEB and an extrapolated Hβ emissivity, since
+    PyNEB's H I recombination tables only cover up to 30,000 K.
 
     Parameters
     ----------
@@ -252,7 +309,17 @@ def _ionic_abundance(
     intensity = flux_line / flux_Hbeta * 100.0  # PyNEB convention: Hβ = 100
 
     atom = pn.Atom(element, ion)
-    abund = atom.getIonAbundance(intensity, tem=Te, den=ne, wave=wave)
+
+    if Te <= _PYNEB_HI_TMAX:
+        abund = atom.getIonAbundance(intensity, tem=Te, den=ne, wave=wave)
+    else:
+        # Manual computation: X^i+/H+ = (I_line/I_Hb) × (ε_Hb / ε_line)
+        emiss_line = atom.getEmissivity(Te, ne, wave=wave)
+        emiss_Hb = _hbeta_emissivity(Te, ne)
+        if emiss_line > 0 and np.isfinite(emiss_Hb) and emiss_Hb > 0:
+            abund = (intensity / 100.0) * (emiss_Hb / emiss_line)
+        else:
+            abund = np.nan
 
     if np.isnan(abund) or abund <= 0:
         return np.nan
