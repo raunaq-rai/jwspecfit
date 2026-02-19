@@ -47,6 +47,13 @@ REST_LINES_A: dict[str, float] = {
     # Sulphur
     "SII_6718": 6720.149693980653,
     "SII_6732": 6734.532561984591,
+    # Additional diagnostic lines (opt-in; not in default grating lists)
+    "NeIII_3869": 3870.16,   # TODO: verify vacuum wavelength (air 3868.760)
+    "SIII_6312": 6313.81,    # TODO: verify vacuum wavelength (air 6312.060)
+    "OII_7320": 7322.01,     # TODO: verify vacuum wavelength (air 7319.990)
+    "OII_7330": 7332.75,     # TODO: verify vacuum wavelength (air 7330.730)
+    "ArIII_7136": 7137.77,   # TODO: verify vacuum wavelength (air 7135.790)
+    "SIII_9069": 9071.10,    # TODO: verify vacuum wavelength (air 9068.600)
 }
 
 # Pre-defined line groups for different spectral resolutions.
