@@ -80,6 +80,16 @@ _LINE_COMPONENTS: dict[str, list[tuple[str, int, int]]] = {
     "SII_6732":    [("S", 2, 6732)],
     "SIII_9069":   [("S", 3, 9069)],
     "ArIII_7136":  [("Ar", 3, 7136)],
+    # UV semi-forbidden lines
+    "NIV_1":       [("N", 4, 1487)],
+    "NIII_1749":   [("N", 3, 1749)],
+    "NIII_1752":   [("N", 3, 1752)],
+    "NIII_doublet": [("N", 3, 1749), ("N", 3, 1752)],
+    "CIII]":       [("C", 3, 1909)],
+    "CIV_1":       [("C", 4, 1548)],
+    "CIV_2":       [("C", 4, 1551)],
+    "CIV_doublet": [("C", 4, 1548), ("C", 4, 1551)],
+    "OIII_1663":   [("O", 3, 1663)],
 }
 
 # Maps (element, ion_stage) -> parameter name for ionic abundance.
@@ -87,36 +97,48 @@ _ION_PARAM_NAME: dict[tuple[str, int], str] = {
     ("O", 3):  "log_Opp",
     ("O", 2):  "log_Op",
     ("N", 2):  "log_Np",
+    ("N", 3):  "log_Npp",
+    ("N", 4):  "log_Nppp",
     ("Ne", 3): "log_Nepp",
     ("S", 2):  "log_Sp",
     ("S", 3):  "log_Spp",
     ("Ar", 3): "log_Arpp",
+    ("C", 3):  "log_Cpp",
+    ("C", 4):  "log_Cppp",
 }
 
 # Human-readable labels for ionic abundance parameters.
 _PARAM_LABELS: dict[str, str] = {
-    "log_Te":   r"$\log\,T_e$ [K]",
-    "log_ne":   r"$\log\,n_e$ [cm$^{-3}$]",
-    "log_Opp":  r"$\log\,(\mathrm{O}^{2+}/\mathrm{H}^+)$",
-    "log_Op":   r"$\log\,(\mathrm{O}^{+}/\mathrm{H}^+)$",
-    "log_Np":   r"$\log\,(\mathrm{N}^{+}/\mathrm{H}^+)$",
-    "log_Nepp": r"$\log\,(\mathrm{Ne}^{2+}/\mathrm{H}^+)$",
-    "log_Sp":   r"$\log\,(\mathrm{S}^{+}/\mathrm{H}^+)$",
-    "log_Spp":  r"$\log\,(\mathrm{S}^{2+}/\mathrm{H}^+)$",
-    "log_Arpp": r"$\log\,(\mathrm{Ar}^{2+}/\mathrm{H}^+)$",
+    "log_Te":    r"$\log\,T_e$ [K]",
+    "log_ne":    r"$\log\,n_e$ [cm$^{-3}$]",
+    "log_Opp":   r"$\log\,(\mathrm{O}^{2+}/\mathrm{H}^+)$",
+    "log_Op":    r"$\log\,(\mathrm{O}^{+}/\mathrm{H}^+)$",
+    "log_Np":    r"$\log\,(\mathrm{N}^{+}/\mathrm{H}^+)$",
+    "log_Npp":   r"$\log\,(\mathrm{N}^{2+}/\mathrm{H}^+)$",
+    "log_Nppp":  r"$\log\,(\mathrm{N}^{3+}/\mathrm{H}^+)$",
+    "log_Nepp":  r"$\log\,(\mathrm{Ne}^{2+}/\mathrm{H}^+)$",
+    "log_Sp":    r"$\log\,(\mathrm{S}^{+}/\mathrm{H}^+)$",
+    "log_Spp":   r"$\log\,(\mathrm{S}^{2+}/\mathrm{H}^+)$",
+    "log_Arpp":  r"$\log\,(\mathrm{Ar}^{2+}/\mathrm{H}^+)$",
+    "log_Cpp":   r"$\log\,(\mathrm{C}^{2+}/\mathrm{H}^+)$",
+    "log_Cppp":  r"$\log\,(\mathrm{C}^{3+}/\mathrm{H}^+)$",
 }
 
 # Uniform prior bounds for each parameter.
 _PRIOR_BOUNDS: dict[str, tuple[float, float]] = {
-    "log_Te":   (3.5, 5.0),
-    "log_ne":   (0.0, 5.0),
-    "log_Opp":  (-7.0, -2.0),
-    "log_Op":   (-7.0, -2.0),
-    "log_Np":   (-8.0, -3.0),
-    "log_Nepp": (-8.0, -3.0),
-    "log_Sp":   (-9.0, -4.0),
-    "log_Spp":  (-9.0, -4.0),
-    "log_Arpp": (-9.0, -4.0),
+    "log_Te":    (3.5, 5.0),
+    "log_ne":    (0.0, 5.0),
+    "log_Opp":   (-7.0, -2.0),
+    "log_Op":    (-7.0, -2.0),
+    "log_Np":    (-8.0, -3.0),
+    "log_Npp":   (-8.0, -3.0),
+    "log_Nppp":  (-8.0, -3.0),
+    "log_Nepp":  (-8.0, -3.0),
+    "log_Sp":    (-9.0, -4.0),
+    "log_Spp":   (-9.0, -4.0),
+    "log_Arpp":  (-9.0, -4.0),
+    "log_Cpp":   (-8.0, -3.0),
+    "log_Cppp":  (-8.0, -3.0),
 }
 
 
