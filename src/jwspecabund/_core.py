@@ -435,6 +435,14 @@ def compute_abundances(
     Rv: float = 3.15,
     delta: float = -0.35,
     B_bump: float = 2.27,
+    # Forward model kwargs (method="forward")
+    forward_sampler: str = "emcee",
+    forward_n_walkers: int = 32,
+    forward_n_steps: int = 5000,
+    forward_n_burn: int = 1000,
+    forward_n_live: int = 500,
+    forward_seed: int = 42,
+    forward_progress: bool = True,
 ) -> AbundanceResult:
     """Compute chemical abundances from a fitting result.
 
@@ -451,8 +459,10 @@ def compute_abundances(
     Av : float or None
         V-band attenuation. If ``None``, derived from Balmer decrement.
     method : str
-        ``"auto"`` (default), ``"direct"``, or ``"strong_line"``.
-        ``"auto"`` uses direct if [OIII] 4363 SNR >= *snr_auroral*.
+        ``"auto"`` (default), ``"direct"``, ``"forward"``, or
+        ``"strong_line"``.  ``"auto"`` uses direct if [OIII] 4363
+        SNR >= *snr_auroral*.  ``"forward"`` runs the Bayesian
+        forward model (Cullen+25) — see :func:`forward_model`.
     snr_auroral : float
         Minimum SNR for [OIII] 4363 to use the direct method (default 3.0).
     n_mc : int
@@ -465,6 +475,20 @@ def compute_abundances(
         Slope deviation for Salim law (default -0.35).
     B_bump : float
         UV bump strength for Salim law (default 2.27).
+    forward_sampler : str
+        Sampler for forward model: ``"emcee"`` or ``"dynesty"`` (default ``"emcee"``).
+    forward_n_walkers : int
+        Number of walkers for emcee forward model (default 32).
+    forward_n_steps : int
+        MCMC steps for emcee forward model (default 5000).
+    forward_n_burn : int
+        Burn-in steps for emcee forward model (default 1000).
+    forward_n_live : int
+        Live points for dynesty forward model (default 500).
+    forward_seed : int
+        Random seed for the forward model (default 42).
+    forward_progress : bool
+        Show progress bar for the forward model (default ``True``).
 
     Returns
     -------
@@ -536,8 +560,11 @@ def compute_abundances(
 
     # --- Method selection ---
     use_direct = False
+    use_forward = False
     if method == "direct":
         use_direct = True
+    elif method == "forward":
+        use_forward = True
     elif method == "auto":
         # Check if [OIII] 4363 has sufficient SNR.
         if "OIII_4363" in fluxes and "OIII_4363" in errors:
@@ -550,7 +577,42 @@ def compute_abundances(
         else:
             logger.info("[OIII] 4363 not detected; using strong-line method.")
     elif method != "strong_line":
-        raise ValueError(f"Unknown method: {method!r}. Use 'auto', 'direct', or 'strong_line'.")
+        raise ValueError(
+            f"Unknown method: {method!r}. "
+            "Use 'auto', 'direct', 'forward', or 'strong_line'."
+        )
+
+    # --- Forward model ---
+    if use_forward:
+        from .forward import forward_model
+
+        fwd_out = forward_model(
+            fluxes, errors,
+            sampler=forward_sampler,
+            n_walkers=forward_n_walkers,
+            n_steps=forward_n_steps,
+            n_burn=forward_n_burn,
+            n_live=forward_n_live,
+            seed=forward_seed,
+            progress=forward_progress,
+        )
+
+        return AbundanceResult(
+            method="forward",
+            OH=fwd_out["OH"],
+            OH_err=fwd_out.get("OH_err", np.nan),
+            NO=fwd_out.get("NO"),
+            NO_err=fwd_out.get("NO_err"),
+            Te_high=fwd_out.get("Te"),
+            Te_low=None,
+            ne=fwd_out.get("ne"),
+            Av=Av_derived,
+            ionic=fwd_out.get("ionic"),
+            OH_posterior=fwd_out.get("OH_posterior"),
+            NO_posterior=fwd_out.get("NO_posterior"),
+            NeO=fwd_out.get("NeO"),
+            _forward_result=fwd_out,
+        )
 
     # --- Direct method ---
     if use_direct:

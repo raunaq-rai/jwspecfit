@@ -1,12 +1,13 @@
 """Abundance result containers.
 
-Dataclasses holding the output of direct T_e and strong-line
-abundance calculations, including optional MCMC posterior arrays.
+Dataclasses holding the output of direct T_e, forward model, and
+strong-line abundance calculations, including optional MCMC posterior arrays.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
@@ -18,7 +19,7 @@ class AbundanceResult:
     Parameters
     ----------
     method : str
-        ``"direct"`` or ``"strong_line"``.
+        ``"direct"``, ``"forward"``, or ``"strong_line"``.
     OH : float
         12 + log(O/H).
     OH_err : float or tuple of float
@@ -79,6 +80,8 @@ class AbundanceResult:
     SO: float | None = None
     NeO: float | None = None
     ArO: float | None = None
+    # Internal: full forward model result dict (samples, param_names, etc.)
+    _forward_result: dict[str, Any] | None = field(default=None, repr=False)
 
     def summary(self) -> str:
         """Return a human-readable summary string.

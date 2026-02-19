@@ -4,13 +4,17 @@ Computes oxygen abundances (O/H), nitrogen-to-oxygen ratios (N/O),
 and other element ratios from emission-line fluxes produced by
 ``jwspecfit`` or ``jwspecmcmc``.
 
-Two pathways are supported:
+Three pathways are supported:
 
 1. **Direct T_e method** — when auroral lines (e.g. [OIII] 4363) are
    detected, uses PyNEB for electron temperature / density diagnostics
    and ionic abundance calculations.
 
-2. **Strong-line calibrations** — Sanders et al. (2025) simultaneous
+2. **Bayesian forward model** — samples ionic abundances, T_e, and n_e
+   via MCMC/nested sampling, predicting line ratios with PyNEB CEL
+   emissivities and the Aller (1984) Hbeta formula (Cullen+25 approach).
+
+3. **Strong-line calibrations** — Sanders et al. (2025) simultaneous
    polynomial fit across O3, O2, R23, O32 diagnostics.
 
 Example
@@ -28,6 +32,7 @@ from __future__ import annotations
 __version__ = "0.1.0"
 
 from ._core import compute_abundances
+from .forward import forward_model, hbeta_emissivity_aller84
 from .direct import (
     Te_low_from_high,
     compute_ionic_abundances,
@@ -59,6 +64,8 @@ __all__ = [
     "compute_Te_OIII",
     "compute_total_abundances",
     "dust_correct_fluxes",
+    "forward_model",
+    "hbeta_emissivity_aller84",
     "icf_argon",
     "icf_neon",
     "icf_nitrogen",

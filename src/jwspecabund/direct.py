@@ -228,19 +228,12 @@ def Te_low_from_high(Te_high: float, relation: str = "desi") -> float:
 # Storey & Hummer (1995) tables in PyNEB go up to 30,000 K.
 _PYNEB_HI_TMAX = 30000.0
 
-# Power-law fit to the Hβ emissivity for extrapolation beyond 30,000 K.
-# Fitted to PyNEB values at 10,000–30,000 K: ε_Hβ = 10^a × T^b.
-# Accuracy < 1% within the fitted range; physically motivated for
-# extrapolation up to ~60,000 K (Case B recombination scales as ~T^{-0.9}).
-_HB_EMISS_LOGCOEFF = -21.178   # intercept (log10)
-_HB_EMISS_TEXP = -0.932        # power-law exponent
-
 
 def _hbeta_emissivity(Te: float, ne: float) -> float:
-    """Return the Hβ volume emissivity, with extrapolation beyond 30,000 K.
+    """Return the Hbeta volume emissivity, using Aller (1984) beyond 30,000 K.
 
     Uses PyNEB directly for T <= 30,000 K.  For higher temperatures,
-    extrapolates with a power law fitted to Case B values.
+    uses the Aller (1984) formula which has no upper-bound limitation.
 
     Parameters
     ----------
@@ -252,15 +245,16 @@ def _hbeta_emissivity(Te: float, ne: float) -> float:
     Returns
     -------
     float
-        Hβ emissivity (same units as PyNEB's ``RecAtom.getEmissivity``).
+        Hbeta emissivity (same units as PyNEB's ``RecAtom.getEmissivity``).
     """
     pn = _get_pyneb()
     if Te <= _PYNEB_HI_TMAX:
         H1 = pn.RecAtom("H", 1)
         return H1.getEmissivity(Te, ne, wave=4861)
 
-    # Extrapolate using power law fitted to PyNEB values.
-    return 10.0 ** (_HB_EMISS_LOGCOEFF + _HB_EMISS_TEXP * np.log10(Te))
+    # Aller (1984) Case B formula, valid at any temperature.
+    from .forward import hbeta_emissivity_aller84
+    return hbeta_emissivity_aller84(Te)
 
 
 def _ionic_abundance(
