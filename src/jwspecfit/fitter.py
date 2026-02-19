@@ -287,6 +287,41 @@ def fit_lines(
     nv_obs_A = REST_LINES_A["NV_1"] * (1.0 + z)
     valid &= spec.wave_A >= nv_obs_A
 
+    # Drop lines that fall in detector gaps (no valid pixels within ±5σ).
+    _sig_inst_check = sigma_inst_A(spec.wave_um, grating=grating, R=R)
+    _kept: list[str] = []
+    for name in line_names:
+        lam_obs_A = REST_LINES_A[name] * (1.0 + z)
+        _, sig_seed, _ = _grating_bounds(grating, _sig_inst_check, spec.dlam_A, lam_obs_A)
+        near_mask = np.abs(spec.wave_A - lam_obs_A) < 5 * sig_seed
+        if np.any(valid & near_mask):
+            _kept.append(name)
+        else:
+            logger.info(
+                "Dropping %s (obs %.0f A): no valid pixels within ±5sigma — "
+                "likely a detector gap.",
+                name, lam_obs_A,
+            )
+    if len(_kept) < len(line_names):
+        logger.info(
+            "Kept %d / %d lines after gap filtering.", len(_kept), len(line_names),
+        )
+        line_names = _kept
+
+    if len(line_names) == 0:
+        logger.warning("All lines fall in detector gaps.")
+        return FitResult(
+            lines={},
+            params=np.array([]),
+            model_flux=np.zeros(spec.n_pix),
+            continuum=np.zeros(spec.n_pix),
+            residuals=spec.flux_ujy.copy(),
+            chi2=np.nan,
+            spectrum=spec,
+            line_names=[],
+            success=False,
+        )
+
     # Pixel info.
     edges = spec.wave_edges_A
     dlam = spec.dlam_A
@@ -312,22 +347,10 @@ def fit_lines(
         # Find peak flux near the line for amplitude seeding.
         near = np.abs(spec.wave_A - lam_obs_A)
         idx_near = np.where(near < 5 * sig_seed)[0]
-        # Only consider valid (non-NaN) pixels near the line.
-        idx_near_valid = idx_near[valid[idx_near]] if len(idx_near) > 0 else idx_near
-        if len(idx_near_valid) > 0:
-            peak_flam = np.nanmax(flam[idx_near_valid])
+        if len(idx_near) > 0:
+            peak_flam = np.nanmax(flam[idx_near])
         else:
-            # Line falls in a detector gap or NaN region — use global median
-            # as a conservative fallback so bounds remain finite.
-            peak_flam = np.nanmedian(np.abs(flam[valid])) if np.any(valid) else 1.0
-            logger.debug(
-                "Line %s at %.1f A falls in a gap; using fallback amplitude seed.",
-                name, lam_obs_A,
-            )
-
-        # Guard against NaN peak_flam (all-NaN region).
-        if not np.isfinite(peak_flam) or peak_flam <= 0:
-            peak_flam = np.nanmedian(np.abs(flam[valid])) if np.any(valid) else 1.0
+            peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
 
         # Amplitude seed = peak × sqrt(2π) × σ (area under Gaussian).
         A_seed = max(peak_flam * _SQRT2PI * sig_seed, 1e-30)
