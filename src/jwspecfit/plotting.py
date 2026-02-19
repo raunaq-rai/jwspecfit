@@ -266,7 +266,7 @@ def plot_fit(
     if y_upper > y_lower:
         ax_main.set_ylim(y_lower, y_upper)
 
-    # Residual panel.
+    # Residual panel — x-range limited to the extent of the fitted lines.
     if show_residuals and ax_res is not None:
         ax_res.step(wave[show], resid[show], where="mid", color="0.3", lw=0.8)
         ax_res.axhline(0, color="C3", lw=0.8, ls="--")
@@ -277,6 +277,20 @@ def plot_fit(
         ax_res.set_ylabel("Residual")
         ax_res.set_xlabel(xlabel)
         ax_res.xaxis.set_major_formatter(sfmt)
+
+        # Clip x-range to the outermost fitted lines ± 5σ margin.
+        if len(result.line_names) > 0:
+            nL = len(result.line_names)
+            centroids_A = result.params[nL: 2 * nL]
+            sigmas_A = result.params[2 * nL: 3 * nL]
+            xlim_lo_A = np.min(centroids_A - 5 * sigmas_A)
+            xlim_hi_A = np.max(centroids_A + 5 * sigmas_A)
+            if wave_unit == "A":
+                ax_res.set_xlim(xlim_lo_A, xlim_hi_A)
+                ax_main.set_xlim(xlim_lo_A, xlim_hi_A)
+            else:
+                ax_res.set_xlim(xlim_lo_A * 1e-4, xlim_hi_A * 1e-4)
+                ax_main.set_xlim(xlim_lo_A * 1e-4, xlim_hi_A * 1e-4)
     else:
         ax_main.set_xlabel(xlabel)
 
