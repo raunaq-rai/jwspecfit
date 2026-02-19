@@ -325,6 +325,7 @@ def plot_fit_interactive(
     show_residuals: bool = True,
     y_pad: float = 1.3,
     exclude_wave_A: list[tuple[float, float]] | None = None,
+    rest_frame: bool = False,
 ) -> "go.Figure":
     """Interactive plotly plot of a spectral fit with zoom and hover.
 
@@ -344,6 +345,10 @@ def plot_fit_interactive(
         Multiplicative padding above tallest line (default 1.3).
     exclude_wave_A : list of (float, float), optional
         Wavelength ranges in Angstroms to hide from the plot.
+    rest_frame : bool
+        If ``True``, plot wavelengths in the rest frame by dividing by
+        ``(1 + z)`` using the redshift stored in the spectrum.  Default
+        ``False`` (observed frame).
 
     Returns
     -------
@@ -354,12 +359,18 @@ def plot_fit_interactive(
     from .io import _flam_to_ujy, _ujy_to_flam
 
     spec = result.spectrum
+
+    # Rest-frame scaling factor.
+    zp1 = 1.0
+    if rest_frame and spec.z is not None:
+        zp1 = 1.0 + spec.z
+
     if wave_unit == "A":
-        wave = spec.wave_A
-        xlabel = "Wavelength [Å]"
+        wave = spec.wave_A / zp1
+        xlabel = "Rest Wavelength [Å]" if rest_frame else "Wavelength [Å]"
     else:
-        wave = spec.wave_um
-        xlabel = "Wavelength [µm]"
+        wave = spec.wave_um / zp1
+        xlabel = "Rest Wavelength [µm]" if rest_frame else "Wavelength [µm]"
 
     use_flam = flux_unit.lower() == "flam"
 
@@ -462,8 +473,8 @@ def plot_fit_interactive(
                 gauss_plot = _flam_to_ujy(gauss_flam, wave_fine_um) + cont_fine_ujy
                 cont_fine = cont_fine_ujy
 
-            # Convert to the chosen wave unit.
-            wave_fine = wave_fine_A if wave_unit == "A" else wave_fine_um
+            # Convert to the chosen wave unit (with rest-frame scaling).
+            wave_fine = wave_fine_A / zp1 if wave_unit == "A" else wave_fine_um / zp1
 
             # Apply exclusion mask.
             keep_fine = _build_exclude_mask(wave_fine_A, exclude_wave_A)
