@@ -26,9 +26,16 @@ _LINE_WAVES: dict[str, float] = {
     name: wave for name, wave in REST_LINES_A.items()
 }
 
+# Balmer lines whose broad components should be summed with the narrow.
+_BALMER_LINES = {"Ha", "HBETA", "HGAMMA", "HDELTA"}
+
 
 def _extract_fluxes(result: Any) -> tuple[dict[str, float], dict[str, float], bool]:
     """Extract line fluxes and errors from any result type.
+
+    For Balmer lines (Ha, Hb, Hg, Hd), the broad component flux is
+    summed with the narrow component so that the total hydrogen flux
+    is used for the Balmer decrement and abundance calculations.
 
     Parameters
     ----------
@@ -45,24 +52,46 @@ def _extract_fluxes(result: Any) -> tuple[dict[str, float], dict[str, float], bo
     errors = {}
     is_mcmc = False
 
-    # All result types have a .lines dict with flux/flux_err attributes.
+    # First pass: extract narrow components.
     for name, lr in result.lines.items():
-        # Skip broad components — we only want narrow emission.
         if "_BROAD" in name:
             continue
         fluxes[name] = lr.flux
-        # MCMCLineResult has tuple flux_err; FitResult has scalar.
         if isinstance(lr.flux_err, tuple):
             errors[name] = 0.5 * (lr.flux_err[0] + lr.flux_err[1])
             is_mcmc = True
         else:
             errors[name] = lr.flux_err
 
+    # Second pass: add broad Balmer components to narrow totals.
+    for name, lr in result.lines.items():
+        if "_BROAD" not in name:
+            continue
+        base_name = name.replace("_BROAD", "")
+        if base_name not in _BALMER_LINES or base_name not in fluxes:
+            continue
+
+        broad_flux = lr.flux
+        if isinstance(lr.flux_err, tuple):
+            broad_err = 0.5 * (lr.flux_err[0] + lr.flux_err[1])
+        else:
+            broad_err = lr.flux_err
+
+        fluxes[base_name] += broad_flux
+        errors[base_name] = np.sqrt(errors[base_name] ** 2 + broad_err ** 2)
+        logger.info(
+            "Added broad component to %s: narrow+broad total = %.4e",
+            base_name, fluxes[base_name],
+        )
+
     return fluxes, errors, is_mcmc
 
 
 def _extract_posteriors(result: Any) -> dict[str, np.ndarray]:
     """Extract flux posteriors from an MCMC result.
+
+    For Balmer lines, broad component posteriors are summed with
+    narrow posteriors sample-by-sample.
 
     Parameters
     ----------
@@ -80,6 +109,17 @@ def _extract_posteriors(result: Any) -> dict[str, np.ndarray]:
             continue
         if hasattr(lr, "flux_posterior") and lr.flux_posterior is not None:
             posteriors[name] = lr.flux_posterior
+
+    # Add broad Balmer posteriors sample-by-sample.
+    for name, lr in result.lines.items():
+        if "_BROAD" not in name:
+            continue
+        base_name = name.replace("_BROAD", "")
+        if base_name not in _BALMER_LINES or base_name not in posteriors:
+            continue
+        if hasattr(lr, "flux_posterior") and lr.flux_posterior is not None:
+            posteriors[base_name] = posteriors[base_name] + lr.flux_posterior
+
     return posteriors
 
 
