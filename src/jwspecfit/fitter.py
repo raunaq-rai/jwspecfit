@@ -312,10 +312,22 @@ def fit_lines(
         # Find peak flux near the line for amplitude seeding.
         near = np.abs(spec.wave_A - lam_obs_A)
         idx_near = np.where(near < 5 * sig_seed)[0]
-        if len(idx_near) > 0:
-            peak_flam = np.nanmax(flam[idx_near])
+        # Only consider valid (non-NaN) pixels near the line.
+        idx_near_valid = idx_near[valid[idx_near]] if len(idx_near) > 0 else idx_near
+        if len(idx_near_valid) > 0:
+            peak_flam = np.nanmax(flam[idx_near_valid])
         else:
-            peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
+            # Line falls in a detector gap or NaN region — use global median
+            # as a conservative fallback so bounds remain finite.
+            peak_flam = np.nanmedian(np.abs(flam[valid])) if np.any(valid) else 1.0
+            logger.debug(
+                "Line %s at %.1f A falls in a gap; using fallback amplitude seed.",
+                name, lam_obs_A,
+            )
+
+        # Guard against NaN peak_flam (all-NaN region).
+        if not np.isfinite(peak_flam) or peak_flam <= 0:
+            peak_flam = np.nanmedian(np.abs(flam[valid])) if np.any(valid) else 1.0
 
         # Amplitude seed = peak × sqrt(2π) × σ (area under Gaussian).
         A_seed = max(peak_flam * _SQRT2PI * sig_seed, 1e-30)
