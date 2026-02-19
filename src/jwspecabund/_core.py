@@ -1,0 +1,592 @@
+"""Main orchestrator for abundance calculations.
+
+:func:`compute_abundances` accepts a fit result from ``jwspecfit``
+or ``jwspecmcmc`` and returns an :class:`AbundanceResult` with
+chemical abundances derived via the direct T_e method or strong-line
+calibrations.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+import numpy as np
+
+from jwspecfit.fitter import FitResult
+from jwspecfit.lines import REST_LINES_A
+
+from .dust import compute_Av_from_balmer, dust_correct_fluxes
+from .result import AbundanceResult
+
+logger = logging.getLogger(__name__)
+
+# Line name to rest wavelength mapping for dust correction.
+_LINE_WAVES: dict[str, float] = {
+    name: wave for name, wave in REST_LINES_A.items()
+}
+
+
+def _extract_fluxes(result: Any) -> tuple[dict[str, float], dict[str, float], bool]:
+    """Extract line fluxes and errors from any result type.
+
+    Parameters
+    ----------
+    result : FitResult | BroadFitResult | MCMCResult | MCMCBroadFitResult
+        A fitting result object.
+
+    Returns
+    -------
+    tuple
+        ``(fluxes, errors, is_mcmc)`` where fluxes and errors are
+        dicts keyed by line name.
+    """
+    fluxes = {}
+    errors = {}
+    is_mcmc = False
+
+    # All result types have a .lines dict with flux/flux_err attributes.
+    for name, lr in result.lines.items():
+        # Skip broad components — we only want narrow emission.
+        if "_BROAD" in name:
+            continue
+        fluxes[name] = lr.flux
+        # MCMCLineResult has tuple flux_err; FitResult has scalar.
+        if isinstance(lr.flux_err, tuple):
+            errors[name] = 0.5 * (lr.flux_err[0] + lr.flux_err[1])
+            is_mcmc = True
+        else:
+            errors[name] = lr.flux_err
+
+    return fluxes, errors, is_mcmc
+
+
+def _extract_posteriors(result: Any) -> dict[str, np.ndarray]:
+    """Extract flux posteriors from an MCMC result.
+
+    Parameters
+    ----------
+    result : MCMCResult | MCMCBroadFitResult
+        An MCMC fitting result.
+
+    Returns
+    -------
+    dict
+        ``{line_name: flux_posterior_array}``.
+    """
+    posteriors = {}
+    for name, lr in result.lines.items():
+        if "_BROAD" in name:
+            continue
+        if hasattr(lr, "flux_posterior") and lr.flux_posterior is not None:
+            posteriors[name] = lr.flux_posterior
+    return posteriors
+
+
+def _apply_dust_correction(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    Av: float,
+    law: str,
+    **dust_kwargs,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Apply dust correction to fluxes and errors.
+
+    Parameters
+    ----------
+    fluxes : dict
+        ``{line_name: flux}``.
+    errors : dict
+        ``{line_name: flux_err}``.
+    Av : float
+        V-band attenuation.
+    law : str
+        Dust law name.
+    **dust_kwargs
+        Extra keyword arguments for the dust law.
+
+    Returns
+    -------
+    tuple
+        ``(corrected_fluxes, corrected_errors)``.
+    """
+    # Build input dict for dust_correct_fluxes: {name: (flux, err, wave)}
+    line_data = {}
+    for name in fluxes:
+        wave = _LINE_WAVES.get(name)
+        if wave is None:
+            logger.warning("No rest wavelength for %s; skipping dust correction.", name)
+            continue
+        line_data[name] = (fluxes[name], errors[name], wave)
+
+    corrected = dust_correct_fluxes(line_data, Av, law=law, **dust_kwargs)
+
+    corr_fluxes = {}
+    corr_errors = {}
+    for name in fluxes:
+        if name in corrected:
+            corr_fluxes[name] = corrected[name][0]
+            corr_errors[name] = corrected[name][1]
+        else:
+            corr_fluxes[name] = fluxes[name]
+            corr_errors[name] = errors[name]
+
+    return corr_fluxes, corr_errors
+
+
+def _run_direct(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    Te_relation: str,
+    n_mc: int,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Run the direct T_e method.
+
+    Parameters
+    ----------
+    fluxes : dict
+        Dust-corrected fluxes.
+    errors : dict
+        Dust-corrected errors.
+    Te_relation : str
+        T_e-T_e relation (``"desi"`` or ``"classical"``).
+    n_mc : int
+        Number of MC iterations for error propagation.
+    seed : int
+        Random seed.
+
+    Returns
+    -------
+    dict
+        Keys: OH, OH_err, NO, NO_err, Te_high, Te_low, ne, ionic, etc.
+    """
+    from .direct import (
+        Te_low_from_high,
+        compute_ionic_abundances,
+        compute_ne,
+        compute_Te_OIII,
+        compute_total_abundances,
+    )
+
+    # --- Electron density ---
+    ne = 100.0  # default
+    if "SII_6718" in fluxes and "SII_6732" in fluxes:
+        try:
+            ne = compute_ne(fluxes["SII_6718"], fluxes["SII_6732"], doublet="SII")
+        except Exception:
+            logger.warning("n_e computation failed; using 100 cm^-3.")
+    elif "OII_3726" in fluxes and "OII_3729" in fluxes:
+        try:
+            ne = compute_ne(fluxes["OII_3726"], fluxes["OII_3729"], doublet="OII")
+        except Exception:
+            logger.warning("n_e computation failed; using 100 cm^-3.")
+
+    # --- Electron temperature ---
+    Te_high = compute_Te_OIII(
+        fluxes["OIII_4363"], fluxes["OIII_5007"], fluxes["OIII_4959"], ne
+    )
+    Te_low = Te_low_from_high(Te_high, relation=Te_relation)
+
+    # --- Ionic abundances ---
+    ionic = compute_ionic_abundances(fluxes, Te_high, Te_low, ne)
+    totals = compute_total_abundances(ionic)
+
+    OH = totals.get("O/H", np.nan)
+    if np.isfinite(OH) and OH > 0:
+        OH_12 = 12.0 + np.log10(OH)
+    else:
+        OH_12 = np.nan
+
+    NO = totals.get("N/O")
+    NO_log = np.log10(NO) if NO is not None and NO > 0 else None
+
+    SO = totals.get("S/O")
+    SO_log = np.log10(SO) if SO is not None and SO > 0 else None
+
+    NeO = totals.get("Ne/O")
+    NeO_log = np.log10(NeO) if NeO is not None and NeO > 0 else None
+
+    ArO = totals.get("Ar/O")
+    ArO_log = np.log10(ArO) if ArO is not None and ArO > 0 else None
+
+    # --- MC error propagation ---
+    rng = np.random.default_rng(seed)
+    OH_mc = []
+    NO_mc = []
+
+    for _ in range(n_mc):
+        mc_fluxes = {}
+        for name in fluxes:
+            mc_fluxes[name] = rng.normal(fluxes[name], errors.get(name, 0.0))
+            mc_fluxes[name] = max(mc_fluxes[name], 1e-50)
+
+        try:
+            ne_mc = ne  # keep ne fixed (density insensitive at typical values)
+            Te_h = compute_Te_OIII(
+                mc_fluxes.get("OIII_4363", 0),
+                mc_fluxes.get("OIII_5007", 0),
+                mc_fluxes.get("OIII_4959", 0),
+                ne_mc,
+            )
+            Te_l = Te_low_from_high(Te_h, relation=Te_relation)
+            ionic_mc = compute_ionic_abundances(mc_fluxes, Te_h, Te_l, ne_mc)
+            totals_mc = compute_total_abundances(ionic_mc)
+
+            oh_mc = totals_mc.get("O/H", np.nan)
+            if np.isfinite(oh_mc) and oh_mc > 0:
+                OH_mc.append(12.0 + np.log10(oh_mc))
+            else:
+                OH_mc.append(np.nan)
+
+            no_mc = totals_mc.get("N/O", np.nan)
+            if no_mc is not None and np.isfinite(no_mc) and no_mc > 0:
+                NO_mc.append(np.log10(no_mc))
+            else:
+                NO_mc.append(np.nan)
+        except (ValueError, RuntimeError):
+            OH_mc.append(np.nan)
+            NO_mc.append(np.nan)
+
+    OH_mc = np.array(OH_mc)
+    NO_mc = np.array(NO_mc)
+
+    OH_err = float(np.nanstd(OH_mc)) if np.any(np.isfinite(OH_mc)) else np.nan
+    NO_err = float(np.nanstd(NO_mc)) if np.any(np.isfinite(NO_mc)) else None
+
+    return {
+        "OH": OH_12,
+        "OH_err": OH_err,
+        "NO": NO_log,
+        "NO_err": NO_err,
+        "Te_high": Te_high,
+        "Te_low": Te_low,
+        "ne": ne,
+        "ionic": ionic,
+        "OH_posterior": OH_mc,
+        "NO_posterior": NO_mc,
+        "SO": SO_log,
+        "NeO": NeO_log,
+        "ArO": ArO_log,
+    }
+
+
+def _run_direct_mcmc(
+    posteriors: dict[str, np.ndarray],
+    Te_relation: str,
+) -> dict[str, Any]:
+    """Run the direct T_e method on MCMC posterior samples.
+
+    Propagates each posterior sample through PyNEB to build
+    the full abundance posterior.
+
+    Parameters
+    ----------
+    posteriors : dict
+        ``{line_name: flux_posterior_array}``.
+    Te_relation : str
+        T_e-T_e relation.
+
+    Returns
+    -------
+    dict
+        Same keys as :func:`_run_direct`.
+    """
+    from .direct import (
+        Te_low_from_high,
+        compute_ionic_abundances,
+        compute_ne,
+        compute_Te_OIII,
+        compute_total_abundances,
+    )
+
+    # Determine number of samples from any available posterior.
+    n_samples = min(len(v) for v in posteriors.values())
+
+    OH_post = np.full(n_samples, np.nan)
+    NO_post = np.full(n_samples, np.nan)
+
+    # Compute medians for the point estimate.
+    med_fluxes = {name: float(np.median(post)) for name, post in posteriors.items()}
+
+    ne_default = 100.0
+    if "SII_6718" in med_fluxes and "SII_6732" in med_fluxes:
+        try:
+            ne_default = compute_ne(med_fluxes["SII_6718"], med_fluxes["SII_6732"])
+        except Exception:
+            pass
+
+    for i in range(n_samples):
+        sample = {name: max(float(post[i]), 1e-50) for name, post in posteriors.items()}
+        try:
+            ne_i = ne_default  # keep ne fixed for speed
+            Te_h = compute_Te_OIII(
+                sample.get("OIII_4363", 0),
+                sample.get("OIII_5007", 0),
+                sample.get("OIII_4959", 0),
+                ne_i,
+            )
+            Te_l = Te_low_from_high(Te_h, relation=Te_relation)
+            ionic = compute_ionic_abundances(sample, Te_h, Te_l, ne_i)
+            totals = compute_total_abundances(ionic)
+
+            oh = totals.get("O/H", np.nan)
+            if np.isfinite(oh) and oh > 0:
+                OH_post[i] = 12.0 + np.log10(oh)
+
+            no = totals.get("N/O", np.nan)
+            if no is not None and np.isfinite(no) and no > 0:
+                NO_post[i] = np.log10(no)
+        except (ValueError, RuntimeError):
+            continue
+
+    # Point estimates from medians.
+    OH_med = float(np.nanmedian(OH_post))
+    OH_lo = float(OH_med - np.nanpercentile(OH_post, 16))
+    OH_hi = float(np.nanpercentile(OH_post, 84) - OH_med)
+    NO_med = float(np.nanmedian(NO_post)) if np.any(np.isfinite(NO_post)) else None
+    NO_lo = NO_hi = None
+    if NO_med is not None:
+        NO_lo = float(NO_med - np.nanpercentile(NO_post, 16))
+        NO_hi = float(np.nanpercentile(NO_post, 84) - NO_med)
+
+    # Compute Te, ne, ionic from median fluxes for point estimate.
+    try:
+        Te_high = compute_Te_OIII(
+            med_fluxes.get("OIII_4363", 0),
+            med_fluxes.get("OIII_5007", 0),
+            med_fluxes.get("OIII_4959", 0),
+            ne_default,
+        )
+    except ValueError:
+        Te_high = np.nan
+    Te_low = Te_low_from_high(Te_high) if np.isfinite(Te_high) else np.nan
+    ionic = compute_ionic_abundances(med_fluxes, Te_high, Te_low, ne_default) if np.isfinite(Te_high) else {}
+    totals = compute_total_abundances(ionic) if ionic else {}
+
+    return {
+        "OH": OH_med,
+        "OH_err": (OH_lo, OH_hi),
+        "NO": NO_med,
+        "NO_err": (NO_lo, NO_hi) if NO_lo is not None else None,
+        "Te_high": Te_high if np.isfinite(Te_high) else None,
+        "Te_low": Te_low if np.isfinite(Te_low) else None,
+        "ne": ne_default,
+        "ionic": ionic if ionic else None,
+        "OH_posterior": OH_post,
+        "NO_posterior": NO_post if np.any(np.isfinite(NO_post)) else None,
+        "SO": np.log10(totals["S/O"]) if "S/O" in totals and totals["S/O"] > 0 else None,
+        "NeO": np.log10(totals["Ne/O"]) if "Ne/O" in totals and totals["Ne/O"] > 0 else None,
+        "ArO": np.log10(totals["Ar/O"]) if "Ar/O" in totals and totals["Ar/O"] > 0 else None,
+    }
+
+
+def compute_abundances(
+    result: Any,
+    z: float,
+    *,
+    dust_correct: bool = True,
+    dust_law: str = "salim",
+    Av: float | None = None,
+    method: str = "auto",
+    snr_auroral: float = 3.0,
+    n_mc: int = 1000,
+    Te_relation: str = "desi",
+    Rv: float = 3.15,
+    delta: float = -0.35,
+    B_bump: float = 2.27,
+) -> AbundanceResult:
+    """Compute chemical abundances from a fitting result.
+
+    Parameters
+    ----------
+    result : FitResult | BroadFitResult | MCMCResult | MCMCBroadFitResult
+        Emission-line fitting result from ``jwspecfit`` or ``jwspecmcmc``.
+    z : float
+        Source redshift.
+    dust_correct : bool
+        Whether to apply dust correction (default ``True``).
+    dust_law : str
+        ``"salim"`` (default) or ``"cardelli"``.
+    Av : float or None
+        V-band attenuation. If ``None``, derived from Balmer decrement.
+    method : str
+        ``"auto"`` (default), ``"direct"``, or ``"strong_line"``.
+        ``"auto"`` uses direct if [OIII] 4363 SNR >= *snr_auroral*.
+    snr_auroral : float
+        Minimum SNR for [OIII] 4363 to use the direct method (default 3.0).
+    n_mc : int
+        Monte Carlo iterations for error propagation (default 1000).
+    Te_relation : str
+        T_e-T_e relation: ``"desi"`` (default) or ``"classical"``.
+    Rv : float
+        Total-to-selective ratio for Salim law (default 3.15).
+    delta : float
+        Slope deviation for Salim law (default -0.35).
+    B_bump : float
+        UV bump strength for Salim law (default 2.27).
+
+    Returns
+    -------
+    AbundanceResult
+        Chemical abundance measurement.
+    """
+    # --- Extract fluxes ---
+    fluxes, errors, is_mcmc = _extract_fluxes(result)
+    posteriors = _extract_posteriors(result) if is_mcmc else {}
+
+    # --- Dust correction ---
+    dust_kwargs = {}
+    if dust_law == "salim":
+        dust_kwargs = {"Rv": Rv, "delta": delta, "B": B_bump}
+
+    Av_derived = None
+    if dust_correct:
+        if Av is None:
+            # Derive A_V from Balmer decrement (Ha/Hb preferred, Hg/Hb fallback).
+            if "Ha" in fluxes and "HBETA" in fluxes and fluxes["Ha"] > 0 and fluxes["HBETA"] > 0:
+                Av_val, Av_err = compute_Av_from_balmer(
+                    fluxes["Ha"], fluxes["HBETA"],
+                    errors["Ha"], errors["HBETA"],
+                    law=dust_law,
+                    intrinsic_ratio=2.86,
+                    wave_num_A=REST_LINES_A.get("Ha", 6564.61),
+                    wave_den_A=REST_LINES_A.get("HBETA", 4862.68),
+                    **dust_kwargs,
+                )
+                Av_derived = Av_val
+                logger.info("A_V from Ha/Hb = %.3f +/- %.3f", Av_val, Av_err)
+            elif "HGAMMA" in fluxes and "HBETA" in fluxes and fluxes["HGAMMA"] > 0 and fluxes["HBETA"] > 0:
+                Av_val, Av_err = compute_Av_from_balmer(
+                    fluxes["HGAMMA"], fluxes["HBETA"],
+                    errors["HGAMMA"], errors["HBETA"],
+                    law=dust_law,
+                    intrinsic_ratio=0.468,
+                    wave_num_A=REST_LINES_A.get("HGAMMA", 4341.68),
+                    wave_den_A=REST_LINES_A.get("HBETA", 4862.68),
+                    **dust_kwargs,
+                )
+                Av_derived = Av_val
+                logger.info("A_V from Hg/Hb = %.3f +/- %.3f", Av_val, Av_err)
+            else:
+                Av_derived = 0.0
+                logger.info("No Balmer pair available for A_V; assuming A_V=0.")
+        else:
+            Av_derived = Av
+
+        if Av_derived > 0:
+            fluxes, errors = _apply_dust_correction(
+                fluxes, errors, Av_derived, dust_law, **dust_kwargs
+            )
+            # Also correct posteriors if available.
+            if posteriors:
+                for name in list(posteriors.keys()):
+                    wave = _LINE_WAVES.get(name)
+                    if wave is None:
+                        continue
+                    from .dust import salim_attenuation, cardelli_extinction
+                    wave_arr = np.array([wave])
+                    if dust_law == "salim":
+                        A_lam = salim_attenuation(wave_arr, Av_derived, **dust_kwargs)[0]
+                    else:
+                        A_lam = cardelli_extinction(wave_arr, Av_derived)[0]
+                    posteriors[name] = posteriors[name] * 10.0 ** (0.4 * A_lam)
+    else:
+        Av_derived = Av  # store for the result even if not applied
+
+    # --- Method selection ---
+    use_direct = False
+    if method == "direct":
+        use_direct = True
+    elif method == "auto":
+        # Check if [OIII] 4363 has sufficient SNR.
+        if "OIII_4363" in fluxes and "OIII_4363" in errors:
+            snr_4363 = fluxes["OIII_4363"] / errors["OIII_4363"] if errors["OIII_4363"] > 0 else 0.0
+            if snr_4363 >= snr_auroral:
+                use_direct = True
+                logger.info("[OIII] 4363 SNR=%.1f >= %.1f; using direct method.", snr_4363, snr_auroral)
+            else:
+                logger.info("[OIII] 4363 SNR=%.1f < %.1f; using strong-line method.", snr_4363, snr_auroral)
+        else:
+            logger.info("[OIII] 4363 not detected; using strong-line method.")
+    elif method != "strong_line":
+        raise ValueError(f"Unknown method: {method!r}. Use 'auto', 'direct', or 'strong_line'.")
+
+    # --- Direct method ---
+    if use_direct:
+        if is_mcmc and posteriors and "OIII_4363" in posteriors:
+            direct_out = _run_direct_mcmc(posteriors, Te_relation)
+        else:
+            direct_out = _run_direct(fluxes, errors, Te_relation, n_mc)
+
+        return AbundanceResult(
+            method="direct",
+            OH=direct_out["OH"],
+            OH_err=direct_out["OH_err"],
+            NO=direct_out.get("NO"),
+            NO_err=direct_out.get("NO_err"),
+            Te_high=direct_out.get("Te_high"),
+            Te_low=direct_out.get("Te_low"),
+            ne=direct_out.get("ne"),
+            Av=Av_derived,
+            ionic=direct_out.get("ionic"),
+            OH_posterior=direct_out.get("OH_posterior"),
+            NO_posterior=direct_out.get("NO_posterior"),
+            SO=direct_out.get("SO"),
+            NeO=direct_out.get("NeO"),
+            ArO=direct_out.get("ArO"),
+        )
+
+    # --- Strong-line method ---
+    from .strong_line import sanders25_metallicity
+
+    if is_mcmc and posteriors:
+        # Run Sanders+25 on each posterior sample.
+        n_samples = min(len(v) for v in posteriors.values())
+        OH_post = np.full(n_samples, np.nan)
+        sample_fluxes = {name: posteriors[name] for name in posteriors}
+        sample_errors = {name: 0.0 for name in posteriors}  # no additional MC needed
+
+        for i in range(n_samples):
+            samp = {name: max(float(arr[i]), 1e-50) for name, arr in sample_fluxes.items()}
+            try:
+                Z_i, _, _, _, _, _ = sanders25_metallicity(
+                    samp, sample_errors, n_mc=0, snr_thresh=0.0,
+                )
+                OH_post[i] = Z_i
+            except ValueError:
+                continue
+
+        OH_med = float(np.nanmedian(OH_post))
+        OH_lo = float(OH_med - np.nanpercentile(OH_post, 16))
+        OH_hi = float(np.nanpercentile(OH_post, 84) - OH_med)
+
+        # Determine ratios used from median fluxes.
+        from .strong_line import compute_line_ratios
+        med_fluxes = {name: float(np.median(arr)) for name, arr in posteriors.items()}
+        med_errors = {name: float(np.std(arr)) for name, arr in posteriors.items()}
+        ratios = compute_line_ratios(med_fluxes, med_errors)
+
+        return AbundanceResult(
+            method="strong_line",
+            OH=OH_med,
+            OH_err=(OH_lo, OH_hi),
+            Av=Av_derived,
+            OH_posterior=OH_post,
+            ratios_used=list(ratios.keys()),
+        )
+
+    # LS result: use MC within sanders25_metallicity.
+    Z_best, Z_lo, Z_hi, chi2, ratios_used, Z_mc = sanders25_metallicity(
+        fluxes, errors, n_mc=n_mc,
+    )
+
+    return AbundanceResult(
+        method="strong_line",
+        OH=Z_best,
+        OH_err=(Z_best - Z_lo, Z_hi - Z_best),
+        Av=Av_derived,
+        chi2=chi2,
+        ratios_used=ratios_used,
+        OH_posterior=Z_mc,
+    )

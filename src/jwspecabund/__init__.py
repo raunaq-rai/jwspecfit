@@ -1,0 +1,68 @@
+"""jwspecabund — Chemical abundance calculations for JWST spectra.
+
+Computes oxygen abundances (O/H), nitrogen-to-oxygen ratios (N/O),
+and other element ratios from emission-line fluxes produced by
+``jwspecfit`` or ``jwspecmcmc``.
+
+Two pathways are supported:
+
+1. **Direct T_e method** — when auroral lines (e.g. [OIII] 4363) are
+   detected, uses PyNEB for electron temperature / density diagnostics
+   and ionic abundance calculations.
+
+2. **Strong-line calibrations** — Sanders et al. (2025) simultaneous
+   polynomial fit across O3, O2, R23, O32 diagnostics.
+
+Example
+-------
+>>> import jwspecfit, jwspecabund
+>>> spec = jwspecfit.read_fits("spectrum.fits")
+>>> result = jwspecfit.fit_lines(spec, z=6.0)
+>>> abund = jwspecabund.compute_abundances(result, z=6.0)
+>>> print(abund.OH)          # 12 + log(O/H)
+>>> print(abund.method)      # "direct" or "strong_line"
+"""
+
+from __future__ import annotations
+
+__version__ = "0.1.0"
+
+from ._core import compute_abundances
+from .direct import (
+    Te_low_from_high,
+    compute_ionic_abundances,
+    compute_ne,
+    compute_Te_NII,
+    compute_Te_OIII,
+    compute_total_abundances,
+)
+from .dust import (
+    cardelli_extinction,
+    compute_Av_from_balmer,
+    dust_correct_fluxes,
+    salim_attenuation,
+)
+from .icf import icf_argon, icf_neon, icf_nitrogen, icf_sulfur
+from .result import AbundanceResult
+from .strong_line import compute_line_ratios, sanders25_metallicity
+
+__all__ = [
+    "AbundanceResult",
+    "Te_low_from_high",
+    "cardelli_extinction",
+    "compute_abundances",
+    "compute_Av_from_balmer",
+    "compute_ionic_abundances",
+    "compute_line_ratios",
+    "compute_ne",
+    "compute_Te_NII",
+    "compute_Te_OIII",
+    "compute_total_abundances",
+    "dust_correct_fluxes",
+    "icf_argon",
+    "icf_neon",
+    "icf_nitrogen",
+    "icf_sulfur",
+    "salim_attenuation",
+    "sanders25_metallicity",
+]
