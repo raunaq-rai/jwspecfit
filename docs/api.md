@@ -335,7 +335,8 @@ Sources: NIST ASD, Morton (2003), Storey & Zeippen (2000).
 | `CIV_2` | 1550.772 |
 | `CIV_doublet` | 1549.48 |
 | `HEII_1640` | 1640.42 |
-| `OIII_1663` | 1663.48 |
+| `OIII_1661` | 1660.81 |
+| `OIII_1666` | 1666.15 |
 | `SiIII_1` | 1882.71 |
 | `SiIII_2` | 1892.03 |
 | `CIII]` | 1908.734 |

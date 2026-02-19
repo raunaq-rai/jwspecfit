@@ -89,7 +89,8 @@ _LINE_COMPONENTS: dict[str, list[tuple[str, int, int]]] = {
     "CIV_1":       [("C", 4, 1548)],
     "CIV_2":       [("C", 4, 1551)],
     "CIV_doublet": [("C", 4, 1548), ("C", 4, 1551)],
-    "OIII_1663":   [("O", 3, 1663)],
+    "OIII_1661":   [("O", 3, 1661)],
+    "OIII_1666":   [("O", 3, 1666)],
 }
 
 # Maps (element, ion_stage) -> parameter name for ionic abundance.

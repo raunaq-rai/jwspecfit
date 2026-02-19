@@ -49,6 +49,7 @@ def plot_fit(
     label_lines: bool = True,
     y_pad: float = 1.3,
     exclude_wave_A: list[tuple[float, float]] | None = None,
+    rest_frame: bool = False,
     save_path: str | None = None,
 ) -> "Figure":
     """Plot a spectral fit with data, model, continuum, and residuals.
@@ -79,6 +80,10 @@ def plot_fit(
     exclude_wave_A : list of (float, float), optional
         Wavelength ranges in Angstroms to hide from the plot.  Each tuple
         is ``(lo, hi)``.  Useful for masking noisy detector regions.
+    rest_frame : bool
+        If ``True``, plot wavelengths in the rest frame by dividing by
+        ``(1 + z)`` using the redshift stored in the spectrum.  Default
+        ``False`` (observed frame).
     save_path : str, optional
         If given, save the figure to this file path (e.g. ``"fit.pdf"``).
 
@@ -93,12 +98,17 @@ def plot_fit(
 
     spec = result.spectrum
 
+    # Rest-frame scaling factor.
+    zp1 = 1.0
+    if rest_frame and spec.z is not None:
+        zp1 = 1.0 + spec.z
+
     if wave_unit == "A":
-        wave = spec.wave_A
-        xlabel = r"Wavelength [$\mathrm{\AA}$]"
+        wave = spec.wave_A / zp1
+        xlabel = r"Rest Wavelength [$\mathrm{\AA}$]" if rest_frame else r"Wavelength [$\mathrm{\AA}$]"
     else:
-        wave = spec.wave_um
-        xlabel = r"Wavelength [$\mu$m]"
+        wave = spec.wave_um / zp1
+        xlabel = r"Rest Wavelength [$\mu$m]" if rest_frame else r"Wavelength [$\mu$m]"
 
     use_flam = flux_unit.lower() == "flam"
 
@@ -215,12 +225,13 @@ def plot_fit(
                 )
 
             if label_lines:
-                centroid_A = result.params[nL + i]
+                centroid_obs_A = result.params[nL + i]
+                centroid_A = centroid_obs_A / zp1
                 if wave_unit == "A":
                     x_label = centroid_A
                 else:
                     x_label = centroid_A * 1e-4
-                y_label = comp_plot[np.argmin(np.abs(spec.wave_A - centroid_A))]
+                y_label = comp_plot[np.argmin(np.abs(spec.wave_A - centroid_obs_A))]
                 display_name = name.replace("_", " ")
                 ax_main.annotate(
                     display_name,
@@ -281,8 +292,8 @@ def plot_fit(
         # Clip x-range to the outermost fitted lines ± 5σ margin.
         if len(result.line_names) > 0:
             nL = len(result.line_names)
-            centroids_A = result.params[nL: 2 * nL]
-            sigmas_A = result.params[2 * nL: 3 * nL]
+            centroids_A = result.params[nL: 2 * nL] / zp1
+            sigmas_A = result.params[2 * nL: 3 * nL] / zp1
             xlim_lo_A = np.min(centroids_A - 5 * sigmas_A)
             xlim_hi_A = np.max(centroids_A + 5 * sigmas_A)
             if wave_unit == "A":
