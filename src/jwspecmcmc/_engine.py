@@ -268,9 +268,22 @@ def _fit_lines_mcmc(
             deg=deg, n_boot=0, clip_sigma=clip_sigma,
         )
         if mle_result.success:
-            p0_free = mle_result.params[free_mask]
+            # Map MLE params back by line name — the MLE fit may have
+            # fewer lines (e.g. detector-gap filtering drops some).
+            nL_mle = len(mle_result.line_names)
+            mle_idx = {n: j for j, n in enumerate(mle_result.line_names)}
+            for i, name in enumerate(line_names):
+                if name in mle_idx:
+                    j = mle_idx[name]
+                    p0[i] = mle_result.params[j]                       # amplitude
+                    p0[nL + i] = mle_result.params[nL_mle + j]         # centroid
+                    p0[2 * nL + i] = mle_result.params[2 * nL_mle + j] # sigma
+            p0_free = p0[free_mask]
             p0_free = np.clip(p0_free, lb_free + 1e-30, ub_free - 1e-30)
-            logger.info("MLE initialisation successful (chi2=%.2f).", mle_result.chi2)
+            logger.info(
+                "MLE initialisation successful (chi2=%.2f, %d/%d lines matched).",
+                mle_result.chi2, len(mle_idx), nL,
+            )
         else:
             logger.warning("MLE fit did not converge; using default initialisation.")
 
