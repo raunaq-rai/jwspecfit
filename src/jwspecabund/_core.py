@@ -695,7 +695,7 @@ def compute_abundances(
             samp = {name: max(float(arr[i]), 1e-50) for name, arr in sample_fluxes.items()}
             try:
                 Z_i, _, _, _, _, _ = sanders25_metallicity(
-                    samp, sample_errors, n_mc=0, snr_thresh=0.0,
+                    samp, sample_errors, n_mc=0, snr_thresh=-np.inf,
                 )
                 OH_post[i] = Z_i
             except ValueError:
