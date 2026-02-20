@@ -23,25 +23,42 @@ Z_REF = 8.0
 Z_MIN = 6.5
 Z_MAX = 9.0
 
-# Sanders+25 calibration coefficients and intrinsic scatter.
+# Sanders+25 calibration coefficients and scatter (Table 3).
+#   sigma_R_fit  — rms residual of the polynomial fit (σ_{R,fit})
+#   sigma_R_int  — intrinsic scatter in the ratio at fixed Z (σ_{R,int})
+#   sigma_OH_int — intrinsic scatter in 12+log(O/H) at fixed R (σ_{O/H,int})
+#   sigma_cal    — total ratio-space scatter = sqrt(σ_{R,fit}² + σ_{R,int}²),
+#                  used in the chi-squared denominator
 CALIBRATIONS: dict[str, dict] = {
     "O3": {
         "coeffs": [0.852, -0.162, -1.149, -0.553],
+        "sigma_R_fit": 0.04,
+        "sigma_R_int": 0.13,
+        "sigma_OH_int": 0.14,
         "sigma_cal": float(np.sqrt(0.04**2 + 0.13**2)),
         "lines": ["OIII_5007", "HBETA"],
     },
     "O2": {
         "coeffs": [0.172, 0.954, -0.832],
+        "sigma_R_fit": 0.03,
+        "sigma_R_int": 0.25,
+        "sigma_OH_int": 0.22,
         "sigma_cal": float(np.sqrt(0.03**2 + 0.25**2)),
         "lines": ["OII_doublet", "HBETA"],
     },
     "R23": {
         "coeffs": [0.998, 0.053, -0.141, -0.493, -0.774],
+        "sigma_R_fit": 0.03,
+        "sigma_R_int": 0.07,
+        "sigma_OH_int": 0.13,
         "sigma_cal": float(np.sqrt(0.03**2 + 0.07**2)),
         "lines": ["OIII_5007", "OII_doublet", "HBETA"],
     },
     "O32": {
         "coeffs": [0.697, -1.245, -0.869],
+        "sigma_R_fit": 0.09,
+        "sigma_R_int": 0.29,
+        "sigma_OH_int": 0.25,
         "sigma_cal": float(np.sqrt(0.09**2 + 0.29**2)),
         "lines": ["OIII_5007", "OII_doublet"],
     },
