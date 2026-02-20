@@ -647,7 +647,11 @@ def plot_fit_interactive(
         fig.update_xaxes(title_text=xlabel, exponentformat="none", row=2, col=1)
         fig.update_xaxes(exponentformat="none", row=1, col=1)
         fig.update_yaxes(title_text=ylabel, range=[y_lower, y_upper], row=1, col=1)
-        fig.update_yaxes(title_text="Residual", row=2, col=1)
+        # Clip residual y-axis to ±5× median error so noise spikes
+        # don't dominate the panel height.
+        med_err = float(np.nanmedian(err[show])) if np.any(show) else 1.0
+        res_ylim = 5.0 * med_err
+        fig.update_yaxes(title_text="Residual", range=[-res_ylim, res_ylim], row=2, col=1)
     else:
         fig.update_layout(
             title=title,
