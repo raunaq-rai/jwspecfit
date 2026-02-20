@@ -93,7 +93,6 @@ _PRISM_LINES = [
     "CIV_doublet",
     "HEII_1640",
     "NIII_doublet",
-    "SiIII_2",          # SiIII_1/2 blended at prism R; keep brighter 1892
     "CIII]",
     # Semi-forbidden / weak UV
     "OIII]_2331",       # OIII]_2321/2331 blended at prism R; keep brighter 2331
