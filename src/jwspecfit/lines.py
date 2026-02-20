@@ -64,19 +64,14 @@ REST_LINES_A: dict[str, float] = {
     "SII_6718": 6720.149693980653,
     "SII_6732": 6734.532561984591,
     # Blue diagnostic lines (4500–4750 Å region)
-    "FeII_4584": 4585.12,    # TODO: verify vacuum wavelength (air 4583.837)
-    "NIII_4642": 4643.15,    # TODO: verify vacuum wavelength (air 4641.85)
-    "FeIII_4660": 4659.35,   # TODO: verify vacuum wavelength (air 4658.05)
-    "HeII_4687": 4687.02,    # TODO: verify vacuum wavelength (air 4685.710)
-    "ArIV_4713": 4712.58,    # TODO: verify vacuum wavelength (air 4711.26); blended with HeI 4713
-    "FeII_4732": 4732.76,    # TODO: verify vacuum wavelength (air 4731.44)
-    "ArIV_4741": 4741.48,    # TODO: verify vacuum wavelength (air 4740.170)
-    # Additional diagnostic lines (opt-in; not in default line lists)
-    "SIII_6312": 6313.81,    # TODO: verify vacuum wavelength (air 6312.060)
-    "OII_7320": 7322.01,     # TODO: verify vacuum wavelength (air 7319.990)
-    "OII_7330": 7332.75,     # TODO: verify vacuum wavelength (air 7330.730)
-    "ArIII_7136": 7137.77,   # TODO: verify vacuum wavelength (air 7135.790)
-    "SIII_9069": 9071.10,    # TODO: verify vacuum wavelength (air 9068.600)
+    "FeII_4584": 4584.11922116,   
+    "NIII_4642": 4641.93950581,    
+    "FeIII_4660": 4659.35411192,  
+    "HeII_4687": 4687.02143223,   
+    "ArIV_4713": 4712.57819671,   
+    "FeII_4732": 4732.76354118,   
+    "ArIV_4741": 4741.44584045,   
+
 }
 
 # ---------------------------------------------------------------------------
