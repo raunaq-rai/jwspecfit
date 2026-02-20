@@ -288,8 +288,9 @@ def sanders25_metallicity(
     for i in tqdm(range(n_mc), desc="Strong-line (MC)", disable=not progress):
         perturbed = {}
         for m, dat in ratios.items():
+            sig_tot = np.sqrt(dat["err"] ** 2 + CALIBRATIONS[m]["sigma_cal"] ** 2)
             perturbed[m] = {
-                "val": rng.normal(dat["val"], dat["err"]),
+                "val": rng.normal(dat["val"], sig_tot),
                 "err": dat["err"],
             }
         mc_res = minimize_scalar(

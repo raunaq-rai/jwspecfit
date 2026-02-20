@@ -676,7 +676,16 @@ def compute_abundances(
     from .strong_line import sanders25_metallicity
 
     if is_mcmc and posteriors:
-        # Run Sanders+25 on each posterior sample (thin if needed).
+        from .strong_line import (
+            CALIBRATIONS,
+            _chi2_simultaneous,
+            Z_MAX,
+            Z_MIN,
+            compute_line_ratios,
+        )
+        from scipy.optimize import minimize_scalar
+
+        # Thin posterior if needed.
         n_total = min(len(v) for v in posteriors.values())
         if n_posterior > 0 and n_total > n_posterior:
             rng = np.random.default_rng(42)
@@ -687,18 +696,34 @@ def compute_abundances(
         else:
             thinned = posteriors
             n_samples = n_total
+            rng = np.random.default_rng(42)
+
         OH_post = np.full(n_samples, np.nan)
         sample_fluxes = {name: thinned[name] for name in thinned}
-        sample_errors = {name: 0.0 for name in posteriors}  # no additional MC needed
+        dummy_errors = {name: 0.0 for name in posteriors}
 
         for i in tqdm(range(n_samples), desc="Strong-line (posterior)", disable=not progress):
             samp = {name: max(float(arr[i]), 1e-50) for name, arr in sample_fluxes.items()}
             try:
-                Z_i, _, _, _, _, _ = sanders25_metallicity(
-                    samp, sample_errors, n_mc=0, snr_thresh=-np.inf,
+                ratios_i = compute_line_ratios(samp, dummy_errors, snr_thresh=-np.inf)
+                if not ratios_i:
+                    continue
+                # Perturb each ratio by the calibration scatter.
+                perturbed = {}
+                for m, dat in ratios_i.items():
+                    sig_cal = CALIBRATIONS[m]["sigma_cal"]
+                    perturbed[m] = {
+                        "val": rng.normal(dat["val"], sig_cal),
+                        "err": dat["err"],
+                    }
+                res_i = minimize_scalar(
+                    _chi2_simultaneous,
+                    bounds=(Z_MIN, Z_MAX),
+                    args=(perturbed,),
+                    method="bounded",
                 )
-                OH_post[i] = Z_i
-            except ValueError:
+                OH_post[i] = res_i.x
+            except (ValueError, RuntimeError):
                 continue
 
         OH_med = float(np.nanmedian(OH_post))
