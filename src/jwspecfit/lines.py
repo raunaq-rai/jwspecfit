@@ -68,13 +68,34 @@ REST_LINES_A: dict[str, float] = {
     "SIII_9069": 9071.10,    # TODO: verify vacuum wavelength (air 9068.600)
 }
 
+# ---------------------------------------------------------------------------
 # Pre-defined line groups for different spectral resolutions.
-# Prism: doublets are merged; grating: doublets resolved.
+#
+# Prism (R ~ 30–300):  merged doublet entries for unresolvable pairs.
+# Grating (R ~ 1000+): individual doublet components resolved.
+#
+# These are the *default* line lists used when the user does not supply
+# their own ``lines=`` argument.  The ``observable_lines()`` filter then
+# removes anything outside the observed wavelength range.
+# ---------------------------------------------------------------------------
+
 _PRISM_LINES = [
+    # UV (merged doublets at prism resolution)
     "Lya",
     "NV_doublet",
+    "NIV_doublet",
     "CIV_doublet",
+    "HEII_1640",
+    "NIII_doublet",
+    "SiIII_1",
+    "SiIII_2",
     "CIII]",
+    # Semi-forbidden / weak UV
+    "OIII]_2321",
+    "OIII]_2331",
+    "OII]_2471",
+    "FeII*_2396",
+    # Optical (merged [OII] doublet)
     "OII_doublet",
     "HDELTA",
     "HGAMMA",
@@ -89,7 +110,30 @@ _PRISM_LINES = [
     "SII_6732",
 ]
 
-_MEDIUM_LINES = [
+_GRATING_LINES = [
+    # UV (individual doublet components)
+    "Lya",
+    "NV_1",
+    "NV_2",
+    "NIV_1483",
+    "NIV_1",
+    "CIV_1",
+    "CIV_2",
+    "HEII_1640",
+    "OIII_1661",
+    "OIII_1666",
+    "NIII_1749",
+    "NIII_1752",
+    "SiIII_1",
+    "SiIII_2",
+    "CIII]_1907",
+    "CIII]",
+    # Semi-forbidden / weak UV
+    "OIII]_2321",
+    "OIII]_2331",
+    "OII]_2471",
+    "FeII*_2396",
+    # Optical (resolved [OII] doublet)
     "OII_3726",
     "OII_3729",
     "HDELTA",
@@ -107,17 +151,23 @@ _MEDIUM_LINES = [
     "SII_6732",
 ]
 
-_HIGH_LINES = _MEDIUM_LINES  # same set; resolution handles the splitting
-
 
 def get_line_list(grating: str = "prism") -> list[str]:
     """Return default line names for a given grating.
 
+    For prism (R ~ 30–300), merged doublet entries are used for pairs
+    that cannot be resolved.  For medium and high-resolution gratings
+    (R ≥ 1000), individual doublet components are returned.
+
+    The user can always override by passing an explicit ``lines=``
+    argument to :func:`fit_lines`.
+
     Parameters
     ----------
     grating : str
-        One of ``"prism"``, ``"medium"`` / ``"g140m"`` / ``"g235m"`` / ``"g395m"``,
-        or ``"high"`` / ``"g140h"`` / ``"g235h"`` / ``"g395h"``.
+        One of ``"prism"``, ``"medium"`` / ``"g140m"`` / ``"g235m"`` /
+        ``"g395m"``, ``"high"`` / ``"g140h"`` / ``"g235h"`` / ``"g395h"``,
+        or ``"grating"`` (generic resolved mode).
 
     Returns
     -------
@@ -127,10 +177,13 @@ def get_line_list(grating: str = "prism") -> list[str]:
     g = grating.lower()
     if "prism" in g:
         return list(_PRISM_LINES)
-    if any(k in g for k in ("medium", "g140m", "g235m", "g395m")):
-        return list(_MEDIUM_LINES)
-    if any(k in g for k in ("high", "g140h", "g235h", "g395h")):
-        return list(_HIGH_LINES)
+    # All gratings (medium *and* high) use resolved individual components.
+    if any(k in g for k in (
+        "medium", "high", "grating", "stack",
+        "g140m", "g235m", "g395m",
+        "g140h", "g235h", "g395h",
+    )):
+        return list(_GRATING_LINES)
     return list(_PRISM_LINES)
 
 
