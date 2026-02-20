@@ -300,7 +300,11 @@ def sanders25_metallicity(
         )
         mc_samples[i] = mc_res.x
 
-    Z_lo = float(np.percentile(mc_samples, 16))
-    Z_hi = float(np.percentile(mc_samples, 84))
+    if n_mc > 0:
+        Z_lo = float(np.percentile(mc_samples, 16))
+        Z_hi = float(np.percentile(mc_samples, 84))
+    else:
+        Z_lo = np.nan
+        Z_hi = np.nan
 
     return Z_best, Z_lo, Z_hi, chi2, list(ratios.keys()), mc_samples
