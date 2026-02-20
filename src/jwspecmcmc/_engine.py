@@ -172,9 +172,9 @@ def _fit_lines_mcmc(
     R_med = float(np.median(R_arr))
     R_lo, R_hi = float(np.min(R_arr)), float(np.max(R_arr))
     if abs(R_hi - R_lo) < 10:
-        logger.info("Resolving power: R = %.0f", R_med)
+        print(f"Resolving power: R = {R_med:.0f}")
     else:
-        logger.info("Resolving power: R ≈ %.0f (range %.0f–%.0f)", R_med, R_lo, R_hi)
+        print(f"Resolving power: R ≈ {R_med:.0f} (range {R_lo:.0f}–{R_hi:.0f})")
 
     continuum = fit_continuum(
         spec.wave_um, spec.flux_ujy, spec.err_ujy, z, line_names,

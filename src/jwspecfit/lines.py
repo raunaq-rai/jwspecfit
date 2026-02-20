@@ -93,12 +93,10 @@ _PRISM_LINES = [
     "CIV_doublet",
     "HEII_1640",
     "NIII_doublet",
-    "SiIII_1",
-    "SiIII_2",
+    "SiIII_2",          # SiIII_1/2 blended at prism R; keep brighter 1892
     "CIII]",
     # Semi-forbidden / weak UV
-    "OIII]_2321",
-    "OIII]_2331",
+    "OIII]_2331",       # OIII]_2321/2331 blended at prism R; keep brighter 2331
     "OII]_2471",
     "FeII*_2396",
     # Optical (merged [OII] doublet)
@@ -106,8 +104,7 @@ _PRISM_LINES = [
     "H10",
     "H9",
     "NeIII_3869",
-    "HEI_3889",
-    "H8",
+    "H8",               # HeI 3889 blended with H8 (Δ=0.4 Å); keep H8
     "HEPSILON",
     "HDELTA",
     "HGAMMA",
@@ -154,8 +151,7 @@ _GRATING_LINES = [
     "H10",
     "H9",
     "NeIII_3869",
-    "HEI_3889",
-    "H8",
+    "H8",               # HeI 3889 blended with H8 (Δ=0.4 Å); unresolvable at any NIRSpec R
     "HEPSILON",
     "HDELTA",
     "HGAMMA",
