@@ -226,7 +226,7 @@ def _fit_lines_mcmc(
 
         # Centroid bounds.
         _C_KMS_CENT = 299792.458
-        _CENT_V_MAX = 300.0
+        _CENT_V_MAX = 500.0
         cent_margin_v = _CENT_V_MAX / _C_KMS_CENT * lam_obs_A
         cent_margin = max(cent_margin_v, 2.0 * np.median(dlam))
 
