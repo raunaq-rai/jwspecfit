@@ -88,12 +88,14 @@ class ConstraintSet:
                     ratio = REST_LINES_A[name] / lam_o3
                     p[nL + i_t] = mu_o3 * ratio
 
-        # --- Tie broad Balmer centroids to their narrow counterparts ---
+        # --- Tie broad centroids to their narrow counterparts ---
         _BROAD_PAIRS = [
             ("Ha_BROAD", "Ha"), ("Ha_BROAD2", "Ha"),
             ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
             ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
             ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
+            ("HEII_1640_BROAD", "HEII_1640"), ("HEII_1640_BROAD2", "HEII_1640"),
+            ("HeII_4687_BROAD", "HeII_4687"), ("HeII_4687_BROAD2", "HeII_4687"),
         ]
         for broad_name, narrow_name in _BROAD_PAIRS:
             if broad_name in idx and narrow_name in idx:
@@ -157,12 +159,14 @@ class ConstraintSet:
                 if name in idx:
                     free[nL + idx[name]] = False
 
-        # Broad Balmer centroids tied to narrow.
+        # Broad centroids tied to narrow.
         _BROAD_PAIRS = [
             ("Ha_BROAD", "Ha"), ("Ha_BROAD2", "Ha"),
             ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
             ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
             ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
+            ("HEII_1640_BROAD", "HEII_1640"), ("HEII_1640_BROAD2", "HEII_1640"),
+            ("HeII_4687_BROAD", "HeII_4687"), ("HeII_4687_BROAD2", "HeII_4687"),
         ]
         for broad_name, narrow_name in _BROAD_PAIRS:
             if broad_name in idx and narrow_name in idx:

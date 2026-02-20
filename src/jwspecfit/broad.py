@@ -43,11 +43,12 @@ BROAD2_SIGMA_V_HI = 2120.0   # km/s — upper bound (FWHM ~ 5000 km/s)
 # BIC threshold for accepting a more complex model.
 BIC_DELTA_THRESHOLD = 6.0
 
-# Broad line definitions — lines that get a broad component.
+# Broad line definitions — lines that can receive a broad component.
+# Balmer lines for AGN / outflow broadening; HeII lines for WR stars.
 # NII_6549 and NII_6585 are included in the Ha complex so that the
 # BIC comparison accounts for the full blend and prevents broad Ha
 # from absorbing narrow NII flux.
-BROAD_BALMER = ["Ha", "HBETA", "HDELTA", "HGAMMA"]
+BROAD_CANDIDATES = ["Ha", "HBETA", "HDELTA", "HGAMMA", "HEII_1640", "HeII_4687"]
 
 # Lines whose narrow kinematics are tied to Ha during broad fitting
 # to guard against the broad component leaking into NII.
@@ -290,7 +291,7 @@ def _add_broad_lines(
         Extended line list with broad entries.
     """
     extended = list(line_names)
-    for base in BROAD_BALMER:
+    for base in BROAD_CANDIDATES:
         if base not in line_names:
             continue
         if broad_type in ("broad1", "both"):
