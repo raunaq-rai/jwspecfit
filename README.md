@@ -518,6 +518,105 @@ result = jwspecmcmc.fit_lines(
 
 ---
 
+## Chemical abundances with `jwspecabund`
+
+`jwspecabund` derives chemical abundances (O/H, N/O, S/O, Ne/O, Ar/O)
+from the emission-line fluxes produced by `jwspecfit` or `jwspecmcmc`.
+It accepts any result type (`FitResult`, `BroadFitResult`, `MCMCResult`,
+`MCMCBroadFitResult`) and automatically selects the appropriate
+uncertainty propagation (bootstrap MC or full posterior sampling).
+
+Three methods are supported:
+
+1. **Direct T_e method** — when the [OIII] 4363 auroral line is detected
+   (SNR >= 3 by default), uses PyNEB for electron temperature, density,
+   and ionic abundance calculations with Izotov+06 ICFs.
+2. **Bayesian forward model** — free parameters (log T_e, log n_e,
+   ionic abundances) sampled via emcee/dynesty, predicting line ratios
+   with PyNEB CEL emissivities and the Aller (1984) Hbeta formula
+   (Cullen+25 approach).
+3. **Strong-line calibrations** — Sanders et al. (2025) simultaneous
+   polynomial fit across O3, O2, R23, O32 diagnostics with MC
+   error propagation including calibration scatter.
+
+Dust correction (Balmer decrement + Salim+18 or Cardelli+89) is applied
+automatically.  Broad Balmer components are summed with narrow
+components for correct hydrogen flux normalisation.
+
+### Installation
+
+```bash
+pip install -e ".[abund]"   # installs PyNEB >= 1.1.25
+```
+
+### Quick start
+
+```python
+import jwspecfit
+import jwspecabund
+
+# From a bootstrap fit result:
+result = jwspecfit.fit_lines(spec, z=6.0)
+abund = jwspecabund.compute_abundances(result, z=6.0)
+
+# From an MCMC result (full posterior propagation):
+import jwspecmcmc
+mcmc_result = jwspecmcmc.fit_lines(spec, z=6.0)
+abund = jwspecabund.compute_abundances(mcmc_result, z=6.0)
+
+print(abund.summary())
+```
+
+### Method selection
+
+```python
+# Auto (default): direct if [OIII] 4363 SNR >= 3, else strong-line
+abund = jwspecabund.compute_abundances(result, z=6.0)
+
+# Force direct T_e method
+abund = jwspecabund.compute_abundances(result, z=6.0, method="direct")
+
+# Force strong-line calibrations
+abund = jwspecabund.compute_abundances(result, z=6.0, method="strong_line")
+
+# Bayesian forward model (Cullen+25)
+abund = jwspecabund.compute_abundances(result, z=6.0, method="forward")
+```
+
+### Key options
+
+```python
+abund = jwspecabund.compute_abundances(
+    result, z=6.0,
+    dust_law="salim",         # "salim" (default) or "cardelli"
+    Av=None,                  # derive from Balmer decrement (default)
+    Te_relation="desi",       # "desi" (DESI DR2) or "classical" (Garnett 1992)
+    n_mc=1000,                # MC iterations for bootstrap results
+    n_posterior=1000,          # max posterior samples to propagate (MCMC results)
+    progress=True,            # show tqdm progress bars
+)
+```
+
+### Result object
+
+`AbundanceResult` holds the full output:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `method` | `str` | `"direct"`, `"forward"`, or `"strong_line"` |
+| `OH` | `float` | 12 + log(O/H) |
+| `OH_err` | `float \| tuple` | Symmetric error or (lo, hi) 68% CI |
+| `NO` | `float \| None` | log(N/O) |
+| `Te_high`, `Te_low` | `float \| None` | Electron temperatures (K) |
+| `ne` | `float \| None` | Electron density (cm^-3) |
+| `Av` | `float \| None` | Dust attenuation A_V |
+| `ionic` | `dict \| None` | Ionic abundances (O+/H+, O++/H+, ...) |
+| `OH_posterior` | `np.ndarray \| None` | Full posterior samples |
+| `SO`, `NeO`, `ArO` | `float \| None` | log(S/O), log(Ne/O), log(Ar/O) |
+| `ratios_used` | `list \| None` | Diagnostic ratios (strong-line) |
+
+---
+
 ## Example notebooks
 
 See `docs/notebooks/` for worked examples:
@@ -530,6 +629,8 @@ See `docs/notebooks/` for worked examples:
 | `04_mcmc_prism.ipynb` | MCMC fitting on a PRISM spectrum with emcee |
 | `05_mcmc_grating.ipynb` | MCMC fitting on a G395M grating spectrum, nautilus demo |
 | `06_mcmc_stack.ipynb` | MCMC fitting on a stacked spectrum with R estimation |
+| `07_abundances.ipynb` | Chemical abundances: direct T_e, forward model, strong-line |
+| `08_nitrogen.ipynb` | N/O ratio calculation via the direct method |
 
 ---
 
@@ -562,6 +663,18 @@ See `docs/notebooks/` for worked examples:
 | `result` | `MCMCResult`, `MCMCBroadFitResult`, `MCMCLineResult` |
 | `diagnostics` | Gelman–Rubin R-hat, effective sample size (ESS) |
 | `plotting` | Corner plots, trace plots, flux posterior histograms |
+
+### `jwspecabund`
+
+| Module | Description |
+|--------|-------------|
+| `_core` | `compute_abundances()` orchestrator, method selection, dust correction |
+| `direct` | Direct T_e method via PyNEB: T_e, n_e, ionic abundances |
+| `forward` | Bayesian forward model (Cullen+25): emcee / dynesty sampling |
+| `strong_line` | Sanders+25 simultaneous polynomial calibrations |
+| `dust` | Salim+18 and Cardelli+89 attenuation curves, Balmer decrement A_V |
+| `icf` | Ionisation correction factors (Izotov+06) |
+| `result` | `AbundanceResult` dataclass |
 
 See [`docs/api.md`](docs/api.md) for the full API reference.
 

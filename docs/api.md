@@ -1,4 +1,4 @@
-# jwspecfit & jwspecmcmc API Reference
+# jwspecfit, jwspecmcmc & jwspecabund API Reference
 
 Full API documentation for all public modules, classes, and functions.
 
@@ -979,3 +979,458 @@ credible interval marked.
 | `ax` | `Axes \| None` | `None` | Axes to plot on (creates new if `None`) |
 
 Returns `matplotlib.axes.Axes`.
+
+---
+---
+
+# `jwspecabund` API Reference
+
+Chemical abundance calculations from emission-line fluxes.  Accepts any
+`jwspecfit` or `jwspecmcmc` result object and computes O/H, N/O, and other
+element ratios via three methods: direct T_e, Bayesian forward modelling
+(Cullen+25), or strong-line calibrations (Sanders+25).
+
+**Installation:** `pip install -e ".[abund]"` (adds PyNEB >= 1.1.25).
+
+---
+
+## `jwspecabund` — Public API
+
+### `compute_abundances()`
+
+```python
+def compute_abundances(
+    result: Any,
+    z: float,
+    *,
+    dust_correct: bool = True,
+    dust_law: str = "salim",
+    Av: float | None = None,
+    method: str = "auto",
+    snr_auroral: float = 3.0,
+    n_mc: int = 1000,
+    Te_relation: str = "desi",
+    Rv: float = 3.15,
+    delta: float = -0.35,
+    B_bump: float = 2.27,
+    forward_sampler: str = "emcee",
+    forward_n_walkers: int = 32,
+    forward_n_steps: int = 5000,
+    forward_n_burn: int = 1000,
+    forward_n_live: int = 500,
+    forward_seed: int = 42,
+    progress: bool = True,
+    n_posterior: int = 1000,
+) -> AbundanceResult:
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `result` | `FitResult \| BroadFitResult \| MCMCResult \| MCMCBroadFitResult` | — | Fitting result from `jwspecfit` or `jwspecmcmc` |
+| `z` | `float` | — | Source redshift |
+| `dust_correct` | `bool` | `True` | Apply dust correction via Balmer decrement |
+| `dust_law` | `str` | `"salim"` | `"salim"` (Salim+18/Noll+09) or `"cardelli"` (CCM89) |
+| `Av` | `float \| None` | `None` | V-band attenuation; derived from Balmer decrement if `None` |
+| `method` | `str` | `"auto"` | `"auto"`, `"direct"`, `"forward"`, or `"strong_line"` |
+| `snr_auroral` | `float` | `3.0` | Minimum [OIII] 4363 SNR for direct method (auto mode) |
+| `n_mc` | `int` | `1000` | MC iterations for error propagation (bootstrap results) |
+| `Te_relation` | `str` | `"desi"` | T_e-T_e relation: `"desi"` (DESI DR2) or `"classical"` (Garnett 1992) |
+| `Rv` | `float` | `3.15` | Total-to-selective ratio for Salim law |
+| `delta` | `float` | `-0.35` | Slope deviation for Salim law |
+| `B_bump` | `float` | `2.27` | UV bump strength for Salim law |
+| `forward_sampler` | `str` | `"emcee"` | Sampler for forward model: `"emcee"` or `"dynesty"` |
+| `forward_n_walkers` | `int` | `32` | Emcee walkers for forward model |
+| `forward_n_steps` | `int` | `5000` | Emcee steps for forward model |
+| `forward_n_burn` | `int` | `1000` | Emcee burn-in for forward model |
+| `forward_n_live` | `int` | `500` | Dynesty live points for forward model |
+| `forward_seed` | `int` | `42` | Random seed for forward model |
+| `progress` | `bool` | `True` | Show tqdm progress bars for MC/posterior loops |
+| `n_posterior` | `int` | `1000` | Max posterior samples to propagate (MCMC results are thinned) |
+
+Returns `AbundanceResult`.
+
+**Method selection logic** (`method="auto"`):
+
+1. If [OIII] 4363 SNR >= `snr_auroral` → direct T_e method
+2. Otherwise → strong-line calibrations (Sanders+25)
+
+**Input handling:**
+
+- `FitResult` / `BroadFitResult` → Gaussian MC error propagation using `n_mc` iterations
+- `MCMCResult` / `MCMCBroadFitResult` → full posterior propagation (thinned to `n_posterior` samples)
+- Broad Balmer components are automatically summed with narrow components for correct hydrogen flux
+
+---
+
+### `AbundanceResult`
+
+```python
+@dataclass
+class AbundanceResult:
+    method: str                                 # "direct", "forward", or "strong_line"
+    OH: float                                   # 12 + log(O/H)
+    OH_err: float | tuple[float, float]         # symmetric or (lo, hi) 68% CI
+    NO: float | None                            # log(N/O)
+    NO_err: float | tuple[float, float] | None  # error on log(N/O)
+    CO: float | None                            # log(C/O) (UV lines)
+    CO_err: float | tuple[float, float] | None
+    Te_high: float | None                       # T_e(O++) in K
+    Te_low: float | None                        # T_e(O+/N+) in K
+    ne: float | None                            # n_e in cm^-3
+    Av: float | None                            # dust attenuation A_V
+    ionic: dict[str, float] | None              # ionic abundances
+    OH_posterior: np.ndarray | None              # full O/H posterior samples
+    NO_posterior: np.ndarray | None              # full N/O posterior samples
+    CO_posterior: np.ndarray | None              # full C/O posterior samples
+    ratios_used: list[str] | None               # strong-line diagnostics used
+    chi2: float | None                          # chi2 (strong-line)
+    SO: float | None                            # log(S/O)
+    NeO: float | None                           # log(Ne/O)
+    ArO: float | None                           # log(Ar/O)
+```
+
+**Methods:**
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `summary()` | `str` | Human-readable multi-line summary |
+
+---
+
+## `jwspecabund.direct` — Direct T_e method
+
+### `compute_ne()`
+
+```python
+def compute_ne(
+    flux_line1: float,
+    flux_line2: float,
+    doublet: str = "SII",
+    Te_guess: float = 1e4,
+) -> float:
+```
+
+Compute electron density from a density-sensitive doublet via PyNEB.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `flux_line1` | `float` | — | Blue member flux ([SII] 6718 or [OII] 3726) |
+| `flux_line2` | `float` | — | Red member flux ([SII] 6732 or [OII] 3729) |
+| `doublet` | `str` | `"SII"` | `"SII"` or `"OII"` |
+| `Te_guess` | `float` | `1e4` | Temperature guess (K) |
+
+Returns `float` — n_e in cm^-3.
+
+---
+
+### `compute_Te_OIII()`
+
+```python
+def compute_Te_OIII(
+    flux_4363: float,
+    flux_5007: float,
+    flux_4959: float,
+    ne: float,
+) -> float:
+```
+
+Compute T_e(O++) from the [OIII] auroral/nebular ratio using PyNEB.
+Uses `log=True` with `start_x=3.0, end_x=5.0` for robust root-finding
+at high temperatures (T > 25,000 K).
+
+Returns `float` — T_e in K.
+
+---
+
+### `compute_Te_NII()`
+
+```python
+def compute_Te_NII(
+    flux_5756: float,
+    flux_6585: float,
+    ne: float,
+) -> float:
+```
+
+Compute T_e(N+) from the [NII] 5756/6585 auroral/nebular ratio.
+
+Returns `float` — T_e in K.
+
+---
+
+### `Te_low_from_high()`
+
+```python
+def Te_low_from_high(Te_high: float, relation: str = "desi") -> float:
+```
+
+Derive T_e(low) from T_e(high) using an empirical T_e-T_e relation.
+
+| Relation | Formula | Reference |
+|----------|---------|-----------|
+| `"desi"` | T_low = 0.648 × T_high + 3270 | DESI DR2 (arXiv:2601.02463) |
+| `"classical"` | T_low = 0.7 × T_high + 3000 | Garnett (1992) |
+
+---
+
+### `compute_ionic_abundances()`
+
+```python
+def compute_ionic_abundances(
+    fluxes: dict[str, float],
+    Te_high: float,
+    Te_low: float,
+    ne: float,
+) -> dict[str, float]:
+```
+
+Compute all available ionic abundances via PyNEB.  Requires `"HBETA"` in fluxes.
+
+**Supported ions and temperature zones:**
+
+| Ion | Line(s) | T_e zone |
+|-----|---------|----------|
+| O++/H+ | [OIII] 5007 | T_high |
+| O+/H+ | [OII] 3726+3729 | T_low |
+| N+/H+ | [NII] 6585 | T_low |
+| S+/H+ | [SII] 6718+6732 | T_low |
+| S++/H+ | [SIII] 9069 | T_mid = (T_high + T_low)/2 |
+| Ne++/H+ | [NeIII] 3869 | T_high |
+| Ar++/H+ | [ArIII] 7136 | T_mid |
+
+For T > 30,000 K (beyond PyNEB H I tables), uses the Aller (1984) Hbeta
+emissivity formula automatically.
+
+Returns `dict` — e.g. `{"O+/H+": val, "O++/H+": val, "N+/H+": val, ...}`.
+
+---
+
+### `compute_total_abundances()`
+
+```python
+def compute_total_abundances(ionic: dict[str, float]) -> dict[str, float]:
+```
+
+Derive total element abundances from ionic abundances using Izotov+06 ICFs.
+
+Returns `dict` — `{"O/H": val, "N/O": val, "S/O": val, "Ne/O": val, "Ar/O": val}`.
+
+---
+
+## `jwspecabund.forward` — Bayesian forward model
+
+### `forward_model()`
+
+```python
+def forward_model(
+    line_fluxes: dict[str, float],
+    line_errors: dict[str, float],
+    *,
+    sampler: str = "emcee",
+    n_walkers: int = 32,
+    n_steps: int = 5000,
+    n_burn: int = 1000,
+    n_live: int = 500,
+    seed: int = 42,
+    progress: bool = True,
+) -> dict[str, Any]:
+```
+
+Bayesian forward model (Cullen+25 approach).  Free parameters: log(T_e),
+log(n_e), and log(ionic abundance) per detected ion.  Predicts line/Hbeta
+flux ratios using PyNEB CEL emissivities and the Aller (1984) Hbeta formula.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `line_fluxes` | `dict` | — | `{line_name: flux}`, must include `"HBETA"` |
+| `line_errors` | `dict` | — | `{line_name: flux_err}` |
+| `sampler` | `str` | `"emcee"` | `"emcee"` or `"dynesty"` |
+| `n_walkers` | `int` | `32` | Emcee walkers |
+| `n_steps` | `int` | `5000` | Emcee total steps |
+| `n_burn` | `int` | `1000` | Emcee burn-in |
+| `n_live` | `int` | `500` | Dynesty live points |
+| `seed` | `int` | `42` | Random seed |
+| `progress` | `bool` | `True` | Show progress bar |
+
+Returns `dict` with keys: `OH`, `OH_err`, `NO`, `NO_err`, `Te`, `ne`,
+`ionic`, `OH_posterior`, `NO_posterior`, `NeO`, etc.
+
+---
+
+### `hbeta_emissivity_aller84()`
+
+```python
+def hbeta_emissivity_aller84(Te: float) -> float:
+```
+
+Hbeta volume emissivity using the Aller (1984) Case B formula:
+alpha_Hb = 3.03e-14 × (T/10^4)^{-0.874} cm^3 s^-1.  Valid at all
+temperatures (no 30,000 K upper limit).
+
+Returns `float` — emissivity in erg cm^3 s^-1.
+
+---
+
+## `jwspecabund.strong_line` — Sanders+25 calibrations
+
+### `sanders25_metallicity()`
+
+```python
+def sanders25_metallicity(
+    line_fluxes: dict[str, float],
+    line_errors: dict[str, float],
+    n_mc: int = 1000,
+    snr_thresh: float = 1.5,
+    seed: int = 42,
+    progress: bool = True,
+) -> tuple[float, float, float, float, list[str], np.ndarray]:
+```
+
+Derive 12+log(O/H) via simultaneous Sanders+25 polynomial calibrations.
+Uses bounded minimisation across all available diagnostic ratios.
+
+MC error propagation perturbs each ratio by
+sqrt(sigma_obs^2 + sigma_cal^2) — both measurement and calibration
+scatter are included.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `line_fluxes` | `dict` | — | `{line_name: flux}` |
+| `line_errors` | `dict` | — | `{line_name: flux_err}` |
+| `n_mc` | `int` | `1000` | MC iterations |
+| `snr_thresh` | `float` | `1.5` | Minimum SNR per line |
+| `seed` | `int` | `42` | Random seed |
+| `progress` | `bool` | `True` | Show tqdm progress bar |
+
+Returns `(Z_best, Z_lo, Z_hi, chi2, ratios_used, Z_mc_samples)`.
+
+**Calibrations (Sanders+25 Table 3):**
+
+| Ratio | Definition | Coefficients | sigma_R_fit | sigma_R_int | sigma_OH_int |
+|-------|-----------|-------------|-------------|-------------|--------------|
+| O3 | [OIII]5007 / Hbeta | 0.852, -0.162, -1.149, -0.553 | 0.04 | 0.13 | 0.14 |
+| O2 | [OII] / Hbeta | 0.172, 0.954, -0.832 | 0.03 | 0.25 | 0.22 |
+| R23 | ([OIII]+[OII]) / Hbeta | 0.998, 0.053, -0.141, -0.493, -0.774 | 0.03 | 0.07 | 0.13 |
+| O32 | [OIII]5007 / [OII] | 0.697, -1.245, -0.869 | 0.09 | 0.29 | 0.25 |
+
+---
+
+### `compute_line_ratios()`
+
+```python
+def compute_line_ratios(
+    line_fluxes: dict[str, float],
+    line_errors: dict[str, float],
+    snr_thresh: float = 1.5,
+) -> dict[str, dict[str, float]]:
+```
+
+Compute available strong-line diagnostic ratios from emission-line fluxes.
+Accepts resolved (`OII_3726` + `OII_3729`) or unresolved (`OII_doublet`)
+[OII] input.
+
+Returns `{ratio_name: {"val": log10_ratio, "err": error}}`.
+
+---
+
+## `jwspecabund.dust` — Dust correction
+
+### `salim_attenuation()`
+
+```python
+def salim_attenuation(
+    wave_A: np.ndarray,
+    Av: float,
+    Rv: float = 3.15,
+    delta: float = -0.35,
+    B: float = 2.27,
+) -> np.ndarray:
+```
+
+Salim+18/Noll+09 modified Calzetti attenuation curve.  Includes a UV bump
+(Drude profile) and power-law slope deviation.
+
+Returns A(lambda) in magnitudes.
+
+---
+
+### `cardelli_extinction()`
+
+```python
+def cardelli_extinction(
+    wave_A: np.ndarray,
+    Av: float,
+    Rv: float = 3.1,
+) -> np.ndarray:
+```
+
+Cardelli, Clayton & Mathis (1989) Milky Way extinction curve.
+
+Returns A(lambda) in magnitudes.
+
+---
+
+### `dust_correct_fluxes()`
+
+```python
+def dust_correct_fluxes(
+    line_fluxes: dict[str, tuple[float, float, float]],
+    Av: float,
+    law: str = "salim",
+    **kwargs,
+) -> dict[str, tuple[float, float]]:
+```
+
+Apply dust correction to emission-line fluxes.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `line_fluxes` | `dict` | `{name: (flux, flux_err, rest_wave_A)}` |
+| `Av` | `float` | V-band attenuation |
+| `law` | `str` | `"salim"` or `"cardelli"` |
+
+Returns `{name: (corrected_flux, corrected_err)}`.
+
+---
+
+### `compute_Av_from_balmer()`
+
+```python
+def compute_Av_from_balmer(
+    flux_num: float,
+    flux_den: float,
+    flux_num_err: float,
+    flux_den_err: float,
+    law: str = "salim",
+    intrinsic_ratio: float = 2.86,
+    wave_num_A: float = 6564.61,
+    wave_den_A: float = 4862.68,
+    **kwargs,
+) -> tuple[float, float]:
+```
+
+Derive A_V from a Balmer decrement (default Ha/Hb; any pair supported).
+
+Returns `(Av, Av_err)`.
+
+---
+
+## `jwspecabund.icf` — Ionisation correction factors
+
+All ICFs from Izotov et al. (2006, A&A, 448, 955).
+
+### `icf_nitrogen(O_plus, O_total)`
+
+ICF for nitrogen (eq. 18).  N/O = ICF_N × N+/O+.
+
+### `icf_neon(O_plus, O_total)`
+
+ICF for neon (eq. 19).  Ne/O = ICF_Ne × Ne++/O++.
+
+### `icf_sulfur(O_plus, O_total)`
+
+ICF for sulfur (eq. 20).  S/O = ICF_S × (S+ + S++)/O.
+
+### `icf_argon(O_plus, O_total)`
+
+ICF for argon (eqs. 22/23).  Ar/O = ICF_Ar × Ar++/O++.
