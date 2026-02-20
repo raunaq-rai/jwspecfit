@@ -36,40 +36,40 @@ spectral pixel using the error function:
 $$
 \bar{G}_i = \frac{A}{2\,\Delta\lambda_i}
 \left[
-  \mathrm{erf}\!\left(\frac{\lambda_{i+1} - \mu}{\sigma\sqrt{2}}\right)
-  - \mathrm{erf}\!\left(\frac{\lambda_i - \mu}{\sigma\sqrt{2}}\right)
+  \operatorname{erf}\!\left(\frac{\lambda_{i+1} - \mu}{\sigma\sqrt{2}}\right)
+  - \operatorname{erf}\!\left(\frac{\lambda_i - \mu}{\sigma\sqrt{2}}\right)
 \right]
 $$
 
-where $A$ is the integrated flux (erg s$^{-1}$ cm$^{-2}$), $\mu$ is
-the line centroid (Å), $\sigma$ is the Gaussian width (Å), and
-$\lambda_i$, $\lambda_{i+1}$ are the pixel edges.  This avoids
+where *A* is the integrated flux (erg s<sup>−1</sup> cm<sup>−2</sup>),
+*μ* is the line centroid (Å), *σ* is the Gaussian width (Å), and
+λ<sub>i</sub>, λ<sub>i+1</sub> are the pixel edges.  This avoids
 sampling bias when lines are narrower than pixels (prism regime,
-R ~ 30).
+R ∼ 30).
 
 ### 1.2 Spectral resolution
 
 The instrumental line spread function is assumed Gaussian with
-$\sigma_\mathrm{inst} = \lambda / (R \times 2.3548)$.  The resolving
-power $R$ is determined as follows:
+σ<sub>inst</sub> = λ / (R × 2.3548).  The resolving power *R* is
+determined as follows:
 
-| Source | $R(\lambda)$ | Reference |
-|--------|-------------|-----------|
-| PRISM/CLEAR | $R = 50 + 50(\lambda - 1) + 15(\lambda - 1)^2$ (µm), clipped to [30, 300] | Heuristic fit to NIRSpec instrument model |
-| G140M, G235M, G395M | $R = 1000$ | NIRSpec documentation |
-| G140H, G235H, G395H | $R = 2700$ | NIRSpec documentation |
-| Pixel estimate | $R \approx \lambda / (2\Delta\lambda)$ | Fallback when grating unknown |
+| Source | R(λ) | Reference |
+|--------|------|-----------|
+| PRISM/CLEAR | R = 50 + 50(λ − 1) + 15(λ − 1)<sup>2</sup> (µm), clipped to [30, 300] | Heuristic fit to NIRSpec instrument model |
+| G140M, G235M, G395M | R = 1000 | NIRSpec documentation |
+| G140H, G235H, G395H | R = 2700 | NIRSpec documentation |
+| Pixel estimate | R ≈ λ / (2Δλ) | Fallback when grating unknown |
 
 ### 1.3 Continuum subtraction
 
 Iterative sigma-clipped polynomial fit:
 
-1. Mask pixels within $\pm 6\sigma_\mathrm{inst}$ of every expected
+1. Mask pixels within ±6σ<sub>inst</sub> of every expected
    emission line and blueward of NV 1239 Å (Lyman break region).
-2. Fit weighted polynomial of degree $d$ (default $d = 2$) to
+2. Fit weighted polynomial of degree *d* (default *d* = 2) to
    unmasked pixels.
-3. Compute residuals $r_i = f_i - C_i$.
-4. Reject pixels with $r_i > k\,\hat{\sigma}$ (default $k = 2.5$)
+3. Compute residuals r<sub>i</sub> = f<sub>i</sub> − C<sub>i</sub>.
+4. Reject pixels with r<sub>i</sub> > k σ̂ (default *k* = 2.5)
    to iteratively clip positive outliers (emission).
 5. Repeat steps 2–4 for 5 iterations.
 
@@ -83,8 +83,8 @@ scaling (`x_scale='jac'`), and box constraints on all parameters.
 
 | Constraint | Implementation | Reference |
 |------------|---------------|-----------|
-| [NII] doublet ratio | $A(6549) = A(6585) / 2.96$ | Storey & Zeippen (2000) |
-| Balmer–OIII width tying | $\sigma_v(\mathrm{H}\alpha, \mathrm{H}\beta, \mathrm{H}\gamma, \mathrm{H}\delta, \mathrm{[NII]}) = \sigma_v(\mathrm{[OIII]}\,5007)$ | Assumed common NLR kinematics |
+| [NII] doublet ratio | A(6549) = A(6585) / 2.96 | Storey & Zeippen (2000) |
+| Balmer–OIII width tying | σ<sub>v</sub>(Hα, Hβ, Hγ, Hδ, [NII]) = σ<sub>v</sub>([OIII] 5007) | Assumed common NLR kinematics |
 | Centroid tying | Same lines, velocity-space centroid tied to [OIII] | |
 | Broad Balmer centroids | Tied to narrow counterpart | |
 
@@ -95,8 +95,8 @@ BIC-based model selection compares four models:
 | Model | Components |
 |-------|-----------|
 | narrow | Narrow lines only |
-| broad1 | + intermediate broad ($\mathrm{FWHM} \sim 500$–$2000$ km s$^{-1}$) |
-| broad2 | + very broad / BLR ($\mathrm{FWHM} \sim 2000$–$5000$ km s$^{-1}$) |
+| broad1 | + intermediate broad (FWHM ∼ 500–2000 km s<sup>−1</sup>) |
+| broad2 | + very broad / BLR (FWHM ∼ 2000–5000 km s<sup>−1</sup>) |
 | both | + both broad components |
 
 The Bayesian Information Criterion is:
@@ -105,21 +105,20 @@ $$
 \mathrm{BIC} = k \ln n - 2 \ln \hat{\mathcal{L}}
 $$
 
-where $k$ is the number of free parameters, $n$ is the number of
-data points, and $\hat{\mathcal{L}}$ is the maximised likelihood.
-A more complex model is accepted if $\Delta\mathrm{BIC} > 6$
+where *k* is the number of free parameters, *n* is the number of
+data points, and L̂ is the maximised likelihood.
+A more complex model is accepted if ΔBIC > 6
 (default threshold).  Robust comparison uses bootstrapped BIC
-distributions ($n_\mathrm{boot,BIC} = 100$).
+distributions (n<sub>boot,BIC</sub> = 100).
 
 ### 1.7 Bootstrap uncertainties
 
-1. Perturb flux: $f'_i = f_i + \sigma_i \times \epsilon_i$,
-   $\epsilon_i \sim \mathcal{N}(0, 1)$.
+1. Perturb flux: f′<sub>i</sub> = f<sub>i</sub> + σ<sub>i</sub> × ε<sub>i</sub>,
+   where ε<sub>i</sub> ∼ 𝒩(0, 1).
 2. Refit with `least_squares` using the best-fit parameters as
    initial guess.
-3. Repeat $N_\mathrm{boot}$ times (default 1000).
-4. Report $\hat{\sigma}(\mathrm{flux})$ from the bootstrap
-   distribution for each line.
+3. Repeat N<sub>boot</sub> times (default 1000).
+4. Report σ̂(flux) from the bootstrap distribution for each line.
 
 Parallelised via `joblib` (`n_jobs = -1` uses all cores).
 
@@ -129,11 +128,11 @@ Lyα is modelled as a skewed Gaussian (Owen 1956;
 `scipy.stats.skewnorm`) attenuated by mean IGM transmission:
 
 $$
-F_\mathrm{Ly\alpha}(\lambda) = S(\lambda;\, A,\, \mu,\, \sigma,\, \alpha) \times T_\mathrm{IGM}(\lambda,\, z)
+F_{\mathrm{Ly}\alpha}(\lambda) = S(\lambda;\, A,\, \mu,\, \sigma,\, \alpha) \times T_\mathrm{IGM}(\lambda,\, z)
 $$
 
-where $S$ is the bin-averaged skewed Gaussian (positive skew =
-red tail) and $T_\mathrm{IGM}$ is the mean IGM transmission.
+where *S* is the bin-averaged skewed Gaussian (positive skew =
+red tail) and T<sub>IGM</sub> is the mean IGM transmission.
 
 **IGM transmission** follows Inoue et al. (2014), accounting for
 Lyman-series line absorption (LAF) and damped Lyman-alpha system
@@ -159,8 +158,9 @@ $$
 \left(\frac{f_i - C_i - M_i(\boldsymbol{\theta})}{\sigma_i}\right)^2
 $$
 
-where $f_i$ is the observed flux, $C_i$ the continuum, $M_i$ the
-emission-line model, and $\sigma_i$ the flux uncertainty.
+where f<sub>i</sub> is the observed flux, C<sub>i</sub> the continuum,
+M<sub>i</sub> the emission-line model, and σ<sub>i</sub> the flux
+uncertainty.
 
 ### 2.2 Priors
 
@@ -169,9 +169,9 @@ Default priors are uniform within the same bounds used by
 
 | Prior type | PDF | Use case |
 |-----------|-----|----------|
-| `UniformPrior(lo, hi)` | $\pi(\theta) \propto 1$ for $\theta \in [\mathrm{lo}, \mathrm{hi}]$ | Default for all parameters |
+| `UniformPrior(lo, hi)` | π(θ) ∝ 1 for θ ∈ [lo, hi] | Default for all parameters |
 | `GaussianPrior(mean, std, lo, hi)` | Truncated Gaussian | Informative priors |
-| `LogUniformPrior(lo, hi)` | $\pi(\theta) \propto 1/\theta$ for $\theta \in [\mathrm{lo}, \mathrm{hi}]$ | Scale-invariant parameters |
+| `LogUniformPrior(lo, hi)` | π(θ) ∝ 1/θ for θ ∈ [lo, hi] | Scale-invariant parameters |
 
 ### 2.3 Samplers
 
@@ -187,13 +187,13 @@ effective samples.
 
 | Diagnostic | Criterion | Reference |
 |-----------|-----------|-----------|
-| Gelman–Rubin $\hat{R}$ | $\hat{R} < 1.05$ for all parameters | Gelman & Rubin (1992) |
+| Gelman–Rubin R̂ | R̂ < 1.05 for all parameters | Gelman & Rubin (1992) |
 | Effective sample size (ESS) | ESS > 100 for all parameters | Via FFT autocorrelation |
 
 ### 2.5 Posterior summaries
 
 Point estimates: medians.  Uncertainties: (16th, 84th) percentile
-half-widths, reported as asymmetric $(- \delta_\mathrm{lo},\, + \delta_\mathrm{hi})$
+half-widths, reported as asymmetric (−δ<sub>lo</sub>, +δ<sub>hi</sub>)
 credible intervals.
 
 ---
@@ -206,28 +206,28 @@ Three independent methods for gas-phase metallicity:
 
 | Method | When used | Lines required | Uncertainty propagation |
 |--------|----------|---------------|----------------------|
-| Direct $T_e$ | [OIII] 4363 detected (SNR $\geq 3$) | [OIII] 4363, 5007, 4959, Hβ, + Balmer pair for dust | MC perturbation or MCMC posterior propagation through PyNEB |
-| Bayesian forward model | User-selected (`method="forward"`) | Any subset of optical CELs + Hβ | Full MCMC/nested sampling of ionic abundances, $T_e$, $n_e$ |
+| Direct T<sub>e</sub> | [OIII] 4363 detected (SNR ≥ 3) | [OIII] 4363, 5007, 4959, Hβ, + Balmer pair for dust | MC perturbation or MCMC posterior propagation through PyNEB |
+| Bayesian forward model | User-selected (`method="forward"`) | Any subset of optical CELs + Hβ | Full MCMC/nested sampling of ionic abundances, T<sub>e</sub>, n<sub>e</sub> |
 | Strong-line calibrations | No auroral line | [OIII] 5007, Hβ, optionally [OII], Hα | MC perturbation including calibration scatter |
 
 ### 3.2 Dust correction
 
 Dust correction is applied to all emission-line fluxes before
 abundance calculations (for the direct and strong-line methods).
-$A_V$ is derived from the Balmer decrement when not supplied.
+A<sub>V</sub> is derived from the Balmer decrement when not supplied.
 
-#### 3.2.1 $A_V$ from the Balmer decrement
+#### 3.2.1 A<sub>V</sub> from the Balmer decrement
 
 $$
 A_V = \frac{2.5 \log_{10}(R_\mathrm{obs} / R_\mathrm{int})}{f(\lambda_\mathrm{den}) - f(\lambda_\mathrm{num})}
 $$
 
-where $R_\mathrm{obs}$ is the observed Balmer ratio (Hα/Hβ or
-Hγ/Hβ), $R_\mathrm{int}$ is the intrinsic Case B ratio, and
-$f(\lambda) = A(\lambda) / A_V$ is the normalised attenuation curve.
+where R<sub>obs</sub> is the observed Balmer ratio (Hα/Hβ or
+Hγ/Hβ), R<sub>int</sub> is the intrinsic Case B ratio, and
+f(λ) = A(λ) / A<sub>V</sub> is the normalised attenuation curve.
 
-**Intrinsic Balmer ratios** (Case B, $T_e = 10^4$ K,
-$n_e = 100$ cm$^{-3}$; Osterbrock & Ferland 2006):
+**Intrinsic Balmer ratios** (Case B, T<sub>e</sub> = 10<sup>4</sup> K,
+n<sub>e</sub> = 100 cm<sup>−3</sup>; Osterbrock & Ferland 2006):
 
 | Ratio | Value |
 |-------|-------|
@@ -236,12 +236,12 @@ $n_e = 100$ cm$^{-3}$; Osterbrock & Ferland 2006):
 | Hδ/Hβ | 0.259 |
 
 **Note on temperature dependence:** The intrinsic Balmer ratios
-are temperature-dependent.  At $T_e = 2.5 \times 10^4$ K the
-Hα/Hβ ratio is $\sim 2.72$, not 2.86.  The current implementation
-uses fixed ratios at $10^4$ K for the external dust correction.
+are temperature-dependent.  At T<sub>e</sub> = 2.5 × 10<sup>4</sup> K
+the Hα/Hβ ratio is ∼2.72, not 2.86.  The current implementation
+uses fixed ratios at 10<sup>4</sup> K for the external dust correction.
 See Section 3.5 (forward model) for self-consistent treatment where
-$A_V$ is a free parameter and Balmer ratios are recomputed at each
-model $T_e$.
+A<sub>V</sub> is a free parameter and Balmer ratios are recomputed at
+each model T<sub>e</sub>.
 
 #### 3.2.2 Salim+18 / Noll+09 attenuation (default)
 
@@ -249,19 +249,18 @@ Modified Calzetti et al. (2000) attenuation with a UV bump and
 power-law slope deviation (Noll et al. 2009; Salim et al. 2018):
 
 $$
-A(\lambda) = E(B-V) \left[ k'_\mathrm{Calz}(\lambda) \left(\frac{\lambda}{0.55\,\mu\mathrm{m}}\right)^\delta + B \cdot D(\lambda) \cdot R_V \right]
+A(\lambda) = E(B{-}V) \left[ k'_\mathrm{Calz}(\lambda) \left(\frac{\lambda}{0.55\,\mu\mathrm{m}}\right)^\delta + B \cdot D(\lambda) \cdot R_V \right]
 $$
 
 where:
-- $k'_\mathrm{Calz}(\lambda)$ is the Calzetti et al. (2000) starburst
-  curve,
-- $D(\lambda)$ is a Drude profile at 2175 Å modelling the UV bump:
-  $D(\lambda) = (\lambda \gamma)^2 / [(\lambda^2 - \lambda_0^2)^2 + (\lambda\gamma)^2]$,
-- $\delta$ is the slope deviation (default $-0.35$),
-- $B$ is the UV bump strength (default $2.27$),
-- $R_V = A_V / E(B-V)$ (default $3.15$).
+- k′<sub>Calz</sub>(λ) is the Calzetti et al. (2000) starburst curve,
+- D(λ) is a Drude profile at 2175 Å modelling the UV bump:
+  D(λ) = (λγ)<sup>2</sup> / [(λ<sup>2</sup> − λ<sub>0</sub><sup>2</sup>)<sup>2</sup> + (λγ)<sup>2</sup>],
+- δ is the slope deviation (default −0.35),
+- *B* is the UV bump strength (default 2.27),
+- R<sub>V</sub> = A<sub>V</sub> / E(B−V) (default 3.15).
 
-**Default parameters** ($R_V = 3.15$, $\delta = -0.35$, $B = 2.27$)
+**Default parameters** (R<sub>V</sub> = 3.15, δ = −0.35, *B* = 2.27)
 follow the median values for star-forming galaxies from
 Salim et al. (2018).
 
@@ -278,10 +277,9 @@ $$
 A(\lambda) = A_V \left[ a(x) + \frac{b(x)}{R_V} \right]
 $$
 
-where $x = 1/\lambda$ (µm$^{-1}$) and $a(x)$, $b(x)$ are
-piecewise polynomials for the IR ($0.3 \leq x < 1.1$),
-optical/NIR ($1.1 \leq x < 3.3$), and UV ($3.3 \leq x < 8.0$)
-regimes.  Default $R_V = 3.1$.
+where x = 1/λ (µm<sup>−1</sup>) and a(x), b(x) are piecewise
+polynomials for the IR (0.3 ≤ x < 1.1), optical/NIR (1.1 ≤ x < 3.3),
+and UV (3.3 ≤ x < 8.0) regimes.  Default R<sub>V</sub> = 3.1.
 
 **Reference:** Cardelli, J. A., Clayton, G. C. & Mathis, J. S.
 1989, ApJ, 345, 245
@@ -299,7 +297,7 @@ available, each posterior sample is corrected individually.
 
 ---
 
-### 3.3 Direct $T_e$ method
+### 3.3 Direct T<sub>e</sub> method
 
 The direct method uses the temperature-sensitive auroral-to-nebular
 line ratio to determine electron temperature, breaking the
@@ -313,16 +311,16 @@ A two-zone model is assumed:
 
 | Zone | Traced by | Temperature | Lines |
 |------|----------|-------------|-------|
-| High ionisation | O<sup>2+</sup>, Ne<sup>2+</sup> | $T_e(\text{high}) = T_e(\text{[OIII]})$ | [OIII] 4363, 4959, 5007; [NeIII] 3869 |
-| Low ionisation | O<sup>+</sup>, N<sup>+</sup>, S<sup>+</sup> | $T_e(\text{low}) = T_e(\text{[OII]})$ | [OII] 3726, 3729; [NII] 6585; [SII] 6718, 6732 |
+| High ionisation | O<sup>2+</sup>, Ne<sup>2+</sup> | T<sub>e</sub>(high) = T<sub>e</sub>([OIII]) | [OIII] 4363, 4959, 5007; [NeIII] 3869 |
+| Low ionisation | O<sup>+</sup>, N<sup>+</sup>, S<sup>+</sup> | T<sub>e</sub>(low) = T<sub>e</sub>([OII]) | [OII] 3726, 3729; [NII] 6585; [SII] 6718, 6732 |
 
 Intermediate ions (S<sup>2+</sup>, Ar<sup>2+</sup>) use
-$T_\text{mid} = (T_\text{high} + T_\text{low}) / 2$.
+T<sub>mid</sub> = (T<sub>high</sub> + T<sub>low</sub>) / 2.
 
 The contribution of O<sup>3+</sup>/H<sup>+</sup> to the total oxygen abundance
 is assumed negligible, following Berg et al. (2021).
 
-#### 3.3.2 Electron temperature: $T_e$([OIII])
+#### 3.3.2 Electron temperature: T<sub>e</sub>([OIII])
 
 Determined from the [OIII] auroral-to-nebular ratio using PyNEB:
 
@@ -330,29 +328,30 @@ $$
 R_{\mathrm{[OIII]}} = \frac{I(4363)}{I(5007) + I(4959)}
 $$
 
-PyNEB solves for $T_e$ numerically using atomic data for the O<sup>2+</sup>
-ion.  We use `getTemDen()` with `to_eval="(L(4363))/(L(5007)+L(4959))"`,
-`log=True`, `start_x=3.0`, `end_x=5.0` for robust root-finding across
-the range $10^3$–$10^5$ K (essential for metal-poor galaxies at
-$z > 4$ where $T_e > 25\,000$ K is common).
+PyNEB solves for T<sub>e</sub> numerically using atomic data for the
+O<sup>2+</sup> ion.  We use `getTemDen()` with
+`to_eval="(L(4363))/(L(5007)+L(4959))"`, `log=True`, `start_x=3.0`,
+`end_x=5.0` for robust root-finding across the range
+10<sup>3</sup>–10<sup>5</sup> K (essential for metal-poor galaxies at
+z > 4 where T<sub>e</sub> > 25 000 K is common).
 
 **Underlying physics:** For a collisionally excited line (CEL) the
-emissivity depends on $T_e$ through the Boltzmann factor.  For a
+emissivity depends on T<sub>e</sub> through the Boltzmann factor.  For a
 two-level simplification (Osterbrock & Ferland 2006, Chapter 5), the
-emissivity of a transition from upper level $j$ to lower level $i$ is:
+emissivity of a transition from upper level *j* to lower level *i* is:
 
 $$
 \varepsilon_{ji} = n_j A_{ji} h\nu_{ji}
 $$
 
-where $A_{ji}$ is the spontaneous transition probability and $n_j$
-is the population of level $j$, determined by solving the statistical
-equilibrium equations.  In the low-density limit
-($n_e \ll n_\text{crit}$), every collisional excitation is followed
-by radiative de-excitation, and the emissivity ratio of the auroral
-($^1S_0 \to\, ^1D_2$, 4363 Å) to nebular
-($^1D_2 \to\, ^3P_{1,2}$, 4959+5007 Å) transitions depends
-primarily on $T_e$:
+where A<sub>ji</sub> is the spontaneous transition probability and
+n<sub>j</sub> is the population of level *j*, determined by solving the
+statistical equilibrium equations.  In the low-density limit
+(n<sub>e</sub> ≪ n<sub>crit</sub>), every collisional excitation is
+followed by radiative de-excitation, and the emissivity ratio of the
+auroral (<sup>1</sup>S<sub>0</sub> → <sup>1</sup>D<sub>2</sub>, 4363 Å)
+to nebular (<sup>1</sup>D<sub>2</sub> → <sup>3</sup>P<sub>1,2</sub>,
+4959+5007 Å) transitions depends primarily on T<sub>e</sub>:
 
 $$
 R_\text{[OIII]} = \frac{j_{4363}}{j_{4959} + j_{5007}}
@@ -361,54 +360,56 @@ R_\text{[OIII]} = \frac{j_{4363}}{j_{4959} + j_{5007}}
 \exp\!\left(-\frac{\Delta E_{43}}{k_B T_e}\right)
 $$
 
-where $\Omega$ are the collision strengths, $\Delta E_{43} = E(^1S_0) - E(^1D_2) = 3.29$ eV
+where Ω are the collision strengths,
+ΔE<sub>43</sub> = E(<sup>1</sup>S<sub>0</sub>) − E(<sup>1</sup>D<sub>2</sub>) = 3.29 eV
 is the energy gap between the auroral and nebular upper levels, and
-$k_B$ is the Boltzmann constant.  This gives the strong exponential
-sensitivity to $T_e$.
+k<sub>B</sub> is the Boltzmann constant.  This gives the strong
+exponential sensitivity to T<sub>e</sub>.
 
 PyNEB solves the full multi-level (typically 5-level) statistical
 equilibrium problem numerically, accounting for all collisional and
 radiative transitions and the actual density dependence.  The
 5-level model for O<sup>2+</sup> includes the ground term
-$^3P_{0,1,2}$ and excited terms $^1D_2$ and $^1S_0$.  The
-statistical equilibrium equations are:
+<sup>3</sup>P<sub>0,1,2</sub> and excited terms <sup>1</sup>D<sub>2</sub>
+and <sup>1</sup>S<sub>0</sub>.  The statistical equilibrium equations are:
 
 $$
 \sum_{j \neq i} n_j \left[ A_{ji} + n_e q_{ji}(T_e) \right]
 = n_i \sum_{j \neq i} \left[ A_{ij} + n_e q_{ij}(T_e) \right]
 $$
 
-for each level $i$, where $q_{ij}$ is the collisional rate
+for each level *i*, where q<sub>ij</sub> is the collisional rate
 coefficient:
 
 $$
 q_{ij}(T_e) = \frac{8.629 \times 10^{-6}}{g_i\, T_e^{1/2}}\, \Omega_{ij}(T_e) \quad \text{cm}^3\,\text{s}^{-1}
 $$
 
-with $g_i$ the statistical weight of level $i$ and
-$\Omega_{ij}(T_e)$ the thermally averaged (Maxwellian) collision
-strength.  PyNEB interpolates tabulated $\Omega_{ij}(T_e)$ from
-the atomic data files.
+with g<sub>i</sub> the statistical weight of level *i* and
+Ω<sub>ij</sub>(T<sub>e</sub>) the thermally averaged (Maxwellian)
+collision strength.  PyNEB interpolates tabulated
+Ω<sub>ij</sub>(T<sub>e</sub>) from the atomic data files.
 
-#### 3.3.3 Electron temperature: $T_e$([NII])
+#### 3.3.3 Electron temperature: T<sub>e</sub>([NII])
 
-When [NII] 5756 is detected, $T_e$(N<sup>+</sup>) is measured directly from
-the [NII] 5756/6585 ratio via PyNEB, providing an independent
-low-ionisation zone temperature:
+When [NII] 5756 is detected, T<sub>e</sub>(N<sup>+</sup>) is measured
+directly from the [NII] 5756/6585 ratio via PyNEB, providing an
+independent low-ionisation zone temperature:
 
 $$
 R_\text{[NII]} = \frac{I(5756)}{I(6549) + I(6585)}
 $$
 
 The same 5-level statistical equilibrium approach applies, with
-the N<sup>+</sup> energy gap $\Delta E = E(^1S_0) - E(^1D_2) = 4.05$ eV
+the N<sup>+</sup> energy gap
+ΔE = E(<sup>1</sup>S<sub>0</sub>) − E(<sup>1</sup>D<sub>2</sub>) = 4.05 eV
 (the [NII] auroral line lies at shorter wavelength than [OIII] 4363
 because the energy gap is larger).  This ratio is less commonly
 detected because [NII] 5756 is intrinsically fainter than [OIII] 4363.
 
-#### 3.3.4 $T_e$–$T_e$ relations
+#### 3.3.4 T<sub>e</sub>–T<sub>e</sub> relations
 
-When $T_e$([OII]) cannot be measured directly (the usual case),
+When T<sub>e</sub>([OII]) cannot be measured directly (the usual case),
 the low-ionisation zone temperature is derived from the high-ionisation
 zone temperature via empirical relations.
 
@@ -416,19 +417,19 @@ zone temperature via empirical relations.
 
 | Name | Equation | Reference | Notes |
 |------|---------|-----------|-------|
-| `"desi"` | $T_e(\mathrm{low}) = 0.648\,T_e(\mathrm{high}) + 3270$ | DESI DR2 (arXiv:2601.02463) | Calibrated on the DESI Early Data Release galaxy sample |
-| `"classical"` | $T_e(\mathrm{low}) = 0.7\,T_e(\mathrm{high}) + 3000$ | Garnett (1992) | Widely used; original form from Campbell, Terlevich & Melnick (1986) |
+| `"desi"` | T<sub>e</sub>(low) = 0.648 T<sub>e</sub>(high) + 3270 | DESI DR2 (arXiv:2601.02463) | Calibrated on the DESI Early Data Release galaxy sample |
+| `"classical"` | T<sub>e</sub>(low) = 0.7 T<sub>e</sub>(high) + 3000 | Garnett (1992) | Widely used; original form from Campbell, Terlevich & Melnick (1986) |
 
-The $T_e$–$T_e$ relation is a significant source of systematic
-uncertainty.  Other relations in the literature include:
+The T<sub>e</sub>–T<sub>e</sub> relation is a significant source of
+systematic uncertainty.  Other relations in the literature include:
 
 | Equation | Reference |
 |---------|-----------|
-| $T_2 = 0.7\,T_3 + 1500$ | Campbell et al. (1986) / Garnett (1992), corrected by Andrews & Martini (2013) |
+| T<sub>2</sub> = 0.7 T<sub>3</sub> + 1500 | Campbell et al. (1986) / Garnett (1992), corrected by Andrews & Martini (2013) |
 | Various parametric forms | Izotov et al. (2006); Pilyugin et al. (2009); Nicholls et al. (2014) |
-| $T_2 = 1.0807\,T_3 - 0.0846\,T_3^2$ ($T$ in $10^4$ K) | Pagel et al. (1992) |
+| T<sub>2</sub> = 1.0807 T<sub>3</sub> − 0.0846 T<sub>3</sub><sup>2</sup> (T in 10<sup>4</sup> K) | Pagel et al. (1992) |
 
-The $\sim 1000$–$2000$ K discrepancy between theoretically and
+The ∼1000–2000 K discrepancy between theoretically and
 empirically calibrated relations (Andrews & Martini 2013; Curti
 et al. 2017) arises partly from the difference between individual
 H II regions and galaxy-integrated spectra, where flux originates
@@ -437,43 +438,44 @@ ionised gas.
 
 #### 3.3.5 Electron density
 
-$n_e$ is derived from density-sensitive doublet ratios via PyNEB:
+n<sub>e</sub> is derived from density-sensitive doublet ratios via PyNEB:
 
 | Doublet | Lines | Diagnostic ratio |
 |---------|-------|-----------------|
-| [SII] | 6718, 6732 | $I(6718)/I(6732)$ |
-| [OII] | 3726, 3729 | $I(3726)/I(3729)$ |
+| [SII] | 6718, 6732 | I(6718) / I(6732) |
+| [OII] | 3726, 3729 | I(3726) / I(3729) |
 
 [SII] is preferred when available; [OII] is used as a fallback.
-If neither doublet is detected, $n_e = 100$ cm$^{-3}$ is assumed
-(abundance diagnostics are insensitive to $n_e$ at
-$n_e \lesssim 10^4$ cm$^{-3}$; e.g. Isobe et al. 2023).
+If neither doublet is detected, n<sub>e</sub> = 100 cm<sup>−3</sup> is
+assumed (abundance diagnostics are insensitive to n<sub>e</sub> at
+n<sub>e</sub> ≲ 10<sup>4</sup> cm<sup>−3</sup>; e.g. Isobe et al. 2023).
 
 **Physical basis:** The [SII] and [OII] doublets arise from
 transitions between levels within the ground-term fine-structure
-splitting ($^4S_{3/2}$, $^2D_{3/2,5/2}$ for S<sup>+</sup>; analogous
-for O<sup>+</sup>).  The two lines in each doublet have different
-critical densities, so their ratio depends on $n_e$:
+splitting (<sup>4</sup>S<sub>3/2</sub>, <sup>2</sup>D<sub>3/2,5/2</sub>
+for S<sup>+</sup>; analogous for O<sup>+</sup>).  The two lines in each
+doublet have different critical densities, so their ratio depends on
+n<sub>e</sub>:
 
 $$
 \frac{I(\lambda_1)}{I(\lambda_2)}
 = \frac{n_{j_1}\,A_{j_1 \to i_1}\,\nu_1}{n_{j_2}\,A_{j_2 \to i_2}\,\nu_2}
 $$
 
-At low density ($n_e \ll n_\text{crit}$) the ratio approaches the
-ratio of collision strengths; at high density
-($n_e \gg n_\text{crit}$) it approaches the ratio of statistical
+At low density (n<sub>e</sub> ≪ n<sub>crit</sub>) the ratio approaches
+the ratio of collision strengths; at high density
+(n<sub>e</sub> ≫ n<sub>crit</sub>) it approaches the ratio of statistical
 weights.  The transition occurs around
-$n_\text{crit} \sim 10^3$–$10^4$ cm$^{-3}$, making the doublet ratio
-a sensitive density probe in this regime.  PyNEB uses the full
-multi-level solution to extract $n_e$ from the observed ratio at the
-adopted $T_e$.
+n<sub>crit</sub> ∼ 10<sup>3</sup>–10<sup>4</sup> cm<sup>−3</sup>,
+making the doublet ratio a sensitive density probe in this regime.
+PyNEB uses the full multi-level solution to extract n<sub>e</sub> from
+the observed ratio at the adopted T<sub>e</sub>.
 
 #### 3.3.6 Ionic abundances
 
-Ionic abundances $X^{i+}/\mathrm{H}^+$ are computed via PyNEB's
-`getIonAbundance()` method for $T_e \leq 30\,000$ K.  For
-$T_e > 30\,000$ K (beyond the Storey & Hummer 1995 H I
+Ionic abundances X<sup>i+</sup>/H<sup>+</sup> are computed via PyNEB's
+`getIonAbundance()` method for T<sub>e</sub> ≤ 30 000 K.  For
+T<sub>e</sub> > 30 000 K (beyond the Storey & Hummer 1995 H I
 recombination tables bundled with PyNEB), we compute abundances
 manually:
 
@@ -481,10 +483,9 @@ $$
 \frac{X^{i+}}{\mathrm{H}^+} = \frac{I_\mathrm{line}}{I_{\mathrm{H}\beta}} \times \frac{\varepsilon_{\mathrm{H}\beta}(T_e, n_e)}{\varepsilon_\mathrm{line}(T_e, n_e)}
 $$
 
-where $\varepsilon_\mathrm{line}$ is obtained from PyNEB's CEL
-emissivity tables (valid at any temperature) and
-$\varepsilon_{\mathrm{H}\beta}$ uses the Aller (1984) formula
-(Section 3.5.3) which has no upper temperature limit.
+where ε<sub>line</sub> is obtained from PyNEB's CEL emissivity tables
+(valid at any temperature) and ε<sub>Hβ</sub> uses the Aller (1984)
+formula (Section 3.5.3) which has no upper temperature limit.
 
 The CEL emissivity is computed from the level populations obtained
 by solving the statistical equilibrium equations (Section 3.3.2):
@@ -495,7 +496,7 @@ $$
 $$
 
 In the low-density limit this simplifies to
-$\varepsilon \propto n_{X^{i+}} \, n_e \, q_{ij}(T_e) \, h\nu_{ji}$,
+ε ∝ n<sub>X<sup>i+</sup></sub> n<sub>e</sub> q<sub>ij</sub>(T<sub>e</sub>) hν<sub>ji</sub>,
 and the ionic abundance reduces to:
 
 $$
@@ -504,10 +505,9 @@ $$
 \times \frac{\alpha_{\mathrm{H}\beta}^\mathrm{eff}(T_e)}{q_{ij}(T_e)\,h\nu_{ji} / (h\nu_{\mathrm{H}\beta})}
 $$
 
-where $\alpha_{\mathrm{H}\beta}^\mathrm{eff}$ is the effective
-recombination coefficient for H$\beta$ (see Section 3.5.3).
-PyNEB handles the full density-dependent multi-level solution
-internally.
+where α<sup>eff</sup><sub>Hβ</sub> is the effective recombination
+coefficient for Hβ (see Section 3.5.3).  PyNEB handles the full
+density-dependent multi-level solution internally.
 
 **Ions computed:**
 
@@ -525,7 +525,7 @@ internally.
 
 PyNEB (Luridiana et al. 2015) is used for all atomic physics
 calculations.  The default atomic and collisional data shipped with
-PyNEB $\geq 1.1.25$ include:
+PyNEB ≥ 1.1.25 include:
 
 - **Transition probabilities:** Froese Fischer & Tachiev (2004)
   for most ions; Storey & Zeippen (2000) for [NII], [OIII].
@@ -557,16 +557,16 @@ $$
 \frac{\mathrm{N}}{\mathrm{O}} = \mathrm{ICF}_\mathrm{N} \times \frac{\mathrm{N}^+/\mathrm{H}^+}{\mathrm{O}^+/\mathrm{H}^+}
 $$
 
-where $\mathrm{ICF}_\mathrm{N}$ is from Izotov et al. (2006, eq. 18):
+where ICF<sub>N</sub> is from Izotov et al. (2006, eq. 18):
 
 $$
 \mathrm{ICF}_\mathrm{N} = -0.825\,x^2 + 0.718\,x + 0.853, \qquad x = \mathrm{O}^+ / \mathrm{O}_\mathrm{total}
 $$
 
-clamped to $\mathrm{ICF}_\mathrm{N} \geq 1$.  For many applications
-the standard assumption $\mathrm{N/O} \approx \mathrm{N}^+/\mathrm{O}^+$
-(ICF = 1) is used, justified by the similar ionisation potentials of
-O<sup>+</sup> and N<sup>+</sup> (e.g. Nava et al. 2006; Amayo et al. 2021).
+clamped to ICF<sub>N</sub> ≥ 1.  For many applications the standard
+assumption N/O ≈ N<sup>+</sup>/O<sup>+</sup> (ICF = 1) is used,
+justified by the similar ionisation potentials of O<sup>+</sup> and
+N<sup>+</sup> (e.g. Nava et al. 2006; Amayo et al. 2021).
 
 **Sulfur:**
 
@@ -580,7 +580,7 @@ $$
 \mathrm{ICF}_\mathrm{S} = 0.013 + 5.986\,x - 21.085\,x^2 + 26.462\,x^3 - 11.282\,x^4
 $$
 
-clamped to $\mathrm{ICF}_\mathrm{S} \geq 1$.
+clamped to ICF<sub>S</sub> ≥ 1.
 
 **Neon:**
 
@@ -606,10 +606,10 @@ $$
 \mathrm{ICF}_\mathrm{Ar} = 0.157 + 3.119\,x - 6.185\,x^2 + 4.517\,x^3
 $$
 
-clamped to $\mathrm{ICF}_\mathrm{Ar} \geq 1$.
+clamped to ICF<sub>Ar</sub> ≥ 1.
 
-In all ICF expressions, $x = \mathrm{O}^+ / \mathrm{O}_\mathrm{total}$ is
-the fractional ionic abundance of O<sup>+</sup>.
+In all ICF expressions, x = O<sup>+</sup> / O<sub>total</sub> is the
+fractional ionic abundance of O<sup>+</sup>.
 
 **Reporting convention:**
 
@@ -621,8 +621,8 @@ $$
 \log(\mathrm{N/O}) = \log_{10}\!\left(\mathrm{ICF}_\mathrm{N} \times \frac{\mathrm{N}^+/\mathrm{H}^+}{\mathrm{O}^+/\mathrm{H}^+}\right)
 $$
 
-The solar oxygen abundance is $12 + \log(\mathrm{O/H})_\odot = 8.69$
-(Asplund et al. 2009).
+The solar oxygen abundance is
+12 + log(O/H)<sub>☉</sub> = 8.69 (Asplund et al. 2009).
 
 **Reference:** Izotov, Y. I., Stasinska, G., Meynet, G., Guseva, N. G.
 & Thuan, T. X. 2006, A&A, 448, 955
@@ -630,20 +630,19 @@ The solar oxygen abundance is $12 + \log(\mathrm{O/H})_\odot = 8.69$
 #### 3.3.9 Uncertainty propagation
 
 **Bootstrap / least-squares results:** Gaussian Monte Carlo
-perturbation ($N_\mathrm{MC} = 1000$ by default):
+perturbation (N<sub>MC</sub> = 1000 by default):
 
 1. For each iteration, perturb every line flux:
-   $F'_\mathrm{line} = \max(F_\mathrm{line} + \sigma_\mathrm{line} \times \epsilon,\; 10^{-50})$,
-   $\epsilon \sim \mathcal{N}(0, 1)$.
-2. Recompute $T_e$, ionic abundances, totals through the full PyNEB
-   pipeline.
-3. Report $\hat{\sigma}$ of the resulting 12+log(O/H) and
-   log(N/O) distributions.
+   F′<sub>line</sub> = max(F<sub>line</sub> + σ<sub>line</sub> × ε, 10<sup>−50</sup>),
+   where ε ∼ 𝒩(0, 1).
+2. Recompute T<sub>e</sub>, ionic abundances, totals through the full
+   PyNEB pipeline.
+3. Report σ̂ of the resulting 12+log(O/H) and log(N/O) distributions.
 
 **MCMC results:** Each posterior sample's line fluxes are propagated
 through the full PyNEB pipeline.  Posteriors are thinned to
-$N_\mathrm{posterior}$ samples (default 1000) via random subsampling
-to keep runtime manageable ($\sim 7$ ms per PyNEB evaluation).
+N<sub>posterior</sub> samples (default 1000) via random subsampling
+to keep runtime manageable (∼7 ms per PyNEB evaluation).
 
 ---
 
@@ -652,7 +651,7 @@ to keep runtime manageable ($\sim 7$ ms per PyNEB evaluation).
 Used when the [OIII] 4363 auroral line is not detected.
 Strong-line methods use empirical calibrations between bright
 emission-line ratios and metallicity, calibrated on samples of
-galaxies with direct $T_e$ measurements.
+galaxies with direct T<sub>e</sub> measurements.
 
 #### 3.4.1 Diagnostic ratios
 
@@ -666,13 +665,13 @@ $$
 \mathrm{O32} = \log_{10}\!\left(\frac{[\mathrm{OIII}]\,5007}{[\mathrm{OII}]}\right)
 $$
 
-[OII] denotes the total [OII] $\lambda\lambda$3726,3729 flux
-(resolved or unresolved).
+[OII] denotes the total [OII] λλ3726,3729 flux (resolved or
+unresolved).
 
 #### 3.4.2 Calibration polynomials
 
-Each diagnostic ratio $R$ is modelled as a polynomial in
-$Z = 12 + \log(\mathrm{O/H})$:
+Each diagnostic ratio *R* is modelled as a polynomial in
+Z = 12 + log(O/H):
 
 $$
 R_\mathrm{model}(Z) = \sum_{k=0}^{n} c_k \,(Z - Z_\mathrm{ref})^k, \qquad Z_\mathrm{ref} = 8.0
@@ -680,24 +679,24 @@ $$
 
 **Coefficients (Sanders et al. 2025, Table 3):**
 
-| Ratio | $c_0$ | $c_1$ | $c_2$ | $c_3$ | $c_4$ | $Z_\mathrm{min}$ | $Z_\mathrm{max}$ |
-|-------|-------|-------|-------|-------|-------|-----------------|-----------------|
-| O3 | 0.852 | $-0.162$ | $-1.149$ | $-0.553$ | — | 7.3 | 8.6 |
-| O2 | 0.172 | 0.954 | $-0.832$ | — | — | 7.3 | 8.6 |
-| R23 | 0.998 | 0.053 | $-0.141$ | $-0.493$ | $-0.774$ | 7.3 | 8.6 |
-| O32 | 0.697 | $-1.245$ | $-0.869$ | — | — | 7.3 | 8.6 |
+| Ratio | c<sub>0</sub> | c<sub>1</sub> | c<sub>2</sub> | c<sub>3</sub> | c<sub>4</sub> | Z<sub>min</sub> | Z<sub>max</sub> |
+|-------|-------|-------|-------|-------|-------|-------|-------|
+| O3 | 0.852 | −0.162 | −1.149 | −0.553 | — | 7.3 | 8.6 |
+| O2 | 0.172 | 0.954 | −0.832 | — | — | 7.3 | 8.6 |
+| R23 | 0.998 | 0.053 | −0.141 | −0.493 | −0.774 | 7.3 | 8.6 |
+| O32 | 0.697 | −1.245 | −0.869 | — | — | 7.3 | 8.6 |
 
 #### 3.4.3 Simultaneous chi-squared fit
 
-The best-fit metallicity $Z_\mathrm{best}$ is found by minimising
+The best-fit metallicity Z<sub>best</sub> is found by minimising
 the simultaneous chi-squared across all available diagnostics:
 
 $$
 \chi^2(Z) = \sum_{m \in \mathrm{diag}} \frac{(R_\mathrm{obs}^{(m)} - R_\mathrm{model}^{(m)}(Z))^2}{\sigma_{\mathrm{obs},m}^2 + \sigma_{\mathrm{cal},m}^2}
 $$
 
-where $\sigma_\mathrm{obs}$ is the measurement error on $\log_{10}$
-of the ratio (Gaussian error propagation) and $\sigma_\mathrm{cal}$
+where σ<sub>obs</sub> is the measurement error on log<sub>10</sub>
+of the ratio (Gaussian error propagation) and σ<sub>cal</sub>
 is the total calibration scatter in ratio space:
 
 $$
@@ -705,7 +704,7 @@ $$
 $$
 
 Minimisation uses `scipy.optimize.minimize_scalar` with method
-`"bounded"` on $Z \in [6.5, 9.0]$.
+`"bounded"` on Z ∈ [6.5, 9.0].
 
 #### 3.4.4 Three scatter components
 
@@ -713,13 +712,13 @@ Sanders+25 report three distinct scatter values for each diagnostic:
 
 | Symbol | Meaning | Role in code |
 |--------|---------|-------------|
-| $\sigma_{R,\mathrm{fit}}$ | RMS residual of the polynomial fit to the calibration sample | Combined into $\sigma_\mathrm{cal}$ |
-| $\sigma_{R,\mathrm{int}}$ | Intrinsic scatter in the ratio at fixed $Z$ (physical scatter from galaxy-to-galaxy variations) | Combined into $\sigma_\mathrm{cal}$ |
-| $\sigma_{\mathrm{O/H,int}}$ | Intrinsic scatter in $12+\log(\mathrm{O/H})$ at fixed ratio (the actual metallicity uncertainty floor per diagnostic) | Stored for reference |
+| σ<sub>R,fit</sub> | RMS residual of the polynomial fit to the calibration sample | Combined into σ<sub>cal</sub> |
+| σ<sub>R,int</sub> | Intrinsic scatter in the ratio at fixed Z (physical scatter from galaxy-to-galaxy variations) | Combined into σ<sub>cal</sub> |
+| σ<sub>O/H,int</sub> | Intrinsic scatter in 12+log(O/H) at fixed ratio (the actual metallicity uncertainty floor per diagnostic) | Stored for reference |
 
 **Values:**
 
-| Ratio | $\sigma_{R,\mathrm{fit}}$ | $\sigma_{R,\mathrm{int}}$ | $\sigma_\mathrm{cal}$ | $\sigma_{\mathrm{O/H,int}}$ |
+| Ratio | σ<sub>R,fit</sub> | σ<sub>R,int</sub> | σ<sub>cal</sub> | σ<sub>O/H,int</sub> |
 |-------|------|------|------|------|
 | O3 | 0.04 | 0.13 | 0.136 | 0.14 |
 | O2 | 0.03 | 0.25 | 0.252 | 0.22 |
@@ -729,26 +728,25 @@ Sanders+25 report three distinct scatter values for each diagnostic:
 #### 3.4.5 Uncertainty propagation
 
 **Bootstrap / least-squares results:** Monte Carlo perturbation
-($N_\mathrm{MC} = 1000$ by default).  Each iteration:
+(N<sub>MC</sub> = 1000 by default).  Each iteration:
 
 1. Perturb each observed log-ratio by
-   $\mathcal{N}(0, \sqrt{\sigma_\mathrm{obs}^2 + \sigma_\mathrm{cal}^2})$
+   𝒩(0, √(σ<sub>obs</sub><sup>2</sup> + σ<sub>cal</sub><sup>2</sup>))
    — both measurement and calibration scatter are included.
-2. Re-minimise the chi-squared to find a perturbed $Z$.
-3. Report (16th, 84th) percentiles of the $Z$ distribution.
+2. Re-minimise the chi-squared to find a perturbed Z.
+3. Report (16th, 84th) percentiles of the Z distribution.
 
 **MCMC results:** Each posterior sample provides a set of fluxes.
 For each sample:
 
 1. Compute line ratios from the posterior fluxes.
-2. Perturb each ratio by $\mathcal{N}(0, \sigma_\mathrm{cal})$ to
-   propagate calibration scatter.
-3. Minimise to find $Z$ for that sample.
+2. Perturb each ratio by 𝒩(0, σ<sub>cal</sub>) to propagate
+   calibration scatter.
+3. Minimise to find Z for that sample.
 
 The MCMC posterior spread captures measurement uncertainty, and
-the $\sigma_\mathrm{cal}$ perturbation adds the calibration scatter
-on top.  Posteriors are thinned to $N_\mathrm{posterior}$ samples
-(default 1000).
+the σ<sub>cal</sub> perturbation adds the calibration scatter on top.
+Posteriors are thinned to N<sub>posterior</sub> samples (default 1000).
 
 **Reference:** Sanders, R. L. et al. 2025, ApJ (submitted)
 
@@ -765,8 +763,8 @@ flux ratios and comparing to observations via MCMC or nested sampling.
 | Parameter | Symbol | Range | Prior | Unit |
 |-----------|--------|-------|-------|------|
 | Electron temperature | log<sub>10</sub> T<sub>e</sub> | [3.5, 5.0] | Uniform | K |
-| Electron density | log<sub>10</sub> n<sub>e</sub> | [0.0, 5.0] | Uniform | cm<sup>-3</sup> |
-| Per-ion abundance | log<sub>10</sub>(X<sup>i+</sup>/H<sup>+</sup>) | [-7, -2] (oxygen); [-8, -3] (N, Ne); [-9, -4] (S, Ar) | Uniform in log (= log-uniform in linear) | — |
+| Electron density | log<sub>10</sub> n<sub>e</sub> | [0.0, 5.0] | Uniform | cm<sup>−3</sup> |
+| Per-ion abundance | log<sub>10</sub>(X<sup>i+</sup>/H<sup>+</sup>) | [−7, −2] (oxygen); [−8, −3] (N, Ne); [−9, −4] (S, Ar) | Uniform in log (= log-uniform in linear) | — |
 
 Only ions with at least one detected emission line are included as
 free parameters.  Typically 4–8 free parameters depending on the
@@ -774,27 +772,26 @@ available lines.
 
 #### 3.5.2 Model prediction
 
-For each parameter vector $\boldsymbol{\theta}$, the predicted
-line/Hβ flux ratio is:
+For each parameter vector **θ**, the predicted line/Hβ flux ratio is:
 
 $$
 \frac{F_\mathrm{line}}{F_{\mathrm{H}\beta}} = \frac{X^{i+}}{\mathrm{H}^+} \times \frac{\varepsilon_\mathrm{line}(T_e, n_e)}{\varepsilon_{\mathrm{H}\beta}(T_e, n_e)}
 $$
 
-where $\varepsilon_\mathrm{line}$ is the collisionally excited line
-(CEL) emissivity from PyNEB's `Atom.getEmissivity()`, and
-$\varepsilon_{\mathrm{H}\beta}$ is the Hβ recombination emissivity.
+where ε<sub>line</sub> is the collisionally excited line (CEL)
+emissivity from PyNEB's `Atom.getEmissivity()`, and ε<sub>Hβ</sub> is
+the Hβ recombination emissivity.
 
 For lines consisting of multiple transitions (e.g. [OII] doublet),
 the emissivities are summed.
 
 #### 3.5.3 Hβ emissivity
 
-For $T_e \leq 30\,000$ K, the Storey & Hummer (1995) H I
+For T<sub>e</sub> ≤ 30 000 K, the Storey & Hummer (1995) H I
 recombination tables in PyNEB are used via
 `RecAtom("H", 1).getEmissivity(Te, ne, wave=4861)`.
 
-For $T_e > 30\,000$ K, the Aller (1984) Case B formula is used:
+For T<sub>e</sub> > 30 000 K, the Aller (1984) Case B formula is used:
 
 $$
 \alpha_{\mathrm{H}\beta}^{\mathrm{eff}} = 3.03 \times 10^{-14} \left(\frac{T_e}{10^4\,\mathrm{K}}\right)^{-0.874} \;\mathrm{cm}^3\,\mathrm{s}^{-1}
@@ -805,8 +802,8 @@ $$
 $$
 
 This formula has no upper temperature limit, enabling abundance
-calculations for the extremely metal-poor, high-$T_e$ galaxies
-found at $z > 4$ with JWST.
+calculations for the extremely metal-poor, high-T<sub>e</sub> galaxies
+found at z > 4 with JWST.
 
 **References:**
 - Aller, L. H. 1984, *Physics of Thermal Gaseous Nebulae* (Reidel)
@@ -821,8 +818,8 @@ $$
 \frac{(R_{\mathrm{obs},l} - R_{\mathrm{model},l}(\boldsymbol{\theta}))^2}{\sigma_{R,l}^2}
 $$
 
-where $R_{\mathrm{obs},l} = F_l / F_{\mathrm{H}\beta}$ and
-$\sigma_{R,l}$ is the error on the ratio propagated from the flux
+where R<sub>obs,l</sub> = F<sub>l</sub> / F<sub>Hβ</sub> and
+σ<sub>R,l</sub> is the error on the ratio propagated from the flux
 uncertainties.
 
 #### 3.5.5 Sampling
@@ -843,7 +840,7 @@ $$
 
 computed sample-by-sample from the posterior chains.
 
-N/O is derived as $\log(\mathrm{N}^+/\mathrm{H}^+) - \log(\mathrm{O}^+/\mathrm{H}^+)$
+N/O is derived as log(N<sup>+</sup>/H<sup>+</sup>) − log(O<sup>+</sup>/H<sup>+</sup>)
 (= log(N<sup>+</sup>/O<sup>+</sup>), the ICF = 1 assumption).
 
 #### 3.5.7 Current limitations and differences from Cullen+25
@@ -851,22 +848,23 @@ N/O is derived as $\log(\mathrm{N}^+/\mathrm{H}^+) - \log(\mathrm{O}^+/\mathrm{H
 The current implementation differs from the full Cullen et al. (2025)
 / Scholte et al. (2025) EXCELS methodology in several ways:
 
-1. **$A_V$ is not a free parameter.** Dust correction is applied
+1. **A<sub>V</sub> is not a free parameter.** Dust correction is applied
    externally before the forward model, using fixed Case B Balmer
-   ratios at $10^4$ K.  Cullen+25 treat $A_V$ as a 6th free
-   parameter and recompute temperature-dependent Balmer ratios at
+   ratios at 10<sup>4</sup> K.  Cullen+25 treat A<sub>V</sub> as a 6th
+   free parameter and recompute temperature-dependent Balmer ratios at
    each likelihood evaluation, providing self-consistent dust
    correction.
 
-2. **Single $T_e$ zone in the forward model.** The forward model
+2. **Single T<sub>e</sub> zone in the forward model.** The forward model
    uses a single `log_Te` parameter for all CEL emissivities.
-   Cullen+25 apply a $T_e$–$T_e$ relation to derive $T_e$([OII])
-   from $T_e$([OIII]) for the low-ionisation zone.  In practice
-   this difference is absorbed into the fitted ionic abundances when
-   both O<sup>+</sup> and O<sup>2+</sup> are free parameters.
+   Cullen+25 apply a T<sub>e</sub>–T<sub>e</sub> relation to derive
+   T<sub>e</sub>([OII]) from T<sub>e</sub>([OIII]) for the
+   low-ionisation zone.  In practice this difference is absorbed into
+   the fitted ionic abundances when both O<sup>+</sup> and O<sup>2+</sup>
+   are free parameters.
 
 3. **Prior bounds differ** (see Section 3.5.1).  Cullen+25 use
-   $\log T_e \in [3.0, 4.52]$ and $\log n_e \in [1.0, 3.0]$.
+   log T<sub>e</sub> ∈ [3.0, 4.52] and log n<sub>e</sub> ∈ [1.0, 3.0].
 
 ---
 
@@ -876,7 +874,8 @@ When a `BroadFitResult` or `MCMCBroadFitResult` is passed to
 `compute_abundances()`, broad Balmer component fluxes (Hα, Hβ,
 Hγ, Hδ) are automatically **summed** with the narrow component
 fluxes.  This ensures the total hydrogen flux is used for the Balmer
-decrement and abundance normalisation ($I_\mathrm{line}/I_{\mathrm{H}\beta}$).
+decrement and abundance normalisation
+(I<sub>line</sub> / I<sub>Hβ</sub>).
 
 For MCMC results, broad and narrow posteriors are summed
 sample-by-sample to preserve correlations.
@@ -906,29 +905,29 @@ sample-by-sample to preserve correlations.
 - Osterbrock, D. E. & Ferland, G. J. 2006, *Astrophysics of Gaseous Nebulae and Active Galactic Nuclei*, 2nd ed. — Case B Balmer ratios
 - Salim, S. et al. 2018, ApJ, 859, 11 — Modified Calzetti parameters
 
-### Electron temperature and Te-Te relations
+### Electron temperature and T<sub>e</sub>–T<sub>e</sub> relations
 
-- Andrews, B. H. & Martini, P. 2013, ApJ, 765, 140 — Te-Te correction
-- Campbell, A., Terlevich, R. & Melnick, J. 1986, MNRAS, 223, 811 — Original Te-Te relation
-- Curti, M. et al. 2017, MNRAS, 465, 1384 — Te-Te discrepancy
-- DESI Collaboration 2025, arXiv:2601.02463 — DESI DR2 Te-Te relation
-- Garnett, D. R. 1992, AJ, 103, 1330 — Classical Te-Te relation
-- Nicholls, D. C. et al. 2014, ApJ, 786, 155 — Te-Te relations
-- Pagel, B. E. J. et al. 1992, MNRAS, 255, 325 — Te-Te relation
-- Pilyugin, L. S. et al. 2009, A&A, 508, 1043 — Te-Te relation
-- Pilyugin, L. S. et al. 2010, ApJ, 720, 1738 — Te-Te discrepancy
+- Andrews, B. H. & Martini, P. 2013, ApJ, 765, 140 — T<sub>e</sub>–T<sub>e</sub> correction
+- Campbell, A., Terlevich, R. & Melnick, J. 1986, MNRAS, 223, 811 — Original T<sub>e</sub>–T<sub>e</sub> relation
+- Curti, M. et al. 2017, MNRAS, 465, 1384 — T<sub>e</sub>–T<sub>e</sub> discrepancy
+- DESI Collaboration 2025, arXiv:2601.02463 — DESI DR2 T<sub>e</sub>–T<sub>e</sub> relation
+- Garnett, D. R. 1992, AJ, 103, 1330 — Classical T<sub>e</sub>–T<sub>e</sub> relation
+- Nicholls, D. C. et al. 2014, ApJ, 786, 155 — T<sub>e</sub>–T<sub>e</sub> relations
+- Pagel, B. E. J. et al. 1992, MNRAS, 255, 325 — T<sub>e</sub>–T<sub>e</sub> relation
+- Pilyugin, L. S. et al. 2009, A&A, 508, 1043 — T<sub>e</sub>–T<sub>e</sub> relation
+- Pilyugin, L. S. et al. 2010, ApJ, 720, 1738 — T<sub>e</sub>–T<sub>e</sub> discrepancy
 
 ### Electron density
 
-- Isobe, Y. et al. 2023, ApJ, 956, 139 — Density insensitivity at low $n_e$
+- Isobe, Y. et al. 2023, ApJ, 956, 139 — Density insensitivity at low n<sub>e</sub>
 
 ### Ionic abundances and ICFs
 
-- Amayo, A. et al. 2021, MNRAS, 505, 2361 — N/O = N+/O+ justification
+- Amayo, A. et al. 2021, MNRAS, 505, 2361 — N/O = N<sup>+</sup>/O<sup>+</sup> justification
 - Asplund, M. et al. 2009, ARA&A, 47, 481 — Solar abundances
 - Berg, D. A. et al. 2021, ApJ, 922, 170 — O<sup>3+</sup> contribution negligible
 - Izotov, Y. I. et al. 2006, A&A, 448, 955 — ICFs (N, Ne, S, Ar)
-- Nava, A. et al. 2006, ApJ, 645, 1076 — N/O = N+/O+ justification
+- Nava, A. et al. 2006, ApJ, 645, 1076 — N/O = N<sup>+</sup>/O<sup>+</sup> justification
 
 ### Strong-line calibrations
 
@@ -943,7 +942,7 @@ sample-by-sample to preserve correlations.
 
 - Foreman-Mackey, D. et al. 2013, PASP, 125, 306 — emcee
 - Foreman-Mackey, D. 2016, JOSS, 1, 24 — corner.py
-- Gelman, A. & Rubin, D. B. 1992, Statistical Science, 7, 457 — R-hat
+- Gelman, A. & Rubin, D. B. 1992, Statistical Science, 7, 457 — R̂
 - Koposov, S. et al. 2022, doi:10.5281/zenodo.7388523 — dynesty
 - Lange, J. U. 2023, MNRAS, 525, 3181 — nautilus
 - Speagle, J. S. 2020, MNRAS, 493, 3132 — dynesty
