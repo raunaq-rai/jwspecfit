@@ -235,7 +235,16 @@ def fit_lines(
         if grating is not None:
             candidate_lines = get_line_list(grating)
         else:
-            candidate_lines = get_line_list("prism")
+            # Infer line list from estimated resolving power.
+            # Prism: R ~ 30–300; gratings/stacks: R ≥ 500.
+            R_arr = resolve_R(spec.wave_um, R=R)
+            R_med = float(np.median(R_arr))
+            if R_med > 500:
+                candidate_lines = get_line_list("grating")
+                logger.info("Median R ≈ %.0f → using resolved line list.", R_med)
+            else:
+                candidate_lines = get_line_list("prism")
+                logger.info("Median R ≈ %.0f → using prism line list.", R_med)
         line_names = observable_lines(
             candidate_lines, z, spec.wave_um.min(), spec.wave_um.max()
         )
