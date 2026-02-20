@@ -222,6 +222,7 @@ result = jwspecfit.fit_lines(
     R=None,              # override resolving power (float or callable)
     lines=None,          # restrict to specific lines (default: auto-detect)
     wave_range_A=None,   # (lo, hi) restrict to wavelength window (Å, observed)
+    wave_windows_A=None, # list of (lo, hi) for multi-window fitting (stacks)
     deg=2,               # continuum polynomial degree
     n_boot=1000,         # bootstrap iterations (0 = analytic errors)
     clip_sigma=2.5,      # continuum sigma-clipping threshold
@@ -266,6 +267,37 @@ result = jwspecfit.fit_lines(spec, z=6.0, lines=["OIII_4959", "OIII_5007", "HBET
 ```python
 result = jwspecfit.fit_lines(spec, z=6.0, wave_range_A=(35000, 50000))
 ```
+
+### Multi-window fitting
+
+For stacked spectra where the continuum shape varies across the full
+wavelength range (e.g. UV-normalised stacks), fitting in a single pass
+can produce poor continuum estimates at the blue or red end.  Use
+`wave_windows_A` to fit multiple independent wavelength windows, each
+with its own continuum subtraction:
+
+```python
+result = jwspecfit.fit_lines(
+    spec, z=0.0,
+    wave_windows_A=[
+        (3500, 5200),   # blue window: [OII] → Hβ + [OIII]
+        (5500, 7000),   # red window:  [NII] + Hα + [SII]
+    ],
+    sigma_factor=2.0,   # wider width bounds for stacked spectra
+)
+```
+
+Each window gets its own polynomial continuum fit and line detection.
+Results are merged into a single `FitResult` with the full spectrum
+attached — compatible with `plot_fit()`, `plot_fit_interactive()`,
+`export_lines_txt()`, and downstream packages (`jwspecmcmc`,
+`jwspecabund`).
+
+Pixels outside all windows have `NaN` continuum and residuals (no fit
+attempted there), so the plot naturally shows gaps between windows.
+
+`wave_windows_A` is mutually exclusive with `wave_range_A` and works
+with all broad-component modes (`mode="auto"`, `"off"`, etc.).
 
 ---
 

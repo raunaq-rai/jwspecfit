@@ -7,6 +7,8 @@ __version__ = "0.1.0"
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
+
 from .broad import BroadFitResult, fit_with_broad
 from .fitter import FitResult, LineResult
 from .fitter import fit_lines as _fit_lines_narrow
@@ -45,6 +47,84 @@ __all__ = [
 ]
 
 
+def _merge_window_results(
+    spectrum: Spectrum,
+    window_results: list[FitResult | BroadFitResult],
+    wave_windows_A: list[tuple[float, float]],
+) -> FitResult:
+    """Merge per-window fit results into a single full-spectrum result.
+
+    Parameters
+    ----------
+    spectrum : Spectrum
+        Original full spectrum.
+    window_results : list of FitResult or BroadFitResult
+        Fit result for each wavelength window.
+    wave_windows_A : list of (float, float)
+        Wavelength windows in Angstroms (observed frame).
+
+    Returns
+    -------
+    FitResult
+        Merged result covering all windows.  Pixels outside any window
+        have ``NaN`` continuum and residuals, and zero model flux.
+    """
+    n_pix = spectrum.n_pix
+    full_wave_A = spectrum.wave_A
+
+    # Initialize full-spectrum arrays.
+    continuum = np.full(n_pix, np.nan)
+    model_flux = np.zeros(n_pix)
+    residuals = np.full(n_pix, np.nan)
+
+    all_lines: dict[str, LineResult] = {}
+    all_line_names: list[str] = []
+
+    for (lo, hi), res in zip(wave_windows_A, window_results):
+        # Extract FitResult from BroadFitResult if needed.
+        fit = res.best_fit if hasattr(res, "best_fit") else res
+
+        # Map window pixels to full spectrum.
+        mask = (full_wave_A >= lo) & (full_wave_A <= hi)
+
+        continuum[mask] = fit.continuum
+        model_flux[mask] = fit.model_flux
+        residuals[mask] = fit.residuals
+
+        # Collect line measurements (first window wins for duplicates).
+        for name in fit.line_names:
+            if name not in all_lines:
+                all_lines[name] = fit.lines[name]
+                all_line_names.append(name)
+
+    # Build a synthetic params vector [amplitudes, centroids, sigmas]
+    # from LineResult attributes so plotting functions can decompose
+    # individual components.
+    nL = len(all_line_names)
+    params = np.zeros(3 * nL)
+    for i, name in enumerate(all_line_names):
+        lr = all_lines[name]
+        params[i] = lr.amplitude
+        params[nL + i] = lr.centroid_A
+        params[2 * nL + i] = lr.sigma_A
+
+    return FitResult(
+        lines=all_lines,
+        params=params,
+        model_flux=model_flux,
+        continuum=continuum,
+        residuals=residuals,
+        chi2=np.nan,
+        spectrum=spectrum,
+        line_names=all_line_names,
+        constraints=None,
+        success=all(
+            (r.success if not hasattr(r, "best_fit") else r.best_fit.success)
+            for r in window_results
+        ),
+    )
+
+
 def fit_lines(
     spectrum: Spectrum,
     z: float,
@@ -53,6 +133,7 @@ def fit_lines(
     R: float | Callable | None = None,
     lines: list[str] | None = None,
     wave_range_A: tuple[float, float] | None = None,
+    wave_windows_A: list[tuple[float, float]] | None = None,
     deg: int = 2,
     n_boot: int = 1000,
     clip_sigma: float = 2.5,
@@ -83,7 +164,16 @@ def fit_lines(
     lines : list of str, optional
         Lines to fit.
     wave_range_A : tuple, optional
-        Observed wavelength range (Angstrom).
+        Observed wavelength range (Angstrom).  Mutually exclusive with
+        *wave_windows_A*.
+    wave_windows_A : list of (float, float), optional
+        Fit the spectrum in multiple independent wavelength windows,
+        each with its own continuum subtraction.  Useful for stacked
+        spectra where the continuum shape varies across the full
+        wavelength range (e.g. UV-normalised stacks).  Each tuple is
+        ``(lo, hi)`` in observed-frame Angstroms.  Results from all
+        windows are merged into a single :class:`FitResult`.  Mutually
+        exclusive with *wave_range_A*.
     deg : int
         Continuum polynomial degree (default 2).
     n_boot : int
@@ -115,12 +205,88 @@ def fit_lines(
     Returns
     -------
     BroadFitResult
-        When ``mode != "off"``.  Delegates all :class:`FitResult`
-        attributes (``lines``, ``params``, ``model_flux``, etc.) via
-        properties, so it can be used as a drop-in replacement.
+        When ``mode != "off"`` and *wave_windows_A* is ``None``.
+        Delegates all :class:`FitResult` attributes (``lines``,
+        ``params``, ``model_flux``, etc.) via properties, so it can be
+        used as a drop-in replacement.
     FitResult
-        When ``mode="off"``.
+        When ``mode="off"`` or when *wave_windows_A* is specified
+        (merged result).
     """
+    # --- Multi-window fitting ---
+    if wave_windows_A is not None:
+        if wave_range_A is not None:
+            raise ValueError(
+                "Cannot specify both wave_range_A and wave_windows_A."
+            )
+        if len(wave_windows_A) == 0:
+            raise ValueError("wave_windows_A must contain at least one window.")
+
+        # Print resolving power once before the window loop.
+        _grating = grating or spectrum.grating
+        _R = R or spectrum.R
+        if _grating is None and _R is None:
+            _R = R_from_pixels(spectrum.wave_um)
+        _R_arr = resolve_R(spectrum.wave_um, grating=_grating, R=_R)
+        _R_med = float(np.median(_R_arr))
+        _R_lo = float(np.min(_R_arr))
+        _R_hi = float(np.max(_R_arr))
+        if abs(_R_hi - _R_lo) < 10:
+            print(f"Resolving power: R = {_R_med:.0f}")
+        else:
+            print(
+                f"Resolving power: R \u2248 {_R_med:.0f} "
+                f"(range {_R_lo:.0f}\u2013{_R_hi:.0f})"
+            )
+
+        window_results: list[FitResult | BroadFitResult] = []
+        for i, (lo, hi) in enumerate(wave_windows_A):
+            mask_win = (spectrum.wave_A >= lo) & (spectrum.wave_A <= hi)
+            if np.sum(mask_win) < 10:
+                raise ValueError(
+                    f"Window [{lo:.0f}, {hi:.0f}] \u00c5 contains only "
+                    f"{np.sum(mask_win)} pixels."
+                )
+            cropped = Spectrum(
+                wave_um=spectrum.wave_um[mask_win],
+                flux_ujy=spectrum.flux_ujy[mask_win],
+                err_ujy=spectrum.err_ujy[mask_win],
+                grating=spectrum.grating,
+                z=spectrum.z,
+                R=spectrum.R,
+                meta=spectrum.meta,
+            )
+            win_label = f"Window {i + 1}/{len(wave_windows_A)}"
+            print(f"--- {win_label}: {lo:.0f}\u2013{hi:.0f} \u00c5 ---")
+
+            if mode == "off":
+                res = _fit_lines_narrow(
+                    cropped, z,
+                    grating=grating, R=R, lines=lines, deg=deg,
+                    n_boot=n_boot, clip_sigma=clip_sigma,
+                    n_jobs=n_jobs, sigma_factor=sigma_factor,
+                    _label=win_label,
+                )
+            else:
+                res = fit_with_broad(
+                    cropped, z,
+                    grating=grating, R=R, lines=lines,
+                    deg=deg, mode=mode,
+                    n_boot=n_boot, n_boot_bic=n_boot_bic,
+                    n_jobs=n_jobs, snr_threshold=snr_threshold,
+                    bic_delta=bic_delta, sigma_factor=sigma_factor,
+                    _print_R=False,
+                )
+            window_results.append(res)
+
+        merged = _merge_window_results(spectrum, window_results, wave_windows_A)
+
+        if save_path is not None:
+            export_lines_txt(merged, save_path, z=z)
+
+        return merged
+
+    # --- Single-window fitting (default) ---
     if mode == "off":
         return _fit_lines_narrow(
             spectrum, z,

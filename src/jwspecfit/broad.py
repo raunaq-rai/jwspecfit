@@ -19,7 +19,7 @@ from .fitter import FitResult, LineResult, _grating_bounds, fit_lines
 from .io import Spectrum, _flam_to_ujy, _ujy_to_flam
 from .lines import REST_LINES_A, get_line_list, observable_lines
 from .models import build_model, pixel_weight
-from .resolution import sigma_inst_A
+from .resolution import resolve_R, sigma_inst_A
 
 logger = logging.getLogger(__name__)
 
@@ -405,6 +405,7 @@ def fit_with_broad(
     snr_threshold: float = 5.0,
     bic_delta: float = BIC_DELTA_THRESHOLD,
     sigma_factor: float = 1.0,
+    _print_R: bool = True,
 ) -> BroadFitResult:
     """Fit emission lines with optional broad Balmer components.
 
@@ -448,6 +449,16 @@ def fit_with_broad(
     """
     grating = grating or spectrum.grating
     R = R or spectrum.R
+
+    # Print resolving power once for the top-level broad-fitting call.
+    if _print_R:
+        R_arr = resolve_R(spectrum.wave_um, grating=grating, R=R)
+        R_med = float(np.median(R_arr))
+        R_lo, R_hi = float(np.min(R_arr)), float(np.max(R_arr))
+        if abs(R_hi - R_lo) < 10:
+            print(f"Resolving power: R = {R_med:.0f}")
+        else:
+            print(f"Resolving power: R \u2248 {R_med:.0f} (range {R_lo:.0f}\u2013{R_hi:.0f})")
 
     # Determine narrow line list.
     if lines is None:
