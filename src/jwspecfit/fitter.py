@@ -383,7 +383,7 @@ def fit_lines(
         # separation to the nearest line so centroids cannot blend.
         local_sig = sig_inst[np.argmin(np.abs(spec.wave_A - lam_obs_A))]
         _C_KMS_CENT = 299792.458
-        _CENT_V_MAX = 300.0  # km/s — max centroid offset
+        _CENT_V_MAX = 500.0  # km/s — max centroid offset
         cent_margin_v = _CENT_V_MAX / _C_KMS_CENT * lam_obs_A
         # Floor: at least 2 pixel widths for coarsely sampled spectra.
         cent_margin = max(cent_margin_v, 2.0 * np.median(dlam))

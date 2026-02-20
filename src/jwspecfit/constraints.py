@@ -94,8 +94,6 @@ class ConstraintSet:
             ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
             ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
             ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
-            ("HEII_1640_BROAD", "HEII_1640"), ("HEII_1640_BROAD2", "HEII_1640"),
-            ("HeII_4687_BROAD", "HeII_4687"), ("HeII_4687_BROAD2", "HeII_4687"),
         ]
         for broad_name, narrow_name in _BROAD_PAIRS:
             if broad_name in idx and narrow_name in idx:
@@ -165,8 +163,6 @@ class ConstraintSet:
             ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
             ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
             ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
-            ("HEII_1640_BROAD", "HEII_1640"), ("HEII_1640_BROAD2", "HEII_1640"),
-            ("HeII_4687_BROAD", "HeII_4687"), ("HeII_4687_BROAD2", "HeII_4687"),
         ]
         for broad_name, narrow_name in _BROAD_PAIRS:
             if broad_name in idx and narrow_name in idx:

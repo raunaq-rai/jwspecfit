@@ -43,12 +43,11 @@ BROAD2_SIGMA_V_HI = 2120.0   # km/s — upper bound (FWHM ~ 5000 km/s)
 # BIC threshold for accepting a more complex model.
 BIC_DELTA_THRESHOLD = 6.0
 
-# Broad line definitions — lines that can receive a broad component.
-# Balmer lines for AGN / outflow broadening; HeII lines for WR stars.
+# Broad line definitions — lines that get a broad component.
 # NII_6549 and NII_6585 are included in the Ha complex so that the
 # BIC comparison accounts for the full blend and prevents broad Ha
 # from absorbing narrow NII flux.
-BROAD_CANDIDATES = ["Ha", "HBETA", "HDELTA", "HGAMMA", "HEII_1640", "HeII_4687"]
+BROAD_CANDIDATES = ["Ha", "HBETA", "HDELTA", "HGAMMA"]
 
 # Lines whose narrow kinematics are tied to Ha during broad fitting
 # to guard against the broad component leaking into NII.
