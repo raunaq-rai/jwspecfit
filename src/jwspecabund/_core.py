@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 import numpy as np
+from tqdm import tqdm
 
 from jwspecfit.fitter import FitResult
 from jwspecfit.lines import REST_LINES_A
@@ -180,6 +181,7 @@ def _run_direct(
     Te_relation: str,
     n_mc: int,
     seed: int = 42,
+    progress: bool = True,
 ) -> dict[str, Any]:
     """Run the direct T_e method.
 
@@ -195,6 +197,8 @@ def _run_direct(
         Number of MC iterations for error propagation.
     seed : int
         Random seed.
+    progress : bool
+        Show a ``tqdm`` progress bar (default ``True``).
 
     Returns
     -------
@@ -255,7 +259,7 @@ def _run_direct(
     OH_mc = []
     NO_mc = []
 
-    for _ in range(n_mc):
+    for _ in tqdm(range(n_mc), desc="Direct Te (MC)", disable=not progress):
         mc_fluxes = {}
         for name in fluxes:
             mc_fluxes[name] = rng.normal(fluxes[name], errors.get(name, 0.0))
@@ -314,6 +318,7 @@ def _run_direct(
 def _run_direct_mcmc(
     posteriors: dict[str, np.ndarray],
     Te_relation: str,
+    progress: bool = True,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -326,6 +331,8 @@ def _run_direct_mcmc(
         ``{line_name: flux_posterior_array}``.
     Te_relation : str
         T_e-T_e relation.
+    progress : bool
+        Show a ``tqdm`` progress bar (default ``True``).
 
     Returns
     -------
@@ -356,7 +363,7 @@ def _run_direct_mcmc(
         except Exception:
             pass
 
-    for i in range(n_samples):
+    for i in tqdm(range(n_samples), desc="Direct Te (posterior)", disable=not progress):
         sample = {name: max(float(post[i]), 1e-50) for name, post in posteriors.items()}
         try:
             ne_i = ne_default  # keep ne fixed for speed
@@ -443,6 +450,7 @@ def compute_abundances(
     forward_n_live: int = 500,
     forward_seed: int = 42,
     forward_progress: bool = True,
+    progress: bool = True,
 ) -> AbundanceResult:
     """Compute chemical abundances from a fitting result.
 
@@ -489,6 +497,9 @@ def compute_abundances(
         Random seed for the forward model (default 42).
     forward_progress : bool
         Show progress bar for the forward model (default ``True``).
+        Deprecated — use *progress* instead.
+    progress : bool
+        Show progress bars for MC / posterior loops (default ``True``).
 
     Returns
     -------
@@ -594,7 +605,7 @@ def compute_abundances(
             n_burn=forward_n_burn,
             n_live=forward_n_live,
             seed=forward_seed,
-            progress=forward_progress,
+            progress=progress and forward_progress,
         )
 
         return AbundanceResult(
@@ -617,9 +628,9 @@ def compute_abundances(
     # --- Direct method ---
     if use_direct:
         if is_mcmc and posteriors and "OIII_4363" in posteriors:
-            direct_out = _run_direct_mcmc(posteriors, Te_relation)
+            direct_out = _run_direct_mcmc(posteriors, Te_relation, progress=progress)
         else:
-            direct_out = _run_direct(fluxes, errors, Te_relation, n_mc)
+            direct_out = _run_direct(fluxes, errors, Te_relation, n_mc, progress=progress)
 
         return AbundanceResult(
             method="direct",
@@ -649,7 +660,7 @@ def compute_abundances(
         sample_fluxes = {name: posteriors[name] for name in posteriors}
         sample_errors = {name: 0.0 for name in posteriors}  # no additional MC needed
 
-        for i in range(n_samples):
+        for i in tqdm(range(n_samples), desc="Strong-line (posterior)", disable=not progress):
             samp = {name: max(float(arr[i]), 1e-50) for name, arr in sample_fluxes.items()}
             try:
                 Z_i, _, _, _, _, _ = sanders25_metallicity(
@@ -680,7 +691,7 @@ def compute_abundances(
 
     # LS result: use MC within sanders25_metallicity.
     Z_best, Z_lo, Z_hi, chi2, ratios_used, Z_mc = sanders25_metallicity(
-        fluxes, errors, n_mc=n_mc,
+        fluxes, errors, n_mc=n_mc, progress=progress,
     )
 
     return AbundanceResult(

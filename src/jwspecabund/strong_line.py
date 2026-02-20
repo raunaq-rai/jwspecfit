@@ -14,6 +14,7 @@ import logging
 
 import numpy as np
 from scipy.optimize import minimize_scalar
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -232,6 +233,7 @@ def sanders25_metallicity(
     n_mc: int = 1000,
     snr_thresh: float = SNR_THRESH,
     seed: int = 42,
+    progress: bool = True,
 ) -> tuple[float, float, float, float, list[str], np.ndarray]:
     """Derive 12+log(O/H) via simultaneous Sanders+25 calibrations.
 
@@ -247,6 +249,8 @@ def sanders25_metallicity(
         Minimum SNR for a ratio to be used (default 1.5).
     seed : int
         Random seed for reproducibility.
+    progress : bool
+        Show a ``tqdm`` progress bar (default ``True``).
 
     Returns
     -------
@@ -281,7 +285,7 @@ def sanders25_metallicity(
     # Monte Carlo error propagation.
     rng = np.random.default_rng(seed)
     mc_samples = np.empty(n_mc)
-    for i in range(n_mc):
+    for i in tqdm(range(n_mc), desc="Strong-line (MC)", disable=not progress):
         perturbed = {}
         for m, dat in ratios.items():
             perturbed[m] = {
