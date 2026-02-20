@@ -569,8 +569,7 @@ def plot_fit_interactive(
                 showarrow=False,
                 yshift=10,
                 font=dict(size=9, color=ann_colour),
-                textangle=-45,
-                xanchor="left",
+                xanchor="center",
                 yanchor="bottom",
             )
 
