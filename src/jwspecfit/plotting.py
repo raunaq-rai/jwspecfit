@@ -450,6 +450,7 @@ def plot_fit_interactive(
 
         # Interpolate continuum onto a fine grid for smooth component curves.
         cont_interp_fn = np.interp
+        peak_info = []
 
         for i, name in enumerate(result.line_names):
             amp = result.params[i]
@@ -526,7 +527,52 @@ def plot_fit_interactive(
                 mode="lines", name=f"{'[B] ' if is_broad else ''}{display_name}",
                 line=dict(color=colour, width=1.5, dash=dash),
                 hovertemplate=f"{display_name}<br>λ=%{{x:.1f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
+                showlegend=False,
             ), row=1)
+
+            # Store peak position for annotation label.
+            gauss_peak_flam = amp / (sqrt(2 * pi) * sig_A)
+            cont_at_peak_ujy = np.interp(
+                mu_A * 1e-4, spec.wave_um, result.continuum,
+            )
+            if use_flam:
+                y_peak = gauss_peak_flam + _ujy_to_flam(
+                    np.array([cont_at_peak_ujy]),
+                    np.array([mu_A * 1e-4]),
+                )[0]
+            else:
+                y_peak = (
+                    _flam_to_ujy(
+                        np.array([gauss_peak_flam]),
+                        np.array([mu_A * 1e-4]),
+                    )[0]
+                    + cont_at_peak_ujy
+                )
+            x_peak = mu_A / zp1 if wave_unit == "A" else mu_A * 1e-4 / zp1
+            peak_info.append((name, x_peak, float(y_peak), colour))
+
+        # Line name annotations above fitted peaks.
+        for name, x_peak, y_peak, colour in peak_info:
+            display_name = name.replace("_", " ")
+            is_broad = "BROAD" in name
+            # Full opacity for readable text.
+            if "rgba" in colour:
+                ann_colour = colour.rsplit(",", 1)[0] + ",1.0)"
+            else:
+                ann_colour = colour
+            fig.add_annotation(
+                x=x_peak,
+                y=y_peak,
+                xref="x",
+                yref="y",
+                text=f"<b>{display_name}</b>" if is_broad else display_name,
+                showarrow=False,
+                yshift=10,
+                font=dict(size=9, color=ann_colour),
+                textangle=-45,
+                xanchor="left",
+                yanchor="bottom",
+            )
 
     # Data (steps).
     _add(go.Scatter(
