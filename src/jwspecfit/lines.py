@@ -22,7 +22,7 @@ REST_LINES_A: dict[str, float] = {
     "CIV_2": 1550.772,
     "CIV_doublet": 1549.48,
     "HEII_1640": 1640.42,
-    "OIII_1661": 1660.81,
+    "OIII_1661": 1660.809,
     "OIII_1663": 1663.48,
     "OIII_1666": 1666.15,
     "SiIII_1": 1882.71,
@@ -38,12 +38,20 @@ REST_LINES_A: dict[str, float] = {
     "OII_3726": 3727.0917000220848,
     "OII_3729": 3729.8754212488416,
     "OII_doublet": 3728.4800597199715,
+    # Higher Balmer series + blue lines
+    "H10": 3798.98234713,
+    "H9": 3836.47908996,
+    "NeIII_3869": 3869.85677179,
+    "HEI_3889": 3889.74894995,
+    "H8": 3890.16605856,
+    "HEPSILON": 3971.20218326,
     # Balmer series
     "HDELTA": 4104.049910602101,
     "HGAMMA": 4342.904611871652,
     "HBETA": 4864.041335024339,
-    # Oxygen
+    # Oxygen / Helium
     "OIII_4363": 4364.436278914932,
+    "HEI_4472": 4472.73381586,
     "OIII_4959": 4961.6792505239255,
     "OIII_5007": 5009.636990676784,
     # Nitrogen, Helium
@@ -55,12 +63,10 @@ REST_LINES_A: dict[str, float] = {
     # Sulphur
     "SII_6718": 6720.149693980653,
     "SII_6732": 6734.532561984591,
-    # Additional diagnostic lines (opt-in; not in default grating lists)
-    "HeI_4472": 4472.73,     # TODO: verify vacuum wavelength (air 4471.480)
+    # Additional diagnostic lines (opt-in; not in default line lists)
     "HeII_4687": 4687.02,    # TODO: verify vacuum wavelength (air 4685.710)
     "ArIV_4713": 4712.58,    # TODO: verify vacuum wavelength (air 4711.260)
     "ArIV_4741": 4741.48,    # TODO: verify vacuum wavelength (air 4740.170)
-    "NeIII_3869": 3870.16,   # TODO: verify vacuum wavelength (air 3868.760)
     "SIII_6312": 6313.81,    # TODO: verify vacuum wavelength (air 6312.060)
     "OII_7320": 7322.01,     # TODO: verify vacuum wavelength (air 7319.990)
     "OII_7330": 7332.75,     # TODO: verify vacuum wavelength (air 7330.730)
@@ -97,12 +103,21 @@ _PRISM_LINES = [
     "FeII*_2396",
     # Optical (merged [OII] doublet)
     "OII_doublet",
+    "H10",
+    "H9",
+    "NeIII_3869",
+    "HEI_3889",
+    "H8",
+    "HEPSILON",
     "HDELTA",
     "HGAMMA",
     "OIII_4363",
+    "HEI_4472",
     "HBETA",
     "OIII_4959",
     "OIII_5007",
+    "NII_5756",
+    "HEI_5877",
     "NII_6549",
     "Ha",
     "NII_6585",
@@ -136,9 +151,16 @@ _GRATING_LINES = [
     # Optical (resolved [OII] doublet)
     "OII_3726",
     "OII_3729",
+    "H10",
+    "H9",
+    "NeIII_3869",
+    "HEI_3889",
+    "H8",
+    "HEPSILON",
     "HDELTA",
     "HGAMMA",
     "OIII_4363",
+    "HEI_4472",
     "HBETA",
     "OIII_4959",
     "OIII_5007",

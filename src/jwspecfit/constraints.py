@@ -67,7 +67,10 @@ class ConstraintSet:
 
             # Width tying: Balmer lines share OIII velocity dispersion.
             # NII width is free (tied only via the doublet constraint).
-            width_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA"]
+            width_targets = [
+                "Ha", "HBETA", "HGAMMA", "HDELTA",
+                "HEPSILON", "H8", "H9", "H10",
+            ]
             for name in width_targets:
                 if name in idx:
                     i_t = idx[name]
@@ -75,7 +78,10 @@ class ConstraintSet:
                     p[2 * nL + i_t] = sigma_o3 * ratio
 
             # Centroid tying: Balmer lines only (not NII — its centroid is free).
-            centroid_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA"]
+            centroid_targets = [
+                "Ha", "HBETA", "HGAMMA", "HDELTA",
+                "HEPSILON", "H8", "H9", "H10",
+            ]
             for name in centroid_targets:
                 if name in idx:
                     i_t = idx[name]
@@ -134,13 +140,19 @@ class ConstraintSet:
 
         if self.tie_balmer_to_oiii and "OIII_5007" in idx:
             # Width tied for Balmer lines only (NII width is free).
-            width_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA"]
+            width_targets = [
+                "Ha", "HBETA", "HGAMMA", "HDELTA",
+                "HEPSILON", "H8", "H9", "H10",
+            ]
             for name in width_targets:
                 if name in idx:
                     free[2 * nL + idx[name]] = False
 
             # Centroid tied for Balmer lines only (NII centroid stays free).
-            centroid_targets = ["HBETA", "Ha", "HDELTA", "HGAMMA"]
+            centroid_targets = [
+                "Ha", "HBETA", "HGAMMA", "HDELTA",
+                "HEPSILON", "H8", "H9", "H10",
+            ]
             for name in centroid_targets:
                 if name in idx:
                     free[nL + idx[name]] = False
