@@ -143,7 +143,15 @@ def _fit_lines_mcmc(
         if grating is not None:
             candidate_lines = get_line_list(grating)
         else:
-            candidate_lines = get_line_list("prism")
+            # Infer line list from estimated resolving power.
+            R_arr = resolve_R(spec.wave_um, R=R)
+            R_med = float(np.median(R_arr))
+            if R_med > 500:
+                candidate_lines = get_line_list("grating")
+                logger.info("Median R ≈ %.0f → using resolved line list.", R_med)
+            else:
+                candidate_lines = get_line_list("prism")
+                logger.info("Median R ≈ %.0f → using prism line list.", R_med)
         line_names = observable_lines(
             candidate_lines, z, spec.wave_um.min(), spec.wave_um.max()
         )
@@ -160,6 +168,13 @@ def _fit_lines_mcmc(
     # 3. Resolution and continuum
     # ------------------------------------------------------------------
     sig_inst = sigma_inst_A(spec.wave_um, grating=grating, R=R)
+    R_arr = resolve_R(spec.wave_um, grating=grating, R=R)
+    R_med = float(np.median(R_arr))
+    R_lo, R_hi = float(np.min(R_arr)), float(np.max(R_arr))
+    if abs(R_hi - R_lo) < 10:
+        logger.info("Resolving power: R = %.0f", R_med)
+    else:
+        logger.info("Resolving power: R ≈ %.0f (range %.0f–%.0f)", R_med, R_lo, R_hi)
 
     continuum = fit_continuum(
         spec.wave_um, spec.flux_ujy, spec.err_ujy, z, line_names,
