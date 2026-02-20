@@ -281,10 +281,11 @@ def fit_lines(
     R_arr = resolve_R(spec.wave_um, grating=grating, R=R)
     R_med = float(np.median(R_arr))
     R_lo, R_hi = float(np.min(R_arr)), float(np.max(R_arr))
-    if abs(R_hi - R_lo) < 10:
-        print(f"Resolving power: R = {R_med:.0f}")
-    else:
-        print(f"Resolving power: R ≈ {R_med:.0f} (range {R_lo:.0f}–{R_hi:.0f})")
+    if not _label:
+        if abs(R_hi - R_lo) < 10:
+            print(f"Resolving power: R = {R_med:.0f}")
+        else:
+            print(f"Resolving power: R ≈ {R_med:.0f} (range {R_lo:.0f}–{R_hi:.0f})")
 
     # Continuum subtraction.
     continuum = fit_continuum(
