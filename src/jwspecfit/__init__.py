@@ -62,6 +62,7 @@ def fit_lines(
     n_boot_bic: int = 100,
     snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
+    sigma_factor: float = 1.0,
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
@@ -107,6 +108,9 @@ def fit_lines(
         Minimum Ha SNR to attempt broad fitting (default 5.0).
     bic_delta : float
         ΔBIC threshold for model selection (default 6.0).
+    sigma_factor : float
+        Multiplicative factor on the upper line-width bound.
+        Use values > 1 for stacked spectra (default 1.0).
 
     Returns
     -------
@@ -124,6 +128,7 @@ def fit_lines(
             wave_range_A=wave_range_A, deg=deg,
             n_boot=n_boot, clip_sigma=clip_sigma,
             n_jobs=n_jobs, save_path=save_path,
+            sigma_factor=sigma_factor,
         )
 
     return fit_with_broad(
@@ -135,4 +140,5 @@ def fit_lines(
         n_jobs=n_jobs,
         snr_threshold=snr_threshold,
         bic_delta=bic_delta,
+        sigma_factor=sigma_factor,
     )

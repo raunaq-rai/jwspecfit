@@ -70,6 +70,7 @@ def fit_lines(
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
+    sigma_factor: float = 1.0,
 ) -> MCMCResult | MCMCBroadFitResult:
     """Fit emission lines using MCMC sampling.
 
@@ -132,6 +133,9 @@ def fit_lines(
         Minimum Ha SNR to attempt broad fitting (default 5.0).
     bic_delta : float
         ΔBIC threshold for model selection (default 6.0).
+    sigma_factor : float
+        Multiplicative factor on the upper line-width bound.
+        Use values > 1 for stacked spectra (default 1.0).
 
     Returns
     -------
@@ -160,6 +164,7 @@ def fit_lines(
             n_eff=n_eff,
             progress=progress,
             seed=seed,
+            sigma_factor=sigma_factor,
         )
 
     return _fit_with_broad_mcmc(
@@ -184,6 +189,7 @@ def fit_lines(
         n_eff=n_eff,
         progress=progress,
         seed=seed,
+        sigma_factor=sigma_factor,
     )
 
 
@@ -211,6 +217,7 @@ def fit_with_broad(
     n_eff: int = 10000,
     progress: bool = True,
     seed: int = 42,
+    sigma_factor: float = 1.0,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
 
@@ -265,6 +272,9 @@ def fit_with_broad(
         Show progress bar.
     seed : int
         Random seed.
+    sigma_factor : float
+        Multiplicative factor on the upper line-width bound.
+        Use values > 1 for stacked spectra (default 1.0).
 
     Returns
     -------
@@ -292,6 +302,7 @@ def fit_with_broad(
         n_eff=n_eff,
         progress=progress,
         seed=seed,
+        sigma_factor=sigma_factor,
     )
 
 

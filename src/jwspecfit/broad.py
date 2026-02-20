@@ -205,6 +205,7 @@ def _bic_bootstrap_single(
     narrow_fit: FitResult,
     balmer_mask: np.ndarray,
     variants: list[str],
+    sigma_factor: float = 1.0,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
 
@@ -228,6 +229,8 @@ def _bic_bootstrap_single(
         Boolean mask for Balmer pixels.
     variants : list of str
         Model variant names to fit (includes ``"narrow"``).
+    sigma_factor : float
+        Width upper-bound multiplier (default 1.0).
 
     Returns
     -------
@@ -246,7 +249,7 @@ def _bic_bootstrap_single(
                 perturbed, z, narrow_lines, grating, R, continuum, deg,
                 broad_type=broad_type, n_boot=0,
                 narrow_fit=narrow_fit if broad_type is not None else None,
-                n_jobs=1,
+                n_jobs=1, sigma_factor=sigma_factor,
             )
         except (ValueError, RuntimeError):
             results[variant] = np.nan
@@ -329,6 +332,7 @@ def _fit_model_variant(
     n_boot: int = 200,
     narrow_fit: FitResult | None = None,
     n_jobs: int = -1,
+    sigma_factor: float = 1.0,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -365,7 +369,8 @@ def _fit_model_variant(
     variant_label = broad_type or "narrow"
     result = fit_lines(
         spec, z, grating=grating, R=R, lines=fit_lines_list, deg=deg, n_boot=n_boot,
-        n_jobs=n_jobs, _label=variant_label, _p0_hint=p0_hint,
+        n_jobs=n_jobs, sigma_factor=sigma_factor, _label=variant_label,
+        _p0_hint=p0_hint,
     )
 
     # Compute BIC.
@@ -399,6 +404,7 @@ def fit_with_broad(
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
     bic_delta: float = BIC_DELTA_THRESHOLD,
+    sigma_factor: float = 1.0,
 ) -> BroadFitResult:
     """Fit emission lines with optional broad Balmer components.
 
@@ -465,6 +471,7 @@ def fit_with_broad(
     fit_narrow, bic_narrow = _fit_model_variant(
         spectrum, z, narrow_lines, grating, R, continuum, deg,
         broad_type=None, n_boot=0, n_jobs=n_jobs,
+        sigma_factor=sigma_factor,
     )
 
     bic_b1 = np.nan
@@ -480,6 +487,7 @@ def fit_with_broad(
             fit_narrow, bic_narrow = _fit_model_variant(
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
                 broad_type=None, n_boot=n_boot, n_jobs=n_jobs,
+                sigma_factor=sigma_factor,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -506,6 +514,7 @@ def fit_with_broad(
             fit_narrow, bic_narrow = _fit_model_variant(
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
                 broad_type=None, n_boot=n_boot, n_jobs=n_jobs,
+                sigma_factor=sigma_factor,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -543,7 +552,7 @@ def fit_with_broad(
             delayed(_bic_bootstrap_single)(
                 noise_vectors[i],
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
-                fit_narrow, balmer_mask, variants_to_fit,
+                fit_narrow, balmer_mask, variants_to_fit, sigma_factor,
             )
             for i in range(n_boot_bic)
         )
@@ -575,7 +584,7 @@ def fit_with_broad(
                 futures[variant] = pool.submit(
                     _fit_model_variant,
                     spectrum, z, narrow_lines, grating, R, continuum, deg,
-                    broad_type, 0, fit_narrow, 1,
+                    broad_type, 0, fit_narrow, 1, sigma_factor,
                 )
             for variant, fut in futures.items():
                 fit_v, _ = fut.result()
@@ -592,7 +601,7 @@ def fit_with_broad(
                 fut = pool.submit(
                     _fit_model_variant,
                     spectrum, z, narrow_lines, grating, R, continuum, deg,
-                    variant, 0, fit_narrow, n_jobs,
+                    variant, 0, fit_narrow, n_jobs, sigma_factor,
                 )
                 bic_futures[variant] = fut
 
@@ -644,7 +653,7 @@ def fit_with_broad(
             spectrum, z, narrow_lines, grating, R, continuum, deg,
             broad_type=broad_type, n_boot=n_boot,
             narrow_fit=fit_narrow if broad_type is not None else None,
-            n_jobs=n_jobs,
+            n_jobs=n_jobs, sigma_factor=sigma_factor,
         )
         all_fits[best_name] = best_fit
 

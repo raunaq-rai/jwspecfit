@@ -56,6 +56,7 @@ def _fit_lines_mcmc(
     # common options
     progress: bool = True,
     seed: int = 42,
+    sigma_factor: float = 1.0,
 ) -> MCMCResult:
     """Fit emission lines using MCMC sampling.
 
@@ -101,6 +102,9 @@ def _fit_lines_mcmc(
         Show a progress bar.
     seed : int
         Random seed.
+    sigma_factor : float
+        Multiplicative factor on the upper line-width bound.
+        Use values > 1 for stacked spectra (default 1.0).
 
     Returns
     -------
@@ -204,7 +208,7 @@ def _fit_lines_mcmc(
 
     for i, name in enumerate(line_names):
         lam_obs_A = REST_LINES_A[name] * (1.0 + z)
-        sig_lo, sig_seed, sig_hi = _grating_bounds(grating, sig_inst, dlam, lam_obs_A)
+        sig_lo, sig_seed, sig_hi = _grating_bounds(grating, sig_inst, dlam, lam_obs_A, sigma_factor)
 
         # Peak flux near the line for amplitude seeding.
         near = np.abs(spec.wave_A - lam_obs_A)
@@ -222,7 +226,7 @@ def _fit_lines_mcmc(
 
         # Centroid bounds.
         _C_KMS_CENT = 299792.458
-        _CENT_V_MAX = 500.0
+        _CENT_V_MAX = 300.0
         cent_margin_v = _CENT_V_MAX / _C_KMS_CENT * lam_obs_A
         cent_margin = max(cent_margin_v, 2.0 * np.median(dlam))
 
@@ -515,6 +519,7 @@ def _fit_with_broad_mcmc(
     # common options
     progress: bool = True,
     seed: int = 42,
+    sigma_factor: float = 1.0,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
 
@@ -591,6 +596,7 @@ def _fit_with_broad_mcmc(
         n_jobs=n_jobs,
         snr_threshold=snr_threshold,
         bic_delta=bic_delta,
+        sigma_factor=sigma_factor,
     )
 
     selected_model = bic_result.selected_model
@@ -634,6 +640,7 @@ def _fit_with_broad_mcmc(
         n_eff=n_eff,
         progress=progress,
         seed=seed,
+        sigma_factor=sigma_factor,
     )
 
     return MCMCBroadFitResult(

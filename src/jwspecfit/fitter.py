@@ -112,6 +112,7 @@ def _grating_bounds(
     sigma_inst: np.ndarray,
     dlam_A: np.ndarray,
     line_wave_obs_A: float,
+    sigma_factor: float = 1.0,
 ) -> tuple[float, float, float]:
     """Return (sigma_lo, sigma_seed, sigma_hi) in Å for a given grating.
 
@@ -125,6 +126,10 @@ def _grating_bounds(
         Pixel widths (Å).
     line_wave_obs_A : float
         Observed wavelength of the line (Å).
+    sigma_factor : float
+        Multiplicative factor applied to the upper width bound.
+        Use values > 1 for stacked spectra where redshift scatter
+        broadens lines beyond the instrumental resolution (default 1.0).
 
     Returns
     -------
@@ -138,15 +143,14 @@ def _grating_bounds(
 
     g = (grating or "").upper()
     if "PRISM" in g:
-        return (0.40 * pix, 0.90 * sig, 1.70 * sig)
+        return (0.40 * pix, 0.90 * sig, 1.70 * sig * sigma_factor)
     if any(k in g for k in ("G140M", "G235M", "G395M")):
-        # Upper bound allows ~2× instrumental σ for astrophysical broadening.
-        return (max(0.12 * pix, 0.22 * sig), 0.60 * sig, 2.0 * sig)
+        return (max(0.12 * pix, 0.22 * sig), 0.60 * sig, 2.0 * sig * sigma_factor)
     if any(k in g for k in ("G140H", "G235H", "G395H")):
-        return (0.10 * pix, 0.50 * sig, 1.8 * sig)
+        return (0.10 * pix, 0.50 * sig, 1.8 * sig * sigma_factor)
     # Default (e.g. stacked spectra): generous bounds — lines are broadened
     # by galaxy velocity dispersions and the stacking process.
-    return (0.20 * pix, 1.0 * sig, 5.0 * sig)
+    return (0.20 * pix, 1.0 * sig, 5.0 * sig * sigma_factor)
 
 
 def fit_lines(
@@ -162,6 +166,7 @@ def fit_lines(
     clip_sigma: float = 2.5,
     n_jobs: int = -1,
     save_path: str | Path | None = None,
+    sigma_factor: float = 1.0,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -194,6 +199,10 @@ def fit_lines(
         ``1`` runs sequentially. Default ``-1``.
     save_path : str or Path, optional
         If given, export per-line measurements to this text file after fitting.
+    sigma_factor : float
+        Multiplicative factor applied to the upper line-width bound.
+        Use values > 1 for stacked spectra where redshift scatter
+        broadens lines beyond the instrumental resolution (default 1.0).
 
     Returns
     -------
@@ -358,7 +367,7 @@ def fit_lines(
 
     for i, name in enumerate(line_names):
         lam_obs_A = REST_LINES_A[name] * (1.0 + z)
-        sig_lo, sig_seed, sig_hi = _grating_bounds(grating, sig_inst, dlam, lam_obs_A)
+        sig_lo, sig_seed, sig_hi = _grating_bounds(grating, sig_inst, dlam, lam_obs_A, sigma_factor)
 
         # Find peak flux near the line for amplitude seeding.
         near = np.abs(spec.wave_A - lam_obs_A)
@@ -383,7 +392,7 @@ def fit_lines(
         # separation to the nearest line so centroids cannot blend.
         local_sig = sig_inst[np.argmin(np.abs(spec.wave_A - lam_obs_A))]
         _C_KMS_CENT = 299792.458
-        _CENT_V_MAX = 500.0  # km/s — max centroid offset
+        _CENT_V_MAX = 300.0  # km/s — max centroid offset
         cent_margin_v = _CENT_V_MAX / _C_KMS_CENT * lam_obs_A
         # Floor: at least 2 pixel widths for coarsely sampled spectra.
         cent_margin = max(cent_margin_v, 2.0 * np.median(dlam))
