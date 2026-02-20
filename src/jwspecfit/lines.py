@@ -63,10 +63,15 @@ REST_LINES_A: dict[str, float] = {
     # Sulphur
     "SII_6718": 6720.149693980653,
     "SII_6732": 6734.532561984591,
-    # Additional diagnostic lines (opt-in; not in default line lists)
+    # Blue diagnostic lines (4500–4750 Å region)
+    "FeII_4584": 4585.12,    # TODO: verify vacuum wavelength (air 4583.837)
+    "NIII_4642": 4643.15,    # TODO: verify vacuum wavelength (air 4641.85)
+    "FeIII_4660": 4659.35,   # TODO: verify vacuum wavelength (air 4658.05)
     "HeII_4687": 4687.02,    # TODO: verify vacuum wavelength (air 4685.710)
-    "ArIV_4713": 4712.58,    # TODO: verify vacuum wavelength (air 4711.260)
+    "ArIV_4713": 4712.58,    # TODO: verify vacuum wavelength (air 4711.26); blended with HeI 4713
+    "FeII_4732": 4732.76,    # TODO: verify vacuum wavelength (air 4731.44)
     "ArIV_4741": 4741.48,    # TODO: verify vacuum wavelength (air 4740.170)
+    # Additional diagnostic lines (opt-in; not in default line lists)
     "SIII_6312": 6313.81,    # TODO: verify vacuum wavelength (air 6312.060)
     "OII_7320": 7322.01,     # TODO: verify vacuum wavelength (air 7319.990)
     "OII_7330": 7332.75,     # TODO: verify vacuum wavelength (air 7330.730)
@@ -156,6 +161,14 @@ _GRATING_LINES = [
     "HGAMMA",
     "OIII_4363",
     "HEI_4472",
+    # Blue diagnostic lines (4500–4750 Å)
+    "FeII_4584",
+    "NIII_4642",
+    "FeIII_4660",
+    "HeII_4687",
+    "ArIV_4713",        # blended with HeI 4713
+    "FeII_4732",
+    "ArIV_4741",
     "HBETA",
     "OIII_4959",
     "OIII_5007",
