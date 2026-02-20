@@ -318,7 +318,9 @@ def _run_direct(
 def _run_direct_mcmc(
     posteriors: dict[str, np.ndarray],
     Te_relation: str,
+    n_posterior: int = 1000,
     progress: bool = True,
+    seed: int = 42,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -331,8 +333,13 @@ def _run_direct_mcmc(
         ``{line_name: flux_posterior_array}``.
     Te_relation : str
         T_e-T_e relation.
+    n_posterior : int
+        Maximum number of posterior samples to use (default 1000).
+        If the posterior is longer, a random subsample is drawn.
     progress : bool
         Show a ``tqdm`` progress bar (default ``True``).
+    seed : int
+        Random seed for subsampling (default 42).
 
     Returns
     -------
@@ -347,8 +354,16 @@ def _run_direct_mcmc(
         compute_total_abundances,
     )
 
-    # Determine number of samples from any available posterior.
-    n_samples = min(len(v) for v in posteriors.values())
+    # Determine number of samples; thin if larger than n_posterior.
+    n_total = min(len(v) for v in posteriors.values())
+    if n_posterior > 0 and n_total > n_posterior:
+        rng = np.random.default_rng(seed)
+        idx = rng.choice(n_total, size=n_posterior, replace=False)
+        idx.sort()
+        posteriors = {name: arr[idx] for name, arr in posteriors.items()}
+        n_samples = n_posterior
+    else:
+        n_samples = n_total
 
     OH_post = np.full(n_samples, np.nan)
     NO_post = np.full(n_samples, np.nan)
@@ -451,6 +466,7 @@ def compute_abundances(
     forward_seed: int = 42,
     forward_progress: bool = True,
     progress: bool = True,
+    n_posterior: int = 1000,
 ) -> AbundanceResult:
     """Compute chemical abundances from a fitting result.
 
@@ -500,6 +516,10 @@ def compute_abundances(
         Deprecated — use *progress* instead.
     progress : bool
         Show progress bars for MC / posterior loops (default ``True``).
+    n_posterior : int
+        Maximum number of posterior samples to propagate through
+        PyNEB / strong-line calculations (default 1000).  If the
+        MCMC posterior has more samples, a random subsample is drawn.
 
     Returns
     -------
@@ -628,7 +648,9 @@ def compute_abundances(
     # --- Direct method ---
     if use_direct:
         if is_mcmc and posteriors and "OIII_4363" in posteriors:
-            direct_out = _run_direct_mcmc(posteriors, Te_relation, progress=progress)
+            direct_out = _run_direct_mcmc(
+                posteriors, Te_relation, n_posterior=n_posterior, progress=progress,
+            )
         else:
             direct_out = _run_direct(fluxes, errors, Te_relation, n_mc, progress=progress)
 
@@ -654,10 +676,19 @@ def compute_abundances(
     from .strong_line import sanders25_metallicity
 
     if is_mcmc and posteriors:
-        # Run Sanders+25 on each posterior sample.
-        n_samples = min(len(v) for v in posteriors.values())
+        # Run Sanders+25 on each posterior sample (thin if needed).
+        n_total = min(len(v) for v in posteriors.values())
+        if n_posterior > 0 and n_total > n_posterior:
+            rng = np.random.default_rng(42)
+            idx = rng.choice(n_total, size=n_posterior, replace=False)
+            idx.sort()
+            thinned = {name: posteriors[name][idx] for name in posteriors}
+            n_samples = n_posterior
+        else:
+            thinned = posteriors
+            n_samples = n_total
         OH_post = np.full(n_samples, np.nan)
-        sample_fluxes = {name: posteriors[name] for name in posteriors}
+        sample_fluxes = {name: thinned[name] for name in thinned}
         sample_errors = {name: 0.0 for name in posteriors}  # no additional MC needed
 
         for i in tqdm(range(n_samples), desc="Strong-line (posterior)", disable=not progress):
