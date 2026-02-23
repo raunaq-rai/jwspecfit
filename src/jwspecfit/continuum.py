@@ -12,7 +12,7 @@ from .resolution import sigma_inst_A
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MOVING_AVERAGE_WINDOW = 75
-_MA_LINE_MASK_NSIGMA = 3.0
+_MA_CLIP_NSIGMA = 3.0  # σ_inst radius around each line where clipping is applied
 
 
 def fit_continuum(
@@ -94,69 +94,80 @@ def fit_continuum(
     else:
         _ma_window = 0
 
-    # Use a narrower line mask for the median-filter path (3σ vs 6σ):
-    # the median filter is inherently robust to localised outliers, so
-    # a tighter mask preserves more continuum pixels.
-    _effective_nsigma = _MA_LINE_MASK_NSIGMA if _ma_window > 0 else line_mask_nsigma
-
-    # Build line mask.
-    line_mask = np.zeros(len(wave_A), dtype=bool)
-    sig_inst = sigma_inst_A(wave_um, grating=grating, R=R)
-
-    for name in line_names:
-        if name not in REST_LINES_A:
-            continue
-        lam_obs_A = REST_LINES_A[name] * (1.0 + z)
-        # Mask width = max(nsigma * sigma_inst, a minimum of 20 Å)
-        idx_near = np.argmin(np.abs(wave_A - lam_obs_A))
-        mask_half = max(_effective_nsigma * sig_inst[idx_near], 20.0)
-        line_mask |= np.abs(wave_A - lam_obs_A) < mask_half
-
-    use = valid & ~line_mask
-
     # ---- Moving-average (median filter) path ----
     if _ma_window > 0:
         from scipy.ndimage import median_filter
 
-        n_use = int(np.sum(use))
-        if n_use < 3:
+        sig_inst = sigma_inst_A(wave_um, grating=grating, R=R)
+
+        # Build a narrow "near-line" mask: pixels within ±_MA_CLIP_NSIGMA
+        # of any known line.  Sigma-clipping is restricted to these pixels;
+        # pixels far from lines are never removed.
+        near_line = np.zeros(len(wave_A), dtype=bool)
+        for name in line_names:
+            if name not in REST_LINES_A:
+                continue
+            lam_obs_A = REST_LINES_A[name] * (1.0 + z)
+            idx_near = np.argmin(np.abs(wave_A - lam_obs_A))
+            clip_half = max(_MA_CLIP_NSIGMA * sig_inst[idx_near], 20.0)
+            near_line |= np.abs(wave_A - lam_obs_A) < clip_half
+
+        n_valid = int(np.sum(valid))
+        if n_valid < 3:
             logger.warning(
-                "Too few continuum pixels (%d) for median filter; returning zeros.",
-                n_use,
+                "Too few valid pixels (%d) for median filter; returning zeros.",
+                n_valid,
             )
             return np.zeros_like(flux_ujy)
 
-        # Ensure window is odd and does not exceed the number of usable pixels.
-        win = min(_ma_window, n_use)
+        # Ensure window is odd and does not exceed the number of valid pixels.
+        win = min(_ma_window, n_valid)
         if win % 2 == 0:
             win += 1
 
-        mask = use.copy()
+        mask = valid.copy()
 
         for _ in range(n_iter):
             idx_mask = np.where(mask)[0]
             if len(idx_mask) < 3:
                 break
-            smoothed_masked = median_filter(flux_ujy[idx_mask], size=min(win, len(idx_mask)))
-            # Interpolate smoothed values to all pixels.
-            cont = np.interp(wave_um, wave_um[idx_mask], smoothed_masked)
+            smoothed = median_filter(
+                flux_ujy[idx_mask], size=min(win, len(idx_mask)),
+            )
+            cont = np.interp(wave_um, wave_um[idx_mask], smoothed)
             resid = flux_ujy - cont
-            # Clip positive outliers (emission residuals) in error-normalised
-            # space, same logic as the polynomial path.
+            # Only clip positive outliers near known line positions.
             norm_resid = np.where(err_ujy > 0, resid / err_ujy, 0.0)
-            mask = use & (norm_resid < clip_sigma)
+            clip_out = near_line & (norm_resid >= clip_sigma)
+            mask = valid & ~clip_out
 
-        # Final smoothing on clipped pixels.
+        # Final smoothing on surviving pixels.
         idx_mask = np.where(mask)[0]
         if len(idx_mask) >= 3:
-            smoothed_masked = median_filter(flux_ujy[idx_mask], size=min(win, len(idx_mask)))
-            continuum = np.interp(wave_um, wave_um[idx_mask], smoothed_masked)
+            smoothed = median_filter(
+                flux_ujy[idx_mask], size=min(win, len(idx_mask)),
+            )
+            continuum = np.interp(wave_um, wave_um[idx_mask], smoothed)
         else:
             continuum = cont
 
         return continuum
 
     # ---- Polynomial path (default) ----
+    # Build line mask.
+    sig_inst = sigma_inst_A(wave_um, grating=grating, R=R)
+    line_mask = np.zeros(len(wave_A), dtype=bool)
+
+    for name in line_names:
+        if name not in REST_LINES_A:
+            continue
+        lam_obs_A = REST_LINES_A[name] * (1.0 + z)
+        # Mask width = max(line_mask_nsigma * sigma_inst, a minimum of 20 Å)
+        idx_near = np.argmin(np.abs(wave_A - lam_obs_A))
+        mask_half = max(line_mask_nsigma * sig_inst[idx_near], 20.0)
+        line_mask |= np.abs(wave_A - lam_obs_A) < mask_half
+
+    use = valid & ~line_mask
     if np.sum(use) < deg + 1:
         logger.warning("Too few continuum pixels (%d); returning zeros.", np.sum(use))
         return np.zeros_like(flux_ujy)
