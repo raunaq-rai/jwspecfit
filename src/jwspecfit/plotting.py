@@ -320,6 +320,19 @@ def plot_fit(
     return fig
 
 
+def _to_rgba(colour: str, alpha: float) -> str:
+    """Convert any CSS colour string to ``rgba(r,g,b,alpha)``."""
+    if colour.startswith("rgba("):
+        # Replace existing alpha.
+        return colour.rsplit(",", 1)[0] + f",{alpha})"
+    if colour.startswith("rgb("):
+        return colour.replace("rgb(", "rgba(").replace(")", f",{alpha})")
+    if colour.startswith("#"):
+        h = colour.lstrip("#")
+        return f"rgba({int(h[0:2],16)},{int(h[2:4],16)},{int(h[4:6],16)},{alpha})"
+    return f"rgba(150,150,150,{alpha})"
+
+
 def plot_fit_interactive(
     result: "FitResult",
     *,
@@ -507,13 +520,7 @@ def plot_fit_interactive(
                 line_only = gauss_masked - cont_fine_masked
                 comp_hi = cont_fine_masked + line_only * (1.0 + frac_err)
                 comp_lo = cont_fine_masked + line_only * max(1.0 - frac_err, 0.0)
-                if "rgba" in colour:
-                    fill = colour.replace("0.6", "0.12")
-                elif colour.startswith("#"):
-                    h = colour.lstrip("#")
-                    fill = f"rgba({int(h[0:2],16)},{int(h[2:4],16)},{int(h[4:6],16)},0.12)"
-                else:
-                    fill = "rgba(150,150,150,0.12)"
+                fill = _to_rgba(colour, 0.12)
                 _add(go.Scatter(
                     x=np.concatenate([wave_fine, wave_fine[::-1]]),
                     y=np.concatenate([comp_hi, comp_lo[::-1]]),
