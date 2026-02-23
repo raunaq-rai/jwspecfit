@@ -12,6 +12,7 @@ from .resolution import sigma_inst_A
 logger = logging.getLogger(__name__)
 
 _DEFAULT_MOVING_AVERAGE_WINDOW = 75
+_MA_LINE_MASK_NSIGMA = 3.0
 
 
 def fit_continuum(
@@ -85,6 +86,19 @@ def fit_continuum(
     lya_obs_A = _LYA_REST_A * (1.0 + z)
     valid &= wave_A >= lya_obs_A
 
+    # Resolve moving_average window size.
+    if moving_average is True:
+        _ma_window = _DEFAULT_MOVING_AVERAGE_WINDOW
+    elif moving_average:
+        _ma_window = int(moving_average)
+    else:
+        _ma_window = 0
+
+    # Use a narrower line mask for the median-filter path (3σ vs 6σ):
+    # the median filter is inherently robust to localised outliers, so
+    # a tighter mask preserves more continuum pixels.
+    _effective_nsigma = _MA_LINE_MASK_NSIGMA if _ma_window > 0 else line_mask_nsigma
+
     # Build line mask.
     line_mask = np.zeros(len(wave_A), dtype=bool)
     sig_inst = sigma_inst_A(wave_um, grating=grating, R=R)
@@ -93,20 +107,12 @@ def fit_continuum(
         if name not in REST_LINES_A:
             continue
         lam_obs_A = REST_LINES_A[name] * (1.0 + z)
-        # Mask width = max(line_mask_nsigma * sigma_inst, a minimum of 20 Å)
+        # Mask width = max(nsigma * sigma_inst, a minimum of 20 Å)
         idx_near = np.argmin(np.abs(wave_A - lam_obs_A))
-        mask_half = max(line_mask_nsigma * sig_inst[idx_near], 20.0)
+        mask_half = max(_effective_nsigma * sig_inst[idx_near], 20.0)
         line_mask |= np.abs(wave_A - lam_obs_A) < mask_half
 
     use = valid & ~line_mask
-
-    # Resolve moving_average window size.
-    if moving_average is True:
-        _ma_window = _DEFAULT_MOVING_AVERAGE_WINDOW
-    elif moving_average:
-        _ma_window = int(moving_average)
-    else:
-        _ma_window = 0
 
     # ---- Moving-average (median filter) path ----
     if _ma_window > 0:
@@ -126,7 +132,6 @@ def fit_continuum(
             win += 1
 
         mask = use.copy()
-        idx_use = np.where(use)[0]
 
         for _ in range(n_iter):
             idx_mask = np.where(mask)[0]
