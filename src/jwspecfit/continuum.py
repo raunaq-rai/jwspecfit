@@ -94,9 +94,9 @@ def fit_continuum(
     else:
         _ma_window = 0
 
-    # ---- Moving-average (median filter) path ----
+    # ---- Moving-average (median filter + boxcar) path ----
     if _ma_window > 0:
-        from scipy.ndimage import median_filter
+        from scipy.ndimage import median_filter, uniform_filter1d
 
         sig_inst = sigma_inst_A(wave_um, grating=grating, R=R)
 
@@ -134,6 +134,8 @@ def fit_continuum(
             smoothed = median_filter(
                 flux_ujy[idx_mask], size=min(win, len(idx_mask)),
             )
+            # Boxcar pass to smooth out the median filter's staircase.
+            smoothed = uniform_filter1d(smoothed, size=min(win, len(idx_mask)))
             cont = np.interp(wave_um, wave_um[idx_mask], smoothed)
             resid = flux_ujy - cont
             # Only clip positive outliers near known line positions.
@@ -147,6 +149,7 @@ def fit_continuum(
             smoothed = median_filter(
                 flux_ujy[idx_mask], size=min(win, len(idx_mask)),
             )
+            smoothed = uniform_filter1d(smoothed, size=min(win, len(idx_mask)))
             continuum = np.interp(wave_um, wave_um[idx_mask], smoothed)
         else:
             continuum = cont
