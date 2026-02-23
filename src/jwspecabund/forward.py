@@ -81,7 +81,7 @@ _LINE_COMPONENTS: dict[str, list[tuple[str, int, int]]] = {
     "SIII_9069":   [("S", 3, 9069)],
     "ArIII_7136":  [("Ar", 3, 7136)],
     # UV semi-forbidden lines
-    "NIV_1":       [("N", 4, 1487)],
+    "NIV_1486":    [("N", 4, 1487)],
     "NIII_1749":   [("N", 3, 1749)],
     "NIII_1752":   [("N", 3, 1752)],
     "NIII_doublet": [("N", 3, 1749), ("N", 3, 1752)],

@@ -330,7 +330,7 @@ Sources: NIST ASD, Morton (2003), Storey & Zeippen (2000).
 | `NV_1` | 1238.821 |
 | `NV_2` | 1242.804 |
 | `NV_doublet` | 1240.81 |
-| `NIV_1` | 1486.496 |
+| `NIV_1486` | 1486.496 |
 | `CIV_1` | 1548.187 |
 | `CIV_2` | 1550.772 |
 | `CIV_doublet` | 1549.48 |
