@@ -61,6 +61,125 @@ def hbeta_emissivity_aller84(Te: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# N V (N4+) manual emissivity — PyNEB has no N 5 data
+# ---------------------------------------------------------------------------
+
+# Li-like N4+ (1s² 2s ²S₁/₂ ground state):
+#   Level 1: 2s ²S₁/₂  (g = 2)
+#   Level 2: 2p ²P₁/₂  (g = 2), λ₂₁ = 1242.804 Å, A₂₁ = 3.37×10⁸ s⁻¹
+#   Level 3: 2p ²P₃/₂  (g = 4), λ₃₁ = 1238.821 Å, A₃₁ = 3.40×10⁸ s⁻¹
+#
+# Effective collision strengths Υ(T) from Aggarwal & Keenan (2004,
+# A&A, 427, 763) / CHIANTI v10.  We store a table and interpolate.
+
+_NV_A21 = 3.37e8   # s⁻¹
+_NV_A31 = 3.40e8   # s⁻¹
+_NV_G = np.array([2, 2, 4])  # statistical weights
+_NV_WAVE = {2: 1242.804, 3: 1238.821}  # Angstroms
+
+# Υ(T) table: log10(T) and effective collision strengths (Aggarwal & Keenan 2004)
+# Transitions: 1→2, 1→3, 2→3
+_NV_LOGTEMP = np.array([3.5, 3.7, 3.9, 4.0, 4.1, 4.2, 4.3, 4.4, 4.5,
+                         4.6, 4.7, 4.8, 4.9, 5.0, 5.2, 5.4])
+_NV_UPS_12 = np.array([0.112, 0.126, 0.142, 0.151, 0.161, 0.174, 0.190,
+                        0.210, 0.233, 0.258, 0.280, 0.295, 0.300, 0.296,
+                        0.266, 0.224])
+_NV_UPS_13 = np.array([0.224, 0.252, 0.283, 0.301, 0.322, 0.348, 0.380,
+                        0.419, 0.466, 0.516, 0.559, 0.589, 0.600, 0.592,
+                        0.532, 0.448])
+_NV_UPS_23 = np.array([0.262, 0.291, 0.327, 0.349, 0.375, 0.408, 0.449,
+                        0.500, 0.560, 0.624, 0.682, 0.725, 0.744, 0.738,
+                        0.668, 0.563])
+
+
+def _nv_emissivity(Te: float, ne: float, wave: int) -> float:
+    r"""N V emissivity from a 3-level atom model.
+
+    Solves statistical equilibrium for the Li-like N4+ ion
+    (1s² 2s ²S – 1s² 2p ²P doublet).
+
+    Parameters
+    ----------
+    Te : float
+        Electron temperature in K.
+    ne : float
+        Electron density in cm⁻³.
+    wave : int
+        Approximate wavelength label: ``1239`` (²P₃/₂→²S₁/₂) or
+        ``1243`` (²P₁/₂→²S₁/₂).
+
+    Returns
+    -------
+    float
+        Volume emissivity coefficient ε in erg cm³ s⁻¹ (same units as
+        PyNEB ``Atom.getEmissivity``).
+    """
+    logT = np.log10(Te)
+    logT = np.clip(logT, _NV_LOGTEMP[0], _NV_LOGTEMP[-1])
+
+    ups_12 = float(np.interp(logT, _NV_LOGTEMP, _NV_UPS_12))
+    ups_13 = float(np.interp(logT, _NV_LOGTEMP, _NV_UPS_13))
+    ups_23 = float(np.interp(logT, _NV_LOGTEMP, _NV_UPS_23))
+
+    # Collision rate coefficients: q_ij = 8.629e-6 / (g_i * T^0.5) * Υ_ij
+    coeff = 8.629e-6 / np.sqrt(Te)
+
+    q12 = coeff * ups_12 / _NV_G[0]
+    q13 = coeff * ups_13 / _NV_G[0]
+    q21 = coeff * ups_12 / _NV_G[1]
+    q31 = coeff * ups_13 / _NV_G[2]
+    q23 = coeff * ups_23 / _NV_G[1]
+    q32 = coeff * ups_23 / _NV_G[2]
+
+    # Statistical equilibrium:  Σ n_j (A_ji + n_e q_ji) = n_i Σ (A_ij + n_e q_ij)
+    # For 3 levels, solve 2 independent equations + normalisation (n1+n2+n3=1).
+    # Rate matrix M·n = 0, with n1+n2+n3 = 1.
+    A21 = _NV_A21
+    A31 = _NV_A31
+
+    # From level 2: n2 (A21 + ne*q21 + ne*q23) = n1 * ne*q12 + n3 * (ne*q32)
+    # From level 3: n3 (A31 + ne*q31 + ne*q32) = n1 * ne*q13 + n2 * (ne*q23)
+    # Express n2, n3 in terms of n1 via matrix inversion.
+    a = A21 + ne * q21 + ne * q23
+    b = -ne * q32
+    c = -ne * q23
+    d = A31 + ne * q31 + ne * q32
+
+    det = a * d - b * c
+    if abs(det) < 1e-100:
+        return 0.0
+
+    # Right-hand side coefficients (for n1=1)
+    rhs2 = ne * q12
+    rhs3 = ne * q13
+
+    n2_rel = (d * rhs2 - b * rhs3) / det
+    n3_rel = (a * rhs3 - c * rhs2) / det
+
+    norm = 1.0 + n2_rel + n3_rel
+    n2 = n2_rel / norm
+    n3 = n3_rel / norm
+
+    # Emissivity = n_level * A * hν / (ne * nion)  →  ε = fraction * A * hν
+    # PyNEB convention: getEmissivity returns ε such that
+    #   j_line = ne * n_ion * ε   (erg/cm³/s)
+    # So ε = (n_upper / (ne * n_total)) * A * hν
+    # With n_total = 1 (normalised), ε = n_upper * A * hν / ne
+    if wave == 1239 or wave == 1238:
+        lam_cm = _NV_WAVE[3] * 1e-8
+        eps = n3 * A31 * (_HC_CGS / lam_cm) / ne
+    elif wave == 1243 or wave == 1242:
+        lam_cm = _NV_WAVE[2] * 1e-8
+        eps = n2 * A21 * (_HC_CGS / lam_cm) / ne
+    else:
+        # Sum of doublet
+        eps = (n3 * A31 * (_HC_CGS / (_NV_WAVE[3] * 1e-8))
+               + n2 * A21 * (_HC_CGS / (_NV_WAVE[2] * 1e-8))) / ne
+
+    return float(eps)
+
+
+# ---------------------------------------------------------------------------
 # Line -> ion mapping
 # ---------------------------------------------------------------------------
 
@@ -81,16 +200,22 @@ _LINE_COMPONENTS: dict[str, list[tuple[str, int, int]]] = {
     "SIII_9069":   [("S", 3, 9069)],
     "ArIII_7136":  [("Ar", 3, 7136)],
     # UV semi-forbidden lines
+    "NIV_1483":    [("N", 4, 1483)],
     "NIV_1486":    [("N", 4, 1487)],
     "NIII_1749":   [("N", 3, 1749)],
     "NIII_1752":   [("N", 3, 1752)],
     "NIII_doublet": [("N", 3, 1749), ("N", 3, 1752)],
+    "CIII]_1907":  [("C", 3, 1907)],
     "CIII]":       [("C", 3, 1909)],
     "CIV_1":       [("C", 4, 1548)],
     "CIV_2":       [("C", 4, 1551)],
     "CIV_doublet": [("C", 4, 1548), ("C", 4, 1551)],
     "OIII_1661":   [("O", 3, 1661)],
     "OIII_1666":   [("O", 3, 1666)],
+    # N V resonance doublet (manual emissivity, no PyNEB atom)
+    "NV_1":        [("N", 5, 1239)],
+    "NV_2":        [("N", 5, 1243)],
+    "NV_doublet":  [("N", 5, 1239), ("N", 5, 1243)],
 }
 
 # Maps (element, ion_stage) -> parameter name for ionic abundance.
@@ -106,6 +231,7 @@ _ION_PARAM_NAME: dict[tuple[str, int], str] = {
     ("Ar", 3): "log_Arpp",
     ("C", 3):  "log_Cpp",
     ("C", 4):  "log_Cppp",
+    ("N", 5):  "log_Npppp",
 }
 
 # Human-readable labels for ionic abundance parameters.
@@ -123,6 +249,7 @@ _PARAM_LABELS: dict[str, str] = {
     "log_Arpp":  r"$\log\,(\mathrm{Ar}^{2+}/\mathrm{H}^+)$",
     "log_Cpp":   r"$\log\,(\mathrm{C}^{2+}/\mathrm{H}^+)$",
     "log_Cppp":  r"$\log\,(\mathrm{C}^{3+}/\mathrm{H}^+)$",
+    "log_Npppp": r"$\log\,(\mathrm{N}^{4+}/\mathrm{H}^+)$",
 }
 
 # Uniform prior bounds for each parameter.
@@ -140,6 +267,7 @@ _PRIOR_BOUNDS: dict[str, tuple[float, float]] = {
     "log_Arpp":  (-9.0, -4.0),
     "log_Cpp":   (-8.0, -3.0),
     "log_Cppp":  (-8.0, -3.0),
+    "log_Npppp": (-9.0, -3.0),
 }
 
 
@@ -294,11 +422,18 @@ def _predict_ratios(
         param_name = _ION_PARAM_NAME[ion_key]
         abund = 10.0 ** params[param_name]
 
-        atom = pyneb_atoms[ion_key]
-        eps_line = sum(
-            atom.getEmissivity(Te, ne, wave=w)
-            for _, _, w in components
-        )
+        if ion_key == ("N", 5):
+            # N V: manual 3-level atom (PyNEB has no N 5 data).
+            eps_line = sum(
+                _nv_emissivity(Te, ne, wave=w)
+                for _, _, w in components
+            )
+        else:
+            atom = pyneb_atoms[ion_key]
+            eps_line = sum(
+                atom.getEmissivity(Te, ne, wave=w)
+                for _, _, w in components
+            )
 
         # F_line / F_Hb = (X^i+ / H+) * eps_line / eps_Hb
         predicted[i] = abund * eps_line / eps_hb
@@ -743,12 +878,12 @@ def forward_model(
         ", ".join(param_names),
     )
 
-    # Pre-initialise PyNEB Atom objects.
+    # Pre-initialise PyNEB Atom objects (skip N V — uses manual emissivity).
     pyneb_atoms: dict[tuple[str, int], Any] = {}
     for components in obs_components:
         for elem, ion, _ in components:
             key = (elem, ion)
-            if key not in pyneb_atoms:
+            if key not in pyneb_atoms and key != ("N", 5):
                 pyneb_atoms[key] = pn.Atom(elem, ion)
 
     # Run sampler.
