@@ -389,6 +389,52 @@ def compute_ionic_abundances(
         Te_mid = 0.5 * (Te_high + Te_low)
         ionic["Ar++/H+"] = _ionic_abundance("Ar", 3, fluxes["ArIII_7136"], Hb, Te_mid, ne, 7136)
 
+    # --- UV ionic abundances (all use T_high zone) ---
+
+    # C2+/H+ from CIII] 1907 + 1909 — T_high zone
+    ciii_flux = 0.0
+    for name in ("CIII]_1907", "CIII]"):
+        if name in fluxes and fluxes[name] > 0:
+            ciii_flux += fluxes[name]
+    if ciii_flux > 0:
+        ionic["C++/H+"] = _ionic_abundance("C", 3, ciii_flux, Hb, Te_high, ne, 1909)
+
+    # C3+/H+ from CIV 1548 + 1551 — T_high zone
+    civ_flux = 0.0
+    for name in ("CIV_1", "CIV_2"):
+        if name in fluxes and fluxes[name] > 0:
+            civ_flux += fluxes[name]
+    if civ_flux > 0:
+        ionic["C+++/H+"] = _ionic_abundance("C", 4, civ_flux, Hb, Te_high, ne, 1548)
+
+    # N2+/H+ from NIII] 1749 + 1752 — T_high zone
+    niii_flux = 0.0
+    for name in ("NIII_1749", "NIII_1752"):
+        if name in fluxes and fluxes[name] > 0:
+            niii_flux += fluxes[name]
+    if niii_flux > 0:
+        ionic["N++/H+"] = _ionic_abundance("N", 3, niii_flux, Hb, Te_high, ne, 1749)
+
+    # N3+/H+ from NIV] 1483 + 1486 — T_high zone
+    niv_flux = 0.0
+    for name in ("NIV_1483", "NIV_1486"):
+        if name in fluxes and fluxes[name] > 0:
+            niv_flux += fluxes[name]
+    if niv_flux > 0:
+        ionic["N+++/H+"] = _ionic_abundance("N", 4, niv_flux, Hb, Te_high, ne, 1487)
+
+    # N4+/H+ from NV 1239 + 1243 — T_high zone (manual emissivity)
+    nv_flux = 0.0
+    for name in ("NV_1", "NV_2"):
+        if name in fluxes and fluxes[name] > 0:
+            nv_flux += fluxes[name]
+    if nv_flux > 0:
+        from .forward import _nv_emissivity, hbeta_emissivity_aller84
+        eps_nv = _nv_emissivity(Te_high, ne, 1239) + _nv_emissivity(Te_high, ne, 1243)
+        eps_Hb = _hbeta_emissivity(Te_high, ne)
+        if eps_nv > 0 and eps_Hb > 0:
+            ionic["N4+/H+"] = (nv_flux / Hb) * (eps_Hb / eps_nv)
+
     return ionic
 
 
@@ -406,7 +452,7 @@ def compute_total_abundances(
     -------
     dict
         Total abundance ratios: ``"O/H"``, ``"N/O"``, ``"S/O"``,
-        ``"Ne/O"``, ``"Ar/O"`` as available.
+        ``"Ne/O"``, ``"Ar/O"``, ``"C/O"``, ``"N/O_UV"`` as available.
     """
     from .icf import icf_argon, icf_neon, icf_nitrogen, icf_sulfur
 
@@ -445,5 +491,21 @@ def compute_total_abundances(
         if Ar_pp > 0 and O_pp > 0:
             icf_ar = icf_argon(O_plus, OH)
             totals["Ar/O"] = icf_ar * Ar_pp / O_pp
+
+        # C/O — direct sum (C2+ + C3+) / O2+  (Jones+2023)
+        C_pp = ionic.get("C++/H+", 0.0)
+        C_ppp = ionic.get("C+++/H+", 0.0)
+        if (C_pp + C_ppp) > 0 and O_pp > 0:
+            totals["C/O"] = (C_pp + C_ppp) / O_pp
+
+        # UV N/O — (N2+ + N3+ + N4+) / O2+
+        N_pp = ionic.get("N++/H+", 0.0)
+        N_ppp = ionic.get("N+++/H+", 0.0)
+        N_pppp = ionic.get("N4+/H+", 0.0)
+        N_uv = N_pp + N_ppp + N_pppp
+        if N_uv > 0 and O_pp > 0:
+            if "N/O" not in totals:
+                totals["N/O"] = N_uv / O_pp
+            totals["N/O_UV"] = N_uv / O_pp
 
     return totals
