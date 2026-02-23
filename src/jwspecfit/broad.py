@@ -206,6 +206,7 @@ def _bic_bootstrap_single(
     balmer_mask: np.ndarray,
     variants: list[str],
     sigma_factor: float = 1.0,
+    centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
@@ -251,6 +252,7 @@ def _bic_bootstrap_single(
                 broad_type=broad_type, n_boot=0,
                 narrow_fit=narrow_fit if broad_type is not None else None,
                 n_jobs=1, sigma_factor=sigma_factor,
+                centroid_vmax=centroid_vmax,
                 moving_average=moving_average,
             )
         except (ValueError, RuntimeError):
@@ -335,6 +337,7 @@ def _fit_model_variant(
     narrow_fit: FitResult | None = None,
     n_jobs: int = -1,
     sigma_factor: float = 1.0,
+    centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
@@ -372,7 +375,8 @@ def _fit_model_variant(
     variant_label = broad_type or "narrow"
     result = fit_lines(
         spec, z, grating=grating, R=R, lines=fit_lines_list, deg=deg, n_boot=n_boot,
-        n_jobs=n_jobs, sigma_factor=sigma_factor, moving_average=moving_average,
+        n_jobs=n_jobs, sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
+        moving_average=moving_average,
         _label=variant_label, _p0_hint=p0_hint,
     )
 
@@ -408,6 +412,7 @@ def fit_with_broad(
     snr_threshold: float = 5.0,
     bic_delta: float = BIC_DELTA_THRESHOLD,
     sigma_factor: float = 1.0,
+    centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
     _print_R: bool = True,
 ) -> BroadFitResult:
@@ -487,7 +492,8 @@ def fit_with_broad(
     fit_narrow, bic_narrow = _fit_model_variant(
         spectrum, z, narrow_lines, grating, R, continuum, deg,
         broad_type=None, n_boot=0, n_jobs=n_jobs,
-        sigma_factor=sigma_factor, moving_average=moving_average,
+        sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
+        moving_average=moving_average,
     )
 
     bic_b1 = np.nan
@@ -503,7 +509,8 @@ def fit_with_broad(
             fit_narrow, bic_narrow = _fit_model_variant(
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
                 broad_type=None, n_boot=n_boot, n_jobs=n_jobs,
-                sigma_factor=sigma_factor, moving_average=moving_average,
+                sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
+                moving_average=moving_average,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -530,7 +537,8 @@ def fit_with_broad(
             fit_narrow, bic_narrow = _fit_model_variant(
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
                 broad_type=None, n_boot=n_boot, n_jobs=n_jobs,
-                sigma_factor=sigma_factor, moving_average=moving_average,
+                sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
+                moving_average=moving_average,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -569,7 +577,7 @@ def fit_with_broad(
                 noise_vectors[i],
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
                 fit_narrow, balmer_mask, variants_to_fit, sigma_factor,
-                moving_average,
+                centroid_vmax, moving_average,
             )
             for i in range(n_boot_bic)
         )
@@ -601,7 +609,8 @@ def fit_with_broad(
                 futures[variant] = pool.submit(
                     _fit_model_variant,
                     spectrum, z, narrow_lines, grating, R, continuum, deg,
-                    broad_type, 0, fit_narrow, 1, sigma_factor, moving_average,
+                    broad_type, 0, fit_narrow, 1, sigma_factor, centroid_vmax,
+                    moving_average,
                 )
             for variant, fut in futures.items():
                 fit_v, _ = fut.result()
@@ -618,7 +627,8 @@ def fit_with_broad(
                 fut = pool.submit(
                     _fit_model_variant,
                     spectrum, z, narrow_lines, grating, R, continuum, deg,
-                    variant, 0, fit_narrow, n_jobs, sigma_factor, moving_average,
+                    variant, 0, fit_narrow, n_jobs, sigma_factor, centroid_vmax,
+                    moving_average,
                 )
                 bic_futures[variant] = fut
 
@@ -671,6 +681,7 @@ def fit_with_broad(
             broad_type=broad_type, n_boot=n_boot,
             narrow_fit=fit_narrow if broad_type is not None else None,
             n_jobs=n_jobs, sigma_factor=sigma_factor,
+            centroid_vmax=centroid_vmax,
             moving_average=moving_average,
         )
         all_fits[best_name] = best_fit
