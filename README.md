@@ -287,11 +287,13 @@ result = jwspecfit.fit_lines(
 )
 ```
 
-Each window gets its own polynomial continuum fit and line detection.
-Results are merged into a single `FitResult` with the full spectrum
-attached — compatible with `plot_fit()`, `plot_fit_interactive()`,
-`export_lines_txt()`, and downstream packages (`jwspecmcmc`,
-`jwspecabund`).
+Each window gets its own polynomial continuum fit and automatic line
+detection — observable lines are selected per window based on redshift
+and wavelength coverage, so you do not need to specify `lines=` unless
+you want to restrict to specific lines.  Results are merged into a
+single `FitResult` with the full spectrum attached — compatible with
+`plot_fit()`, `plot_fit_interactive()`, `export_lines_txt()`, and
+downstream packages (`jwspecmcmc`, `jwspecabund`).
 
 Pixels outside all windows have `NaN` continuum and residuals (no fit
 attempted there), so the plot naturally shows gaps between windows.
