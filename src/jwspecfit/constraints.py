@@ -46,7 +46,7 @@ class ConstraintSet:
     line_names: list[str]
     tie_nii: bool = True
     tie_balmer_to_oiii: bool = True
-    tie_uv_doublets: bool = True
+    tie_uv_doublets: bool = False
 
     def apply(self, params: np.ndarray) -> np.ndarray:
         """Apply constraints to a parameter vector (in-place copy).
