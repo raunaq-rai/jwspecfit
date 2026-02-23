@@ -748,20 +748,37 @@ def _build_forward_result(
         result["OH_err"] = np.nan
         result["OH_posterior"] = None
 
-    # log(N/O) if N+ and O+ or O++ available
-    if "log_Np" in ionic_posteriors:
-        log_np = ionic_posteriors["log_Np"]
-        if "log_Op" in ionic_posteriors:
-            NO_post = log_np - ionic_posteriors["log_Op"]
-        elif "log_Opp" in ionic_posteriors:
-            # Approximate: N/O ~ N+/O++  (coarse)
-            NO_post = log_np - ionic_posteriors["log_Opp"]
-        else:
-            NO_post = None
+    # log(N/O) — sum all available nitrogen ions in linear space, divide
+    # by total oxygen.  Falls back to N+/O+ if only optical N+ is available.
+    n_ion_keys = [
+        ("log_Np", "N+"),
+        ("log_Npp", "N2+"),
+        ("log_Nppp", "N3+"),
+        ("log_Npppp", "N4+"),
+    ]
+    n_posteriors_lin = []
+    for key, _label in n_ion_keys:
+        if key in ionic_posteriors:
+            n_posteriors_lin.append(10.0 ** ionic_posteriors[key])
 
-        if NO_post is not None:
+    o_posteriors_lin = []
+    for key in ("log_Op", "log_Opp"):
+        if key in ionic_posteriors:
+            o_posteriors_lin.append(10.0 ** ionic_posteriors[key])
+
+    if n_posteriors_lin and o_posteriors_lin:
+        N_total = sum(n_posteriors_lin)
+        O_total = sum(o_posteriors_lin)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            NO_post = np.where(
+                (N_total > 0) & (O_total > 0),
+                np.log10(N_total / O_total),
+                np.nan,
+            )
+        valid = np.isfinite(NO_post)
+        if np.any(valid):
             result["NO_posterior"] = NO_post
-            result["NO"], result["NO_err"] = _summarise(NO_post)
+            result["NO"], result["NO_err"] = _summarise(NO_post[valid])
         else:
             result["NO"] = None
             result["NO_err"] = None
@@ -779,6 +796,35 @@ def _build_forward_result(
     else:
         result["NeO"] = None
         result["NeO_err"] = None
+
+    # log(C/O) — sum C2+ and C3+ in linear space, divide by O2+
+    c_ion_keys = [("log_Cpp", "C2+"), ("log_Cppp", "C3+")]
+    c_posteriors_lin = []
+    for key, _label in c_ion_keys:
+        if key in ionic_posteriors:
+            c_posteriors_lin.append(10.0 ** ionic_posteriors[key])
+
+    if c_posteriors_lin and "log_Opp" in ionic_posteriors:
+        C_total = sum(c_posteriors_lin)
+        O_pp_lin = 10.0 ** ionic_posteriors["log_Opp"]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            CO_post = np.where(
+                (C_total > 0) & (O_pp_lin > 0),
+                np.log10(C_total / O_pp_lin),
+                np.nan,
+            )
+        valid = np.isfinite(CO_post)
+        if np.any(valid):
+            result["CO_posterior"] = CO_post
+            result["CO"], result["CO_err"] = _summarise(CO_post[valid])
+        else:
+            result["CO"] = None
+            result["CO_err"] = None
+            result["CO_posterior"] = None
+    else:
+        result["CO"] = None
+        result["CO_err"] = None
+        result["CO_posterior"] = None
 
     return result
 
