@@ -254,10 +254,14 @@ def _run_direct(
     ArO = totals.get("Ar/O")
     ArO_log = np.log10(ArO) if ArO is not None and ArO > 0 else None
 
+    CO = totals.get("C/O")
+    CO_log = np.log10(CO) if CO is not None and CO > 0 else None
+
     # --- MC error propagation ---
     rng = np.random.default_rng(seed)
     OH_mc = []
     NO_mc = []
+    CO_mc = []
 
     for _ in tqdm(range(n_mc), desc="Direct Te (MC)", disable=not progress):
         mc_fluxes = {}
@@ -288,27 +292,39 @@ def _run_direct(
                 NO_mc.append(np.log10(no_mc))
             else:
                 NO_mc.append(np.nan)
+
+            co_mc = totals_mc.get("C/O", np.nan)
+            if co_mc is not None and np.isfinite(co_mc) and co_mc > 0:
+                CO_mc.append(np.log10(co_mc))
+            else:
+                CO_mc.append(np.nan)
         except (ValueError, RuntimeError):
             OH_mc.append(np.nan)
             NO_mc.append(np.nan)
+            CO_mc.append(np.nan)
 
     OH_mc = np.array(OH_mc)
     NO_mc = np.array(NO_mc)
+    CO_mc = np.array(CO_mc)
 
     OH_err = float(np.nanstd(OH_mc)) if np.any(np.isfinite(OH_mc)) else np.nan
     NO_err = float(np.nanstd(NO_mc)) if np.any(np.isfinite(NO_mc)) else None
+    CO_err = float(np.nanstd(CO_mc)) if np.any(np.isfinite(CO_mc)) else None
 
     return {
         "OH": OH_12,
         "OH_err": OH_err,
         "NO": NO_log,
         "NO_err": NO_err,
+        "CO": CO_log,
+        "CO_err": CO_err,
         "Te_high": Te_high,
         "Te_low": Te_low,
         "ne": ne,
         "ionic": ionic,
         "OH_posterior": OH_mc,
         "NO_posterior": NO_mc,
+        "CO_posterior": CO_mc,
         "SO": SO_log,
         "NeO": NeO_log,
         "ArO": ArO_log,
@@ -367,6 +383,7 @@ def _run_direct_mcmc(
 
     OH_post = np.full(n_samples, np.nan)
     NO_post = np.full(n_samples, np.nan)
+    CO_post = np.full(n_samples, np.nan)
 
     # Compute medians for the point estimate.
     med_fluxes = {name: float(np.median(post)) for name, post in posteriors.items()}
@@ -399,6 +416,10 @@ def _run_direct_mcmc(
             no = totals.get("N/O", np.nan)
             if no is not None and np.isfinite(no) and no > 0:
                 NO_post[i] = np.log10(no)
+
+            co = totals.get("C/O", np.nan)
+            if co is not None and np.isfinite(co) and co > 0:
+                CO_post[i] = np.log10(co)
         except (ValueError, RuntimeError):
             continue
 
@@ -411,6 +432,11 @@ def _run_direct_mcmc(
     if NO_med is not None:
         NO_lo = float(NO_med - np.nanpercentile(NO_post, 16))
         NO_hi = float(np.nanpercentile(NO_post, 84) - NO_med)
+    CO_med = float(np.nanmedian(CO_post)) if np.any(np.isfinite(CO_post)) else None
+    CO_lo = CO_hi = None
+    if CO_med is not None:
+        CO_lo = float(CO_med - np.nanpercentile(CO_post, 16))
+        CO_hi = float(np.nanpercentile(CO_post, 84) - CO_med)
 
     # Compute Te, ne, ionic from median fluxes for point estimate.
     try:
@@ -431,12 +457,15 @@ def _run_direct_mcmc(
         "OH_err": (OH_lo, OH_hi),
         "NO": NO_med,
         "NO_err": (NO_lo, NO_hi) if NO_lo is not None else None,
+        "CO": CO_med,
+        "CO_err": (CO_lo, CO_hi) if CO_lo is not None else None,
         "Te_high": Te_high if np.isfinite(Te_high) else None,
         "Te_low": Te_low if np.isfinite(Te_low) else None,
         "ne": ne_default,
         "ionic": ionic if ionic else None,
         "OH_posterior": OH_post,
         "NO_posterior": NO_post if np.any(np.isfinite(NO_post)) else None,
+        "CO_posterior": CO_post if np.any(np.isfinite(CO_post)) else None,
         "SO": np.log10(totals["S/O"]) if "S/O" in totals and totals["S/O"] > 0 else None,
         "NeO": np.log10(totals["Ne/O"]) if "Ne/O" in totals and totals["Ne/O"] > 0 else None,
         "ArO": np.log10(totals["Ar/O"]) if "Ar/O" in totals and totals["Ar/O"] > 0 else None,
@@ -634,6 +663,8 @@ def compute_abundances(
             OH_err=fwd_out.get("OH_err", np.nan),
             NO=fwd_out.get("NO"),
             NO_err=fwd_out.get("NO_err"),
+            CO=fwd_out.get("CO"),
+            CO_err=fwd_out.get("CO_err"),
             Te_high=fwd_out.get("Te"),
             Te_low=None,
             ne=fwd_out.get("ne"),
@@ -641,6 +672,7 @@ def compute_abundances(
             ionic=fwd_out.get("ionic"),
             OH_posterior=fwd_out.get("OH_posterior"),
             NO_posterior=fwd_out.get("NO_posterior"),
+            CO_posterior=fwd_out.get("CO_posterior"),
             NeO=fwd_out.get("NeO"),
             _forward_result=fwd_out,
         )
@@ -660,6 +692,8 @@ def compute_abundances(
             OH_err=direct_out["OH_err"],
             NO=direct_out.get("NO"),
             NO_err=direct_out.get("NO_err"),
+            CO=direct_out.get("CO"),
+            CO_err=direct_out.get("CO_err"),
             Te_high=direct_out.get("Te_high"),
             Te_low=direct_out.get("Te_low"),
             ne=direct_out.get("ne"),
@@ -667,6 +701,7 @@ def compute_abundances(
             ionic=direct_out.get("ionic"),
             OH_posterior=direct_out.get("OH_posterior"),
             NO_posterior=direct_out.get("NO_posterior"),
+            CO_posterior=direct_out.get("CO_posterior"),
             SO=direct_out.get("SO"),
             NeO=direct_out.get("NeO"),
             ArO=direct_out.get("ArO"),
