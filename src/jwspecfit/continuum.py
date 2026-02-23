@@ -66,11 +66,12 @@ def fit_continuum(
     wave_A = wave_um * 1e4
     valid = np.isfinite(flux_ujy) & np.isfinite(err_ujy) & (err_ujy > 0)
 
-    # Mask everything blueward of NV (IGM absorption / Lyman break region).
-    # NV_1 (1238.8 Å) is the bluest line we fit; the continuum should not
-    # extend into the IGM-absorbed region shortward of it.
-    nv_obs_A = REST_LINES_A["NV_1"] * (1.0 + z)
-    valid &= wave_A >= nv_obs_A
+    # Mask everything blueward of Lyman-alpha (1215.67 Å rest-frame).
+    # The IGM absorbs flux shortward of Ly-α, making the continuum
+    # unreliable there.
+    _LYA_REST_A = 1215.670
+    lya_obs_A = _LYA_REST_A * (1.0 + z)
+    valid &= wave_A >= lya_obs_A
 
     # Build line mask.
     line_mask = np.zeros(len(wave_A), dtype=bool)
