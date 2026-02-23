@@ -264,14 +264,14 @@ def _ionic_abundance(
     flux_Hbeta: float,
     Te: float,
     ne: float,
-    wave: int,
+    wave: int | list[int],
 ) -> float:
     """Compute an ionic abundance X^i+/H+ via PyNEB.
 
-    For T <= 30,000 K, delegates to ``Atom.getIonAbundance()``.
-    For T > 30,000 K, computes the abundance manually using the CEL
-    emissivity from PyNEB and an extrapolated Hβ emissivity, since
-    PyNEB's H I recombination tables only cover up to 30,000 K.
+    For a single wavelength at T <= 30,000 K, delegates to
+    ``Atom.getIonAbundance()``.  For T > 30,000 K or when *wave* is a
+    list of wavelengths (doublet/multiplet), computes the abundance
+    manually as (F_line/F_Hβ) × (ε_Hβ / Σε_line).
 
     Parameters
     ----------
@@ -280,15 +280,18 @@ def _ionic_abundance(
     ion : int
         Ionisation stage (PyNEB convention: 2 = singly ionised, etc.).
     flux_line : float
-        Emission-line flux.
+        Emission-line flux.  When *wave* is a list this must be the
+        **summed** flux of all components.
     flux_Hbeta : float
         Hbeta flux (for normalisation).
     Te : float
         Electron temperature in K.
     ne : float
         Electron density in cm^-3.
-    wave : int
-        Approximate wavelength label for PyNEB (e.g. 5007, 6584).
+    wave : int or list[int]
+        Wavelength label(s) for PyNEB (e.g. ``5007`` or ``[1907, 1909]``).
+        Pass a list when *flux_line* is the combined doublet flux so that
+        the total emissivity is used.
 
     Returns
     -------
@@ -300,20 +303,29 @@ def _ionic_abundance(
     if flux_Hbeta <= 0 or flux_line <= 0:
         return np.nan
 
-    intensity = flux_line / flux_Hbeta * 100.0  # PyNEB convention: Hβ = 100
-
     atom = pn.Atom(element, ion)
 
-    if Te <= _PYNEB_HI_TMAX:
-        abund = atom.getIonAbundance(intensity, tem=Te, den=ne, wave=wave)
-    else:
-        # Manual computation: X^i+/H+ = (I_line/I_Hb) × (ε_Hb / ε_line)
-        emiss_line = atom.getEmissivity(Te, ne, wave=wave)
+    # Doublet / multiplet — always use the manual emissivity path
+    # so that we sum ε over all components.
+    if isinstance(wave, (list, tuple)):
+        emiss_line = sum(atom.getEmissivity(Te, ne, wave=w) for w in wave)
         emiss_Hb = _hbeta_emissivity(Te, ne)
         if emiss_line > 0 and np.isfinite(emiss_Hb) and emiss_Hb > 0:
-            abund = (intensity / 100.0) * (emiss_Hb / emiss_line)
+            abund = (flux_line / flux_Hbeta) * (emiss_Hb / emiss_line)
         else:
             abund = np.nan
+    else:
+        intensity = flux_line / flux_Hbeta * 100.0  # PyNEB convention: Hβ = 100
+        if Te <= _PYNEB_HI_TMAX:
+            abund = atom.getIonAbundance(intensity, tem=Te, den=ne, wave=wave)
+        else:
+            # Manual computation: X^i+/H+ = (I_line/I_Hb) × (ε_Hb / ε_line)
+            emiss_line = atom.getEmissivity(Te, ne, wave=wave)
+            emiss_Hb = _hbeta_emissivity(Te, ne)
+            if emiss_line > 0 and np.isfinite(emiss_Hb) and emiss_Hb > 0:
+                abund = (intensity / 100.0) * (emiss_Hb / emiss_line)
+            else:
+                abund = np.nan
 
     if np.isnan(abund) or abund <= 0:
         return np.nan
@@ -362,7 +374,7 @@ def compute_ionic_abundances(
     elif "OII_doublet" in fluxes:
         oii = fluxes["OII_doublet"]
     if oii > 0:
-        ionic["O+/H+"] = _ionic_abundance("O", 2, oii, Hb, Te_low, ne, 3726)
+        ionic["O+/H+"] = _ionic_abundance("O", 2, oii, Hb, Te_low, ne, [3726, 3729])
 
     # N+/H+ from [NII] 6585 — T_low zone
     if "NII_6585" in fluxes and fluxes["NII_6585"] > 0:
@@ -373,7 +385,7 @@ def compute_ionic_abundances(
     if "SII_6718" in fluxes and "SII_6732" in fluxes:
         sii = fluxes["SII_6718"] + fluxes["SII_6732"]
     if sii > 0:
-        ionic["S+/H+"] = _ionic_abundance("S", 2, sii, Hb, Te_low, ne, 6718)
+        ionic["S+/H+"] = _ionic_abundance("S", 2, sii, Hb, Te_low, ne, [6718, 6732])
 
     # S++/H+ from [SIII] 9069 — T_mid zone (use average of T_high, T_low)
     if "SIII_9069" in fluxes and fluxes["SIII_9069"] > 0:
@@ -397,7 +409,7 @@ def compute_ionic_abundances(
         if name in fluxes and fluxes[name] > 0:
             ciii_flux += fluxes[name]
     if ciii_flux > 0:
-        ionic["C++/H+"] = _ionic_abundance("C", 3, ciii_flux, Hb, Te_high, ne, 1909)
+        ionic["C++/H+"] = _ionic_abundance("C", 3, ciii_flux, Hb, Te_high, ne, [1907, 1909])
 
     # C3+/H+ from CIV 1548 + 1551 — T_high zone
     civ_flux = 0.0
@@ -405,7 +417,7 @@ def compute_ionic_abundances(
         if name in fluxes and fluxes[name] > 0:
             civ_flux += fluxes[name]
     if civ_flux > 0:
-        ionic["C+++/H+"] = _ionic_abundance("C", 4, civ_flux, Hb, Te_high, ne, 1548)
+        ionic["C+++/H+"] = _ionic_abundance("C", 4, civ_flux, Hb, Te_high, ne, [1548, 1551])
 
     # N2+/H+ from NIII] 1749 + 1752 — T_high zone
     niii_flux = 0.0
@@ -413,7 +425,7 @@ def compute_ionic_abundances(
         if name in fluxes and fluxes[name] > 0:
             niii_flux += fluxes[name]
     if niii_flux > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, niii_flux, Hb, Te_high, ne, 1749)
+        ionic["N++/H+"] = _ionic_abundance("N", 3, niii_flux, Hb, Te_high, ne, [1749, 1752])
 
     # N3+/H+ from NIV] 1483 + 1486 — T_high zone
     niv_flux = 0.0
@@ -421,7 +433,7 @@ def compute_ionic_abundances(
         if name in fluxes and fluxes[name] > 0:
             niv_flux += fluxes[name]
     if niv_flux > 0:
-        ionic["N+++/H+"] = _ionic_abundance("N", 4, niv_flux, Hb, Te_high, ne, 1487)
+        ionic["N+++/H+"] = _ionic_abundance("N", 4, niv_flux, Hb, Te_high, ne, [1483, 1487])
 
     # N4+/H+ from NV 1239 + 1243 — T_high zone (manual emissivity)
     nv_flux = 0.0
