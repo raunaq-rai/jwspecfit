@@ -167,6 +167,7 @@ def fit_lines(
     n_jobs: int = -1,
     save_path: str | Path | None = None,
     sigma_factor: float = 1.0,
+    centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
@@ -204,6 +205,9 @@ def fit_lines(
         Multiplicative factor applied to the upper line-width bound.
         Use values > 1 for stacked spectra where redshift scatter
         broadens lines beyond the instrumental resolution (default 1.0).
+    centroid_vmax : float
+        Maximum centroid offset in km/s (default 500).  Increase for
+        stacked spectra with larger velocity offsets between lines.
     moving_average : bool or int
         If ``False`` (default), use polynomial continuum.  If ``True``,
         use a median filter with a default window of 75 pixels.  If an
@@ -399,7 +403,7 @@ def fit_lines(
         # separation to the nearest line so centroids cannot blend.
         local_sig = sig_inst[np.argmin(np.abs(spec.wave_A - lam_obs_A))]
         _C_KMS_CENT = 299792.458
-        _CENT_V_MAX = 500.0  # km/s — max centroid offset
+        _CENT_V_MAX = centroid_vmax  # km/s — max centroid offset
         cent_margin_v = _CENT_V_MAX / _C_KMS_CENT * lam_obs_A
         # Floor: at least 2 pixel widths for coarsely sampled spectra.
         cent_margin = max(cent_margin_v, 2.0 * np.median(dlam))

@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 # [NII] 6549/6585 theoretical flux ratio (Storey & Zeippen 2000).
 NII_RATIO = 1.0 / 2.96
 
+# Resonance doublets: secondary/primary amplitude ratio (optically thin).
+# Set by statistical weights g = 2J+1; not density-sensitive.
+NV_RATIO = 0.5       # F(NV_2) / F(NV_1)
+CIV_RATIO = 0.5      # F(CIV_2) / F(CIV_1)
+
+# OIII] UV intercombination: weakly density-dependent, not a standard
+# density diagnostic.  Fix for fitting stability.
+OIII_UV_RATIO = 1.0 / 1.20   # F(OIII_1661) / F(OIII_1666)
+
 
 @dataclass
 class ConstraintSet:
@@ -37,6 +46,7 @@ class ConstraintSet:
     line_names: list[str]
     tie_nii: bool = True
     tie_balmer_to_oiii: bool = True
+    tie_uv_doublets: bool = True
 
     def apply(self, params: np.ndarray) -> np.ndarray:
         """Apply constraints to a parameter vector (in-place copy).
@@ -114,6 +124,42 @@ class ConstraintSet:
             # Width: tied in velocity space
             p[2 * nL + i49] = p[2 * nL + i85] * lam_ratio
 
+        # --- UV doublet constraints ---
+        if self.tie_uv_doublets:
+            # Amplitude-tied doublets: resonance lines with fixed flux ratios
+            # and OIII] UV intercombination (weakly density-dependent).
+            _AMPLITUDE_TIED = [
+                # (primary, secondary, ratio = F_secondary / F_primary)
+                ("NV_1",      "NV_2",      NV_RATIO),
+                ("CIV_1",     "CIV_2",     CIV_RATIO),
+                ("OIII_1666", "OIII_1661", OIII_UV_RATIO),
+            ]
+            for pri, sec, ratio in _AMPLITUDE_TIED:
+                if pri in idx and sec in idx:
+                    i_pri = idx[pri]
+                    i_sec = idx[sec]
+                    lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
+                    p[i_sec] = p[i_pri] * ratio
+                    p[nL + i_sec] = p[nL + i_pri] * lam_ratio
+                    p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
+
+            # Kinematics-only doublets: density-sensitive intercombination
+            # lines whose flux ratio must remain free.
+            _KINEMATIC_TIED = [
+                # (primary, secondary) — amplitudes stay free
+                ("CIII]_1907", "CIII]"),
+                ("NIV_1486",   "NIV_1483"),
+                ("NIII_1749",  "NIII_1752"),
+                ("SiIII_1",   "SiIII_2"),
+            ]
+            for pri, sec in _KINEMATIC_TIED:
+                if pri in idx and sec in idx:
+                    i_pri = idx[pri]
+                    i_sec = idx[sec]
+                    lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
+                    p[nL + i_sec] = p[nL + i_pri] * lam_ratio
+                    p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
+
         return p
 
     def free_mask(self) -> np.ndarray:
@@ -167,6 +213,34 @@ class ConstraintSet:
         for broad_name, narrow_name in _BROAD_PAIRS:
             if broad_name in idx and narrow_name in idx:
                 free[nL + idx[broad_name]] = False
+
+        # UV doublet constraints.
+        if self.tie_uv_doublets:
+            # Amplitude-tied: all 3 parameters of secondary are derived.
+            _AMPLITUDE_TIED = [
+                ("NV_1",      "NV_2"),
+                ("CIV_1",     "CIV_2"),
+                ("OIII_1666", "OIII_1661"),
+            ]
+            for pri, sec in _AMPLITUDE_TIED:
+                if pri in idx and sec in idx:
+                    i_sec = idx[sec]
+                    free[i_sec] = False
+                    free[nL + i_sec] = False
+                    free[2 * nL + i_sec] = False
+
+            # Kinematics-only: centroid and sigma derived, amplitude free.
+            _KINEMATIC_TIED = [
+                ("CIII]_1907", "CIII]"),
+                ("NIV_1486",   "NIV_1483"),
+                ("NIII_1749",  "NIII_1752"),
+                ("SiIII_1",   "SiIII_2"),
+            ]
+            for pri, sec in _KINEMATIC_TIED:
+                if pri in idx and sec in idx:
+                    i_sec = idx[sec]
+                    free[nL + i_sec] = False
+                    free[2 * nL + i_sec] = False
 
         return free
 
