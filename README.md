@@ -38,7 +38,7 @@ cd jwspecfit
 pip install -e ".[dev]"
 ```
 
-**Requirements:** Python >= 3.10, numpy, scipy, astropy, matplotlib, lmfit, tqdm, joblib, plotly.
+**Requirements:** Python >= 3.10, numpy, scipy, astropy, matplotlib, tqdm, joblib, plotly.
 
 ---
 
