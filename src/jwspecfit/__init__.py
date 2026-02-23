@@ -144,6 +144,7 @@ def fit_lines(
     snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
     sigma_factor: float = 1.0,
+    moving_average: bool | int = False,
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
@@ -201,6 +202,10 @@ def fit_lines(
     sigma_factor : float
         Multiplicative factor on the upper line-width bound.
         Use values > 1 for stacked spectra (default 1.0).
+    moving_average : bool or int
+        If ``False`` (default), use polynomial continuum.  If ``True``,
+        use a median filter with a default window of 75 pixels.  If an
+        ``int``, use that as the median-filter window size.
 
     Returns
     -------
@@ -265,6 +270,7 @@ def fit_lines(
                     grating=grating, R=R, lines=lines, deg=deg,
                     n_boot=n_boot, clip_sigma=clip_sigma,
                     n_jobs=n_jobs, sigma_factor=sigma_factor,
+                    moving_average=moving_average,
                     _label=win_label,
                 )
             else:
@@ -275,6 +281,7 @@ def fit_lines(
                     n_boot=n_boot, n_boot_bic=n_boot_bic,
                     n_jobs=n_jobs, snr_threshold=snr_threshold,
                     bic_delta=bic_delta, sigma_factor=sigma_factor,
+                    moving_average=moving_average,
                     _print_R=False,
                 )
             window_results.append(res)
@@ -295,6 +302,7 @@ def fit_lines(
             n_boot=n_boot, clip_sigma=clip_sigma,
             n_jobs=n_jobs, save_path=save_path,
             sigma_factor=sigma_factor,
+            moving_average=moving_average,
         )
 
     return fit_with_broad(
@@ -307,4 +315,5 @@ def fit_lines(
         snr_threshold=snr_threshold,
         bic_delta=bic_delta,
         sigma_factor=sigma_factor,
+        moving_average=moving_average,
     )

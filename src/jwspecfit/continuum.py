@@ -1,4 +1,4 @@
-"""Continuum fitting via iterative σ-clipped polynomial."""
+"""Continuum fitting via iterative σ-clipped polynomial or median filter."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from .lines import REST_LINES_A
 from .resolution import sigma_inst_A
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_MOVING_AVERAGE_WINDOW = 75
 
 
 def fit_continuum(
@@ -25,13 +27,18 @@ def fit_continuum(
     clip_sigma: float = 2.5,
     n_iter: int = 5,
     line_mask_nsigma: float = 6.0,
+    moving_average: bool | int = False,
 ) -> np.ndarray:
-    """Fit a polynomial continuum with emission-line masking.
+    """Fit a continuum with emission-line masking.
 
-    The algorithm:
-    1. Mask pixels within ±``line_mask_nsigma`` × σ_inst of every known line.
-    2. Fit a polynomial of degree *deg* to the unmasked, valid pixels.
-    3. Iteratively σ-clip residuals above *clip_sigma* and refit.
+    Two modes are available:
+
+    - **Polynomial** (default): fit a polynomial of degree *deg* to unmasked
+      pixels with iterative σ-clipping.
+    - **Median filter** (``moving_average``): apply a
+      ``scipy.ndimage.median_filter`` to unmasked pixels and interpolate to
+      the full wavelength grid.  Useful for stacked spectra where the
+      continuum shape varies across the wavelength range.
 
     Parameters
     ----------
@@ -50,19 +57,24 @@ def fit_continuum(
     R : float, optional
         Resolving power (overrides *grating*).
     deg : int
-        Polynomial degree (default 2).
+        Polynomial degree (default 2).  Ignored when *moving_average* is
+        active.
     clip_sigma : float
         Sigma-clipping threshold (default 2.5).
     n_iter : int
         Number of clipping iterations (default 5).
     line_mask_nsigma : float
         Number of instrumental σ to mask around each line (default 6).
+    moving_average : bool or int
+        If ``False`` (default), use the polynomial continuum.  If ``True``,
+        use a median filter with a default window of
+        {default_win} pixels.  If an ``int``, use that as the window size.
 
     Returns
     -------
     np.ndarray
         Continuum evaluated at each pixel (µJy).
-    """
+    """.format(default_win=_DEFAULT_MOVING_AVERAGE_WINDOW)
     wave_A = wave_um * 1e4
     valid = np.isfinite(flux_ujy) & np.isfinite(err_ujy) & (err_ujy > 0)
 
@@ -88,6 +100,58 @@ def fit_continuum(
 
     use = valid & ~line_mask
 
+    # Resolve moving_average window size.
+    if moving_average is True:
+        _ma_window = _DEFAULT_MOVING_AVERAGE_WINDOW
+    elif moving_average:
+        _ma_window = int(moving_average)
+    else:
+        _ma_window = 0
+
+    # ---- Moving-average (median filter) path ----
+    if _ma_window > 0:
+        from scipy.ndimage import median_filter
+
+        n_use = int(np.sum(use))
+        if n_use < 3:
+            logger.warning(
+                "Too few continuum pixels (%d) for median filter; returning zeros.",
+                n_use,
+            )
+            return np.zeros_like(flux_ujy)
+
+        # Ensure window is odd and does not exceed the number of usable pixels.
+        win = min(_ma_window, n_use)
+        if win % 2 == 0:
+            win += 1
+
+        mask = use.copy()
+        idx_use = np.where(use)[0]
+
+        for _ in range(n_iter):
+            idx_mask = np.where(mask)[0]
+            if len(idx_mask) < 3:
+                break
+            smoothed_masked = median_filter(flux_ujy[idx_mask], size=min(win, len(idx_mask)))
+            # Interpolate smoothed values to all pixels.
+            cont = np.interp(wave_um, wave_um[idx_mask], smoothed_masked)
+            resid = flux_ujy - cont
+            # Clip positive outliers (emission residuals) in error-normalised
+            # space, same logic as the polynomial path.
+            norm_resid = np.where(err_ujy > 0, resid / err_ujy, 0.0)
+            mask = use & (norm_resid < clip_sigma)
+
+        # Final smoothing on clipped pixels.
+        idx_mask = np.where(mask)[0]
+        if len(idx_mask) >= 3:
+            smoothed_masked = median_filter(flux_ujy[idx_mask], size=min(win, len(idx_mask)))
+            continuum = np.interp(wave_um, wave_um[idx_mask], smoothed_masked)
+        else:
+            continuum = cont
+
+        return continuum
+
+    # ---- Polynomial path (default) ----
     if np.sum(use) < deg + 1:
         logger.warning("Too few continuum pixels (%d); returning zeros.", np.sum(use))
         return np.zeros_like(flux_ujy)

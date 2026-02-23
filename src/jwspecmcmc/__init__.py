@@ -71,6 +71,7 @@ def fit_lines(
     snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
     sigma_factor: float = 1.0,
+    moving_average: bool | int = False,
 ) -> MCMCResult | MCMCBroadFitResult:
     """Fit emission lines using MCMC sampling.
 
@@ -136,6 +137,10 @@ def fit_lines(
     sigma_factor : float
         Multiplicative factor on the upper line-width bound.
         Use values > 1 for stacked spectra (default 1.0).
+    moving_average : bool or int
+        If ``False`` (default), use polynomial continuum.  If ``True``,
+        use a median filter with a default window of 75 pixels.  If an
+        ``int``, use that as the median-filter window size.
 
     Returns
     -------
@@ -165,6 +170,7 @@ def fit_lines(
             progress=progress,
             seed=seed,
             sigma_factor=sigma_factor,
+            moving_average=moving_average,
         )
 
     return _fit_with_broad_mcmc(
@@ -190,6 +196,7 @@ def fit_lines(
         progress=progress,
         seed=seed,
         sigma_factor=sigma_factor,
+        moving_average=moving_average,
     )
 
 
@@ -218,6 +225,7 @@ def fit_with_broad(
     progress: bool = True,
     seed: int = 42,
     sigma_factor: float = 1.0,
+    moving_average: bool | int = False,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
 
@@ -275,6 +283,10 @@ def fit_with_broad(
     sigma_factor : float
         Multiplicative factor on the upper line-width bound.
         Use values > 1 for stacked spectra (default 1.0).
+    moving_average : bool or int
+        If ``False`` (default), use polynomial continuum.  If ``True``,
+        use a median filter with a default window of 75 pixels.  If an
+        ``int``, use that as the median-filter window size.
 
     Returns
     -------
@@ -303,6 +315,7 @@ def fit_with_broad(
         progress=progress,
         seed=seed,
         sigma_factor=sigma_factor,
+        moving_average=moving_average,
     )
 
 

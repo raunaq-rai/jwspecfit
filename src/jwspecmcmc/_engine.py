@@ -57,6 +57,7 @@ def _fit_lines_mcmc(
     progress: bool = True,
     seed: int = 42,
     sigma_factor: float = 1.0,
+    moving_average: bool | int = False,
 ) -> MCMCResult:
     """Fit emission lines using MCMC sampling.
 
@@ -105,6 +106,10 @@ def _fit_lines_mcmc(
     sigma_factor : float
         Multiplicative factor on the upper line-width bound.
         Use values > 1 for stacked spectra (default 1.0).
+    moving_average : bool or int
+        If ``False`` (default), use polynomial continuum.  If ``True``,
+        use a median filter with a default window of 75 pixels.  If an
+        ``int``, use that as the median-filter window size.
 
     Returns
     -------
@@ -183,6 +188,7 @@ def _fit_lines_mcmc(
     continuum = fit_continuum(
         spec.wave_um, spec.flux_ujy, spec.err_ujy, z, line_names,
         grating=grating, R=R, deg=deg, clip_sigma=clip_sigma,
+        moving_average=moving_average,
     )
     flux_sub = spec.flux_ujy - continuum
 
@@ -520,6 +526,7 @@ def _fit_with_broad_mcmc(
     progress: bool = True,
     seed: int = 42,
     sigma_factor: float = 1.0,
+    moving_average: bool | int = False,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
 
@@ -575,6 +582,10 @@ def _fit_with_broad_mcmc(
         Show progress bar.
     seed : int
         Random seed.
+    moving_average : bool or int
+        If ``False`` (default), use polynomial continuum.  If ``True``,
+        use a median filter with a default window of 75 pixels.  If an
+        ``int``, use that as the median-filter window size.
 
     Returns
     -------
@@ -597,6 +608,7 @@ def _fit_with_broad_mcmc(
         snr_threshold=snr_threshold,
         bic_delta=bic_delta,
         sigma_factor=sigma_factor,
+        moving_average=moving_average,
     )
 
     selected_model = bic_result.selected_model
@@ -641,6 +653,7 @@ def _fit_with_broad_mcmc(
         progress=progress,
         seed=seed,
         sigma_factor=sigma_factor,
+        moving_average=moving_average,
     )
 
     return MCMCBroadFitResult(

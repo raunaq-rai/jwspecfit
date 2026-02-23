@@ -167,6 +167,7 @@ def fit_lines(
     n_jobs: int = -1,
     save_path: str | Path | None = None,
     sigma_factor: float = 1.0,
+    moving_average: bool | int = False,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -203,6 +204,10 @@ def fit_lines(
         Multiplicative factor applied to the upper line-width bound.
         Use values > 1 for stacked spectra where redshift scatter
         broadens lines beyond the instrumental resolution (default 1.0).
+    moving_average : bool or int
+        If ``False`` (default), use polynomial continuum.  If ``True``,
+        use a median filter with a default window of 75 pixels.  If an
+        ``int``, use that as the median-filter window size.
 
     Returns
     -------
@@ -298,6 +303,7 @@ def fit_lines(
         R=R,
         deg=deg,
         clip_sigma=clip_sigma,
+        moving_average=moving_average,
     )
     flux_sub = spec.flux_ujy - continuum
 
