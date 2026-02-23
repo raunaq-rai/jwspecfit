@@ -722,6 +722,6 @@ pytest tests/ -v
 
 ---
 
-## License
+## Licence
 
-MIT
+MIT — see [LICENCE](LICENCE).
