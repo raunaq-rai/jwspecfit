@@ -223,6 +223,11 @@ def _fit_lines_mcmc(
             peak_flam = np.nanmax(flam[idx_near])
         else:
             peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
+        # Guard against all-NaN windows (e.g. line in a detector gap).
+        if not np.isfinite(peak_flam) or peak_flam <= 0:
+            peak_flam = np.nanmax(np.abs(flam[valid])) if np.any(valid) else 1.0
+        if not np.isfinite(peak_flam) or peak_flam <= 0:
+            peak_flam = 1.0
 
         A_seed = max(peak_flam * _SQRT2PI * sig_seed, 1e-30)
 
