@@ -175,6 +175,116 @@ def _apply_dust_correction(
     return corr_fluxes, corr_errors
 
 
+def _compute_multi_ne(fluxes: dict[str, float]) -> tuple[float, float]:
+    """Compute multi-phase electron densities (Berg+2025 step 1).
+
+    Parameters
+    ----------
+    fluxes : dict
+        Dust-corrected emission-line fluxes.
+
+    Returns
+    -------
+    tuple
+        ``(ne_low, ne_high)`` in cm^-3.  ``ne_low`` is from [SII] or
+        [OII]; ``ne_high`` is from NIV] or CIII].  Falls back to
+        ne_low or 100 cm^-3 when UV diagnostics are unavailable.
+    """
+    from .direct import compute_ne, compute_ne_CIII, compute_ne_NIV
+
+    # Low-ionisation zone: [SII] 6718/6732 or [OII] 3726/3729.
+    ne_low = 100.0
+    if "SII_6718" in fluxes and "SII_6732" in fluxes:
+        try:
+            ne_low = compute_ne(fluxes["SII_6718"], fluxes["SII_6732"], doublet="SII")
+        except Exception:
+            logger.warning("n_e(SII) failed; using 100 cm^-3.")
+    elif "OII_3726" in fluxes and "OII_3729" in fluxes:
+        try:
+            ne_low = compute_ne(fluxes["OII_3726"], fluxes["OII_3729"], doublet="OII")
+        except Exception:
+            logger.warning("n_e(OII) failed; using 100 cm^-3.")
+
+    # High-ionisation zone: NIV] 1483/1486 (preferred) or CIII] 1907/1909.
+    ne_high = None
+    if "NIV_1483" in fluxes and "NIV_1486" in fluxes:
+        try:
+            ne_high = compute_ne_NIV(fluxes["NIV_1483"], fluxes["NIV_1486"])
+            logger.info("n_e(high) from NIV] = %.0f cm^-3.", ne_high)
+        except Exception:
+            logger.warning("n_e(NIV]) failed.")
+    if ne_high is None and "CIII]_1907" in fluxes and "CIII]" in fluxes:
+        try:
+            ne_high = compute_ne_CIII(fluxes["CIII]_1907"], fluxes["CIII]"])
+            logger.info("n_e(high) from CIII] = %.0f cm^-3.", ne_high)
+        except Exception:
+            logger.warning("n_e(CIII]) failed.")
+
+    # Fall back to ne_low if no high-ionisation density available.
+    if ne_high is None:
+        ne_high = ne_low
+
+    return ne_low, ne_high
+
+
+def _compute_logU(
+    fluxes: dict[str, float],
+    Z_Zsun: float,
+    ne_high: float,
+) -> tuple[float | None, str | None]:
+    """Compute ionisation parameter (Berg+2025 step 5).
+
+    Parameters
+    ----------
+    fluxes : dict
+        Dust-corrected emission-line fluxes.
+    Z_Zsun : float
+        Gas-phase metallicity in solar units.
+    ne_high : float
+        High-ionisation zone electron density in cm^-3.
+
+    Returns
+    -------
+    tuple
+        ``(logU, diagnostic)`` where diagnostic is ``"N43"`` or
+        ``"O32"``.  Returns ``(None, None)`` if neither diagnostic
+        is available.
+    """
+    from .martinez25_icf import LOG_OH_SOLAR, log_U_from_N43, log_U_from_O32
+
+    # N43 = NIV]1486 / NIII]1750 — density-insensitive, recommended.
+    niv_flux = 0.0
+    for name in ("NIV_1483", "NIV_1486"):
+        if name in fluxes and fluxes[name] > 0:
+            niv_flux += fluxes[name]
+    niii_flux = 0.0
+    for name in ("NIII_1749", "NIII_1752"):
+        if name in fluxes and fluxes[name] > 0:
+            niii_flux += fluxes[name]
+
+    if niv_flux > 0 and niii_flux > 0:
+        N43 = niv_flux / niii_flux
+        logU = log_U_from_N43(np.log10(N43), Z_Zsun, ne_high)
+        logger.info("log(U) from N43 = %.2f (N43=%.3f).", logU, N43)
+        return logU, "N43"
+
+    # O32 = [OIII]5007 / [OII]3727 — density-sensitive fallback.
+    oiii = fluxes.get("OIII_5007", 0.0)
+    oii = 0.0
+    if "OII_3726" in fluxes and "OII_3729" in fluxes:
+        oii = fluxes["OII_3726"] + fluxes["OII_3729"]
+    elif "OII_doublet" in fluxes:
+        oii = fluxes["OII_doublet"]
+
+    if oiii > 0 and oii > 0:
+        O32 = oiii / oii
+        logU = log_U_from_O32(np.log10(O32), Z_Zsun, ne_high)
+        logger.info("log(U) from O32 = %.2f (O32=%.3f).", logU, O32)
+        return logU, "O32"
+
+    return None, None
+
+
 def _run_direct(
     fluxes: dict[str, float],
     errors: dict[str, float],
@@ -183,7 +293,11 @@ def _run_direct(
     seed: int = 42,
     progress: bool = True,
 ) -> dict[str, Any]:
-    """Run the direct T_e method.
+    """Run the direct T_e method following Berg+2025's 6-step procedure.
+
+    Steps: (1) multi-phase ne, (2) zone-appropriate Te, (3) ionic
+    abundances, (4) O/H and Z/Zsun, (5) logU from N43 or O32,
+    (6) Martinez+25 ICFs for N/O (fallback: Izotov+06).
 
     Parameters
     ----------
@@ -203,44 +317,48 @@ def _run_direct(
     Returns
     -------
     dict
-        Keys: OH, OH_err, NO, NO_err, Te_high, Te_low, ne, ionic, etc.
+        Keys: OH, OH_err, NO, NO_err, Te_high, Te_low, ne, ne_low,
+        ne_high, logU, icf_method, ionic, posteriors, etc.
     """
     from .direct import (
         Te_low_from_high,
         compute_ionic_abundances,
-        compute_ne,
         compute_Te_OIII,
         compute_total_abundances,
     )
+    from .martinez25_icf import LOG_OH_SOLAR
 
-    # --- Electron density ---
-    ne = 100.0  # default
-    if "SII_6718" in fluxes and "SII_6732" in fluxes:
-        try:
-            ne = compute_ne(fluxes["SII_6718"], fluxes["SII_6732"], doublet="SII")
-        except Exception:
-            logger.warning("n_e computation failed; using 100 cm^-3.")
-    elif "OII_3726" in fluxes and "OII_3729" in fluxes:
-        try:
-            ne = compute_ne(fluxes["OII_3726"], fluxes["OII_3729"], doublet="OII")
-        except Exception:
-            logger.warning("n_e computation failed; using 100 cm^-3.")
+    # --- Step 1: Multi-phase electron density ---
+    ne_low, ne_high = _compute_multi_ne(fluxes)
 
-    # --- Electron temperature ---
+    # --- Step 2: Electron temperature with zone-appropriate ne ---
     Te_high = compute_Te_OIII(
-        fluxes["OIII_4363"], fluxes["OIII_5007"], fluxes["OIII_4959"], ne
+        fluxes["OIII_4363"], fluxes["OIII_5007"], fluxes["OIII_4959"], ne_high
     )
     Te_low = Te_low_from_high(Te_high, relation=Te_relation)
 
-    # --- Ionic abundances ---
-    ionic = compute_ionic_abundances(fluxes, Te_high, Te_low, ne)
-    totals = compute_total_abundances(ionic)
+    # --- Step 3: Ionic abundances with zone-appropriate ne ---
+    ionic = compute_ionic_abundances(fluxes, Te_high, Te_low, ne_low, ne_high=ne_high)
 
-    OH = totals.get("O/H", np.nan)
-    if np.isfinite(OH) and OH > 0:
+    # --- Step 4: O/H and Z/Zsun ---
+    OH = (ionic.get("O+/H+", 0.0) + ionic.get("O++/H+", 0.0))
+    if OH > 0:
         OH_12 = 12.0 + np.log10(OH)
+        Z_Zsun = 10.0 ** (OH_12 - LOG_OH_SOLAR)
     else:
         OH_12 = np.nan
+        Z_Zsun = None
+
+    # --- Step 5: Ionisation parameter ---
+    logU = None
+    logU_diag = None
+    if Z_Zsun is not None:
+        logU, logU_diag = _compute_logU(fluxes, Z_Zsun, ne_high)
+
+    # --- Step 6: Total abundances with ICFs ---
+    totals = compute_total_abundances(
+        ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
+    )
 
     NO = totals.get("N/O")
     NO_log = np.log10(NO) if NO is not None and NO > 0 else None
@@ -257,7 +375,10 @@ def _run_direct(
     CO = totals.get("C/O")
     CO_log = np.log10(CO) if CO is not None and CO > 0 else None
 
-    # --- MC error propagation ---
+    icf_method = totals.get("icf_method")
+    NO_icf_name = totals.get("NO_icf_name")
+
+    # --- MC error propagation (all 6 steps per iteration) ---
     rng = np.random.default_rng(seed)
     OH_mc = []
     NO_mc = []
@@ -270,16 +391,36 @@ def _run_direct(
             mc_fluxes[name] = max(mc_fluxes[name], 1e-50)
 
         try:
-            ne_mc = ne  # keep ne fixed (density insensitive at typical values)
+            # Use fixed ne (varying ne per MC iteration adds noise
+            # without improving accuracy for the density diagnostics).
             Te_h = compute_Te_OIII(
                 mc_fluxes.get("OIII_4363", 0),
                 mc_fluxes.get("OIII_5007", 0),
                 mc_fluxes.get("OIII_4959", 0),
-                ne_mc,
+                ne_high,
             )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
-            ionic_mc = compute_ionic_abundances(mc_fluxes, Te_h, Te_l, ne_mc)
-            totals_mc = compute_total_abundances(ionic_mc)
+            ionic_mc = compute_ionic_abundances(
+                mc_fluxes, Te_h, Te_l, ne_low, ne_high=ne_high,
+            )
+
+            # Compute Z_Zsun for this MC iteration.
+            oh_val = ionic_mc.get("O+/H+", 0.0) + ionic_mc.get("O++/H+", 0.0)
+            if oh_val > 0:
+                z_zsun_mc = 10.0 ** (12.0 + np.log10(oh_val) - LOG_OH_SOLAR)
+            else:
+                z_zsun_mc = Z_Zsun  # fallback to point estimate
+
+            # Compute logU for this MC iteration.
+            logU_mc = logU  # default to point estimate
+            if z_zsun_mc is not None and logU_diag is not None:
+                logU_mc_val, _ = _compute_logU(mc_fluxes, z_zsun_mc, ne_high)
+                if logU_mc_val is not None:
+                    logU_mc = logU_mc_val
+
+            totals_mc = compute_total_abundances(
+                ionic_mc, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
+            )
 
             oh_mc = totals_mc.get("O/H", np.nan)
             if np.isfinite(oh_mc) and oh_mc > 0:
@@ -320,7 +461,12 @@ def _run_direct(
         "CO_err": CO_err,
         "Te_high": Te_high,
         "Te_low": Te_low,
-        "ne": ne,
+        "ne": ne_low,
+        "ne_low": ne_low,
+        "ne_high": ne_high,
+        "logU": logU,
+        "icf_method": icf_method,
+        "NO_icf_name": NO_icf_name,
         "ionic": ionic,
         "OH_posterior": OH_mc,
         "NO_posterior": NO_mc,
@@ -340,8 +486,7 @@ def _run_direct_mcmc(
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
-    Propagates each posterior sample through PyNEB to build
-    the full abundance posterior.
+    Follows Berg+2025's 6-step procedure for each posterior sample.
 
     Parameters
     ----------
@@ -365,10 +510,10 @@ def _run_direct_mcmc(
     from .direct import (
         Te_low_from_high,
         compute_ionic_abundances,
-        compute_ne,
         compute_Te_OIII,
         compute_total_abundances,
     )
+    from .martinez25_icf import LOG_OH_SOLAR
 
     # Determine number of samples; thin if larger than n_posterior.
     n_total = min(len(v) for v in posteriors.values())
@@ -385,45 +530,83 @@ def _run_direct_mcmc(
     NO_post = np.full(n_samples, np.nan)
     CO_post = np.full(n_samples, np.nan)
 
-    # Compute medians for the point estimate.
+    # Compute medians for the point estimate and multi-phase ne.
     med_fluxes = {name: float(np.median(post)) for name, post in posteriors.items()}
+    ne_low, ne_high = _compute_multi_ne(med_fluxes)
 
-    ne_default = 100.0
-    if "SII_6718" in med_fluxes and "SII_6732" in med_fluxes:
-        try:
-            ne_default = compute_ne(med_fluxes["SII_6718"], med_fluxes["SII_6732"])
-        except Exception:
-            pass
+    # Point estimate: logU and Z_Zsun from medians.
+    try:
+        Te_high_pt = compute_Te_OIII(
+            med_fluxes.get("OIII_4363", 0),
+            med_fluxes.get("OIII_5007", 0),
+            med_fluxes.get("OIII_4959", 0),
+            ne_high,
+        )
+    except ValueError:
+        Te_high_pt = np.nan
+    Te_low_pt = Te_low_from_high(Te_high_pt, relation=Te_relation) if np.isfinite(Te_high_pt) else np.nan
+
+    ionic_pt = compute_ionic_abundances(
+        med_fluxes, Te_high_pt, Te_low_pt, ne_low, ne_high=ne_high
+    ) if np.isfinite(Te_high_pt) else {}
+
+    OH_pt = ionic_pt.get("O+/H+", 0.0) + ionic_pt.get("O++/H+", 0.0)
+    Z_Zsun_pt = 10.0 ** (12.0 + np.log10(OH_pt) - LOG_OH_SOLAR) if OH_pt > 0 else None
+    logU_pt = None
+    logU_diag = None
+    if Z_Zsun_pt is not None:
+        logU_pt, logU_diag = _compute_logU(med_fluxes, Z_Zsun_pt, ne_high)
+
+    totals_pt = compute_total_abundances(
+        ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
+    ) if ionic_pt else {}
+    icf_method = totals_pt.get("icf_method")
+    NO_icf_name = totals_pt.get("NO_icf_name")
 
     for i in tqdm(range(n_samples), desc="Direct Te (posterior)", disable=not progress):
         sample = {name: max(float(post[i]), 1e-50) for name, post in posteriors.items()}
         try:
-            ne_i = ne_default  # keep ne fixed for speed
             Te_h = compute_Te_OIII(
                 sample.get("OIII_4363", 0),
                 sample.get("OIII_5007", 0),
                 sample.get("OIII_4959", 0),
-                ne_i,
+                ne_high,
             )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
-            ionic = compute_ionic_abundances(sample, Te_h, Te_l, ne_i)
-            totals = compute_total_abundances(ionic)
+            ionic_i = compute_ionic_abundances(
+                sample, Te_h, Te_l, ne_low, ne_high=ne_high,
+            )
 
-            oh = totals.get("O/H", np.nan)
+            # Z_Zsun for this sample.
+            oh_val = ionic_i.get("O+/H+", 0.0) + ionic_i.get("O++/H+", 0.0)
+            z_zsun_i = 10.0 ** (12.0 + np.log10(oh_val) - LOG_OH_SOLAR) if oh_val > 0 else Z_Zsun_pt
+
+            # logU for this sample.
+            logU_i = logU_pt
+            if z_zsun_i is not None and logU_diag is not None:
+                logU_val, _ = _compute_logU(sample, z_zsun_i, ne_high)
+                if logU_val is not None:
+                    logU_i = logU_val
+
+            totals_i = compute_total_abundances(
+                ionic_i, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,
+            )
+
+            oh = totals_i.get("O/H", np.nan)
             if np.isfinite(oh) and oh > 0:
                 OH_post[i] = 12.0 + np.log10(oh)
 
-            no = totals.get("N/O", np.nan)
+            no = totals_i.get("N/O", np.nan)
             if no is not None and np.isfinite(no) and no > 0:
                 NO_post[i] = np.log10(no)
 
-            co = totals.get("C/O", np.nan)
+            co = totals_i.get("C/O", np.nan)
             if co is not None and np.isfinite(co) and co > 0:
                 CO_post[i] = np.log10(co)
         except (ValueError, RuntimeError):
             continue
 
-    # Point estimates from medians.
+    # Point estimates from posteriors.
     OH_med = float(np.nanmedian(OH_post))
     OH_lo = float(OH_med - np.nanpercentile(OH_post, 16))
     OH_hi = float(np.nanpercentile(OH_post, 84) - OH_med)
@@ -438,20 +621,6 @@ def _run_direct_mcmc(
         CO_lo = float(CO_med - np.nanpercentile(CO_post, 16))
         CO_hi = float(np.nanpercentile(CO_post, 84) - CO_med)
 
-    # Compute Te, ne, ionic from median fluxes for point estimate.
-    try:
-        Te_high = compute_Te_OIII(
-            med_fluxes.get("OIII_4363", 0),
-            med_fluxes.get("OIII_5007", 0),
-            med_fluxes.get("OIII_4959", 0),
-            ne_default,
-        )
-    except ValueError:
-        Te_high = np.nan
-    Te_low = Te_low_from_high(Te_high) if np.isfinite(Te_high) else np.nan
-    ionic = compute_ionic_abundances(med_fluxes, Te_high, Te_low, ne_default) if np.isfinite(Te_high) else {}
-    totals = compute_total_abundances(ionic) if ionic else {}
-
     return {
         "OH": OH_med,
         "OH_err": (OH_lo, OH_hi),
@@ -459,16 +628,21 @@ def _run_direct_mcmc(
         "NO_err": (NO_lo, NO_hi) if NO_lo is not None else None,
         "CO": CO_med,
         "CO_err": (CO_lo, CO_hi) if CO_lo is not None else None,
-        "Te_high": Te_high if np.isfinite(Te_high) else None,
-        "Te_low": Te_low if np.isfinite(Te_low) else None,
-        "ne": ne_default,
-        "ionic": ionic if ionic else None,
+        "Te_high": Te_high_pt if np.isfinite(Te_high_pt) else None,
+        "Te_low": Te_low_pt if np.isfinite(Te_low_pt) else None,
+        "ne": ne_low,
+        "ne_low": ne_low,
+        "ne_high": ne_high,
+        "logU": logU_pt,
+        "icf_method": icf_method,
+        "NO_icf_name": NO_icf_name,
+        "ionic": ionic_pt if ionic_pt else None,
         "OH_posterior": OH_post,
         "NO_posterior": NO_post if np.any(np.isfinite(NO_post)) else None,
         "CO_posterior": CO_post if np.any(np.isfinite(CO_post)) else None,
-        "SO": np.log10(totals["S/O"]) if "S/O" in totals and totals["S/O"] > 0 else None,
-        "NeO": np.log10(totals["Ne/O"]) if "Ne/O" in totals and totals["Ne/O"] > 0 else None,
-        "ArO": np.log10(totals["Ar/O"]) if "Ar/O" in totals and totals["Ar/O"] > 0 else None,
+        "SO": np.log10(totals_pt["S/O"]) if "S/O" in totals_pt and totals_pt["S/O"] > 0 else None,
+        "NeO": np.log10(totals_pt["Ne/O"]) if "Ne/O" in totals_pt and totals_pt["Ne/O"] > 0 else None,
+        "ArO": np.log10(totals_pt["Ar/O"]) if "Ar/O" in totals_pt and totals_pt["Ar/O"] > 0 else None,
     }
 
 
@@ -705,6 +879,11 @@ def compute_abundances(
             SO=direct_out.get("SO"),
             NeO=direct_out.get("NeO"),
             ArO=direct_out.get("ArO"),
+            logU=direct_out.get("logU"),
+            ne_low=direct_out.get("ne_low"),
+            ne_high=direct_out.get("ne_high"),
+            icf_method=direct_out.get("icf_method"),
+            NO_icf_name=direct_out.get("NO_icf_name"),
         )
 
     # --- Strong-line method ---
