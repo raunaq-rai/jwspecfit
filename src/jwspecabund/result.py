@@ -80,6 +80,11 @@ class AbundanceResult:
     SO: float | None = None
     NeO: float | None = None
     ArO: float | None = None
+    logU: float | None = None
+    ne_low: float | None = None
+    ne_high: float | None = None
+    icf_method: str | None = None
+    NO_icf_name: str | None = None
     # Internal: full forward model result dict (samples, param_names, etc.)
     _forward_result: dict[str, Any] | None = field(default=None, repr=False)
 
@@ -109,8 +114,17 @@ class AbundanceResult:
             lines.append(f"  T_e(low)    = {self.Te_low:.0f} K")
         if self.ne is not None:
             lines.append(f"  n_e         = {self.ne:.0f} cm^-3")
+        if self.ne_low is not None and self.ne_high is not None:
+            lines.append(f"  n_e(low)    = {self.ne_low:.0f} cm^-3")
+            lines.append(f"  n_e(high)   = {self.ne_high:.0f} cm^-3")
+        if self.logU is not None:
+            lines.append(f"  log(U)      = {self.logU:.2f}")
         if self.Av is not None:
             lines.append(f"  A_V         = {self.Av:.3f}")
+        if self.icf_method is not None:
+            lines.append(f"  ICF method  = {self.icf_method}")
+        if self.NO_icf_name is not None:
+            lines.append(f"  N/O ICF     = {self.NO_icf_name}")
         if self.ratios_used:
             lines.append(f"  Ratios used = {self.ratios_used}")
         if self.chi2 is not None:

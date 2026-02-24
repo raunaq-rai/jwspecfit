@@ -37,9 +37,16 @@ from .direct import (
     Te_low_from_high,
     compute_ionic_abundances,
     compute_ne,
+    compute_ne_CIII,
+    compute_ne_NIV,
     compute_Te_NII,
     compute_Te_OIII,
     compute_total_abundances,
+)
+from .martinez25_icf import (
+    compute_NO_martinez25,
+    log_U_from_N43,
+    log_U_from_O32,
 )
 from .dust import (
     cardelli_extinction,
@@ -60,6 +67,9 @@ __all__ = [
     "compute_ionic_abundances",
     "compute_line_ratios",
     "compute_ne",
+    "compute_ne_CIII",
+    "compute_ne_NIV",
+    "compute_NO_martinez25",
     "compute_Te_NII",
     "compute_Te_OIII",
     "compute_total_abundances",
@@ -70,6 +80,8 @@ __all__ = [
     "icf_neon",
     "icf_nitrogen",
     "icf_sulfur",
+    "log_U_from_N43",
+    "log_U_from_O32",
     "salim_attenuation",
     "sanders25_metallicity",
 ]
