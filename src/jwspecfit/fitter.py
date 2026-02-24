@@ -323,20 +323,21 @@ def fit_lines(
     nv_obs_A = REST_LINES_A["NV_1"] * (1.0 + z)
     valid &= spec.wave_A >= nv_obs_A
 
-    # Drop lines that fall in detector gaps (no valid pixels within ±5σ).
-    _sig_inst_check = sigma_inst_A(spec.wave_um, grating=grating, R=R)
+    # Drop lines that fall in detector gaps (< 50% valid pixels within ±5σ).
     _kept: list[str] = []
     for name in line_names:
         lam_obs_A = REST_LINES_A[name] * (1.0 + z)
-        _, sig_seed, _ = _grating_bounds(grating, _sig_inst_check, spec.dlam_A, lam_obs_A)
+        _, sig_seed, _ = _grating_bounds(grating, sig_inst, spec.dlam_A, lam_obs_A, sigma_factor)
         near_mask = np.abs(spec.wave_A - lam_obs_A) < 5 * sig_seed
-        if np.any(valid & near_mask):
+        n_valid = int(np.sum(valid & near_mask))
+        n_total = int(np.sum(near_mask))
+        frac = n_valid / n_total if n_total > 0 else 0.0
+        if frac >= 0.5:
             _kept.append(name)
         else:
             logger.info(
-                "Dropping %s (obs %.0f A): no valid pixels within ±5sigma — "
-                "likely a detector gap.",
-                name, lam_obs_A,
+                "Dropping %s (obs %.0f A): %d/%d valid pixels (%.0f%%) in ±5sigma",
+                name, lam_obs_A, n_valid, n_total, 100 * frac,
             )
     if len(_kept) < len(line_names):
         logger.info(
@@ -387,9 +388,6 @@ def fit_lines(
             peak_flam = np.nanmax(flam[idx_near])
         else:
             peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
-        # Guard against all-NaN windows (e.g. line in a detector gap).
-        if not np.isfinite(peak_flam) or peak_flam <= 0:
-            peak_flam = np.nanmax(np.abs(flam[valid])) if np.any(valid) else 1.0
         if not np.isfinite(peak_flam) or peak_flam <= 0:
             peak_flam = 1.0
 
