@@ -89,6 +89,86 @@ def compute_ne(
     return float(ne)
 
 
+def compute_ne_CIII(
+    flux_1907: float,
+    flux_1909: float,
+    Te_guess: float = 1e4,
+) -> float:
+    """Compute electron density from the CIII] 1907/1909 ratio.
+
+    Probes the intermediate-ionisation zone.
+
+    Parameters
+    ----------
+    flux_1907 : float
+        CIII] 1907 flux.
+    flux_1909 : float
+        CIII] 1909 flux.
+    Te_guess : float
+        Electron temperature guess in K (default 10^4).
+
+    Returns
+    -------
+    float
+        Electron density n_e in cm^-3.
+    """
+    pn = _get_pyneb()
+
+    if flux_1909 <= 0:
+        logger.warning("CIII] 1909 flux <= 0; returning 100 cm^-3.")
+        return 100.0
+
+    ratio = flux_1907 / flux_1909
+    atom = pn.Atom("C", 3)
+    ne = atom.getTemDen(ratio, tem=Te_guess, wave1=1907, wave2=1909)
+
+    if np.isnan(ne) or ne <= 0:
+        logger.warning("PyNEB returned invalid n_e=%.1f from CIII]; using 100 cm^-3.", ne)
+        return 100.0
+
+    return float(ne)
+
+
+def compute_ne_NIV(
+    flux_1483: float,
+    flux_1486: float,
+    Te_guess: float = 1e4,
+) -> float:
+    """Compute electron density from the NIV] 1483/1486 ratio.
+
+    Probes the high-ionisation zone.
+
+    Parameters
+    ----------
+    flux_1483 : float
+        NIV] 1483 flux.
+    flux_1486 : float
+        NIV] 1486 flux.
+    Te_guess : float
+        Electron temperature guess in K (default 10^4).
+
+    Returns
+    -------
+    float
+        Electron density n_e in cm^-3.
+    """
+    pn = _get_pyneb()
+
+    if flux_1486 <= 0:
+        logger.warning("NIV] 1486 flux <= 0; returning 100 cm^-3.")
+        return 100.0
+
+    ratio = flux_1483 / flux_1486
+    atom = pn.Atom("N", 4)
+    ne = atom.getTemDen(ratio, tem=Te_guess, wave1=1483, wave2=1487)
+
+    if np.isnan(ne) or ne <= 0:
+        logger.warning("PyNEB returned invalid n_e=%.1f from NIV]; using 100 cm^-3.", ne)
+        return 100.0
+
+    return float(ne)
+
+
 # ---------------------------------------------------------------------------
 # Electron temperature
 # ---------------------------------------------------------------------------
@@ -338,6 +418,7 @@ def compute_ionic_abundances(
     Te_high: float,
     Te_low: float,
     ne: float,
+    ne_high: float | None = None,
 ) -> dict[str, float]:
     """Compute all available ionic abundances.
 
@@ -351,7 +432,11 @@ def compute_ionic_abundances(
     Te_low : float
         T_e(O+/N+) in K.
     ne : float
-        Electron density in cm^-3.
+        Electron density in cm^-3 (low-ionisation zone).
+    ne_high : float, optional
+        Electron density for the high-ionisation zone (cm^-3).
+        If ``None``, defaults to *ne*.  Use when a separate density
+        measurement is available from CIII] or NIV] (Berg+2025).
 
     Returns
     -------
@@ -363,9 +448,12 @@ def compute_ionic_abundances(
     if Hb <= 0:
         return ionic
 
+    ne_lo = ne
+    ne_hi = ne_high if ne_high is not None else ne
+
     # O++/H+ from [OIII] 5007 — T_high zone
     if "OIII_5007" in fluxes and fluxes["OIII_5007"] > 0:
-        ionic["O++/H+"] = _ionic_abundance("O", 3, fluxes["OIII_5007"], Hb, Te_high, ne, 5007)
+        ionic["O++/H+"] = _ionic_abundance("O", 3, fluxes["OIII_5007"], Hb, Te_high, ne_hi, 5007)
 
     # O+/H+ from [OII] 3726+3729 — T_low zone
     oii = 0.0
@@ -374,32 +462,32 @@ def compute_ionic_abundances(
     elif "OII_doublet" in fluxes:
         oii = fluxes["OII_doublet"]
     if oii > 0:
-        ionic["O+/H+"] = _ionic_abundance("O", 2, oii, Hb, Te_low, ne, [3726, 3729])
+        ionic["O+/H+"] = _ionic_abundance("O", 2, oii, Hb, Te_low, ne_lo, [3726, 3729])
 
     # N+/H+ from [NII] 6585 — T_low zone
     if "NII_6585" in fluxes and fluxes["NII_6585"] > 0:
-        ionic["N+/H+"] = _ionic_abundance("N", 2, fluxes["NII_6585"], Hb, Te_low, ne, 6584)
+        ionic["N+/H+"] = _ionic_abundance("N", 2, fluxes["NII_6585"], Hb, Te_low, ne_lo, 6584)
 
     # S+/H+ from [SII] 6718+6732 — T_low zone
     sii = 0.0
     if "SII_6718" in fluxes and "SII_6732" in fluxes:
         sii = fluxes["SII_6718"] + fluxes["SII_6732"]
     if sii > 0:
-        ionic["S+/H+"] = _ionic_abundance("S", 2, sii, Hb, Te_low, ne, [6718, 6732])
+        ionic["S+/H+"] = _ionic_abundance("S", 2, sii, Hb, Te_low, ne_lo, [6718, 6732])
 
     # S++/H+ from [SIII] 9069 — T_mid zone (use average of T_high, T_low)
     if "SIII_9069" in fluxes and fluxes["SIII_9069"] > 0:
         Te_mid = 0.5 * (Te_high + Te_low)
-        ionic["S++/H+"] = _ionic_abundance("S", 3, fluxes["SIII_9069"], Hb, Te_mid, ne, 9069)
+        ionic["S++/H+"] = _ionic_abundance("S", 3, fluxes["SIII_9069"], Hb, Te_mid, ne_lo, 9069)
 
     # Ne++/H+ from [NeIII] 3869 — T_high zone
     if "NeIII_3869" in fluxes and fluxes["NeIII_3869"] > 0:
-        ionic["Ne++/H+"] = _ionic_abundance("Ne", 3, fluxes["NeIII_3869"], Hb, Te_high, ne, 3869)
+        ionic["Ne++/H+"] = _ionic_abundance("Ne", 3, fluxes["NeIII_3869"], Hb, Te_high, ne_hi, 3869)
 
     # Ar++/H+ from [ArIII] 7136 — T_mid zone
     if "ArIII_7136" in fluxes and fluxes["ArIII_7136"] > 0:
         Te_mid = 0.5 * (Te_high + Te_low)
-        ionic["Ar++/H+"] = _ionic_abundance("Ar", 3, fluxes["ArIII_7136"], Hb, Te_mid, ne, 7136)
+        ionic["Ar++/H+"] = _ionic_abundance("Ar", 3, fluxes["ArIII_7136"], Hb, Te_mid, ne_lo, 7136)
 
     # --- UV ionic abundances (all use T_high zone) ---
 
@@ -409,7 +497,7 @@ def compute_ionic_abundances(
         if name in fluxes and fluxes[name] > 0:
             ciii_flux += fluxes[name]
     if ciii_flux > 0:
-        ionic["C++/H+"] = _ionic_abundance("C", 3, ciii_flux, Hb, Te_high, ne, [1907, 1909])
+        ionic["C++/H+"] = _ionic_abundance("C", 3, ciii_flux, Hb, Te_high, ne_hi, [1907, 1909])
 
     # C3+/H+ from CIV 1548 + 1551 — T_high zone
     civ_flux = 0.0
@@ -417,7 +505,7 @@ def compute_ionic_abundances(
         if name in fluxes and fluxes[name] > 0:
             civ_flux += fluxes[name]
     if civ_flux > 0:
-        ionic["C+++/H+"] = _ionic_abundance("C", 4, civ_flux, Hb, Te_high, ne, [1548, 1551])
+        ionic["C+++/H+"] = _ionic_abundance("C", 4, civ_flux, Hb, Te_high, ne_hi, [1548, 1551])
 
     # N2+/H+ from NIII] 1749 + 1752 — T_high zone
     niii_flux = 0.0
@@ -425,7 +513,7 @@ def compute_ionic_abundances(
         if name in fluxes and fluxes[name] > 0:
             niii_flux += fluxes[name]
     if niii_flux > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, niii_flux, Hb, Te_high, ne, [1749, 1752])
+        ionic["N++/H+"] = _ionic_abundance("N", 3, niii_flux, Hb, Te_high, ne_hi, [1749, 1752])
 
     # N3+/H+ from NIV] 1483 + 1486 — T_high zone
     niv_flux = 0.0
@@ -433,7 +521,7 @@ def compute_ionic_abundances(
         if name in fluxes and fluxes[name] > 0:
             niv_flux += fluxes[name]
     if niv_flux > 0:
-        ionic["N+++/H+"] = _ionic_abundance("N", 4, niv_flux, Hb, Te_high, ne, [1483, 1487])
+        ionic["N+++/H+"] = _ionic_abundance("N", 4, niv_flux, Hb, Te_high, ne_hi, [1483, 1487])
 
     # N4+/H+ from NV 1239 + 1243 — T_high zone (manual emissivity)
     nv_flux = 0.0
@@ -442,8 +530,8 @@ def compute_ionic_abundances(
             nv_flux += fluxes[name]
     if nv_flux > 0:
         from .forward import _nv_emissivity, hbeta_emissivity_aller84
-        eps_nv = _nv_emissivity(Te_high, ne, 1239) + _nv_emissivity(Te_high, ne, 1243)
-        eps_Hb = _hbeta_emissivity(Te_high, ne)
+        eps_nv = _nv_emissivity(Te_high, ne_hi, 1239) + _nv_emissivity(Te_high, ne_hi, 1243)
+        eps_Hb = _hbeta_emissivity(Te_high, ne_hi)
         if eps_nv > 0 and eps_Hb > 0:
             ionic["N4+/H+"] = (nv_flux / Hb) * (eps_Hb / eps_nv)
 
@@ -452,6 +540,10 @@ def compute_ionic_abundances(
 
 def compute_total_abundances(
     ionic: dict[str, float],
+    logU: float | None = None,
+    Z_Zsun: float | None = None,
+    ne: float | None = None,
+    icf_method: str = "auto",
 ) -> dict[str, float]:
     """Derive total element abundances from ionic abundances + ICFs.
 
@@ -459,12 +551,25 @@ def compute_total_abundances(
     ----------
     ionic : dict
         Ionic abundance dict from :func:`compute_ionic_abundances`.
+    logU : float, optional
+        Ionisation parameter log(U).  Required for Martinez+25 ICFs.
+    Z_Zsun : float, optional
+        Gas-phase metallicity in solar units.  Required for Martinez+25 ICFs.
+    ne : float, optional
+        Electron density in cm^-3 for Martinez+25 ICF density interpolation.
+    icf_method : str
+        ``"auto"`` (default): use Martinez+25 for N/O when logU is provided,
+        fall back to Izotov+06 otherwise.
+        ``"martinez25"``: force Martinez+25 ICFs (requires logU and Z_Zsun).
+        ``"izotov06"``: use Izotov+06 ICFs only.
 
     Returns
     -------
     dict
         Total abundance ratios: ``"O/H"``, ``"N/O"``, ``"S/O"``,
         ``"Ne/O"``, ``"Ar/O"``, ``"C/O"``, ``"N/O_UV"`` as available.
+        When Martinez+25 is used, also includes ``"NO_icf_name"`` and
+        ``"icf_method"`` keys.
     """
     from .icf import icf_argon, icf_neon, icf_nitrogen, icf_sulfur
 
@@ -473,16 +578,43 @@ def compute_total_abundances(
     O_plus = ionic.get("O+/H+", 0.0)
     O_pp = ionic.get("O++/H+", 0.0)
 
+    # Decide whether to use Martinez+25 for N/O.
+    use_martinez = False
+    if icf_method == "martinez25":
+        if logU is None or Z_Zsun is None:
+            logger.warning("Martinez+25 ICFs require logU and Z_Zsun; falling back to Izotov+06.")
+        else:
+            use_martinez = True
+    elif icf_method == "auto" and logU is not None and Z_Zsun is not None:
+        use_martinez = True
+
     # O/H = O+/H+ + O++/H+ (no ICF needed)
     if O_plus > 0 or O_pp > 0:
         OH = O_plus + O_pp
         totals["O/H"] = OH
 
         # N/O
-        N_plus = ionic.get("N+/H+", 0.0)
-        if N_plus > 0 and O_plus > 0:
-            icf_n = icf_nitrogen(O_plus, OH)
-            totals["N/O"] = icf_n * N_plus / O_plus
+        if use_martinez:
+            from .martinez25_icf import compute_NO_martinez25
+            ne_icf = ne if ne is not None else 100.0
+            NO_val, NO_icf_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)
+            if NO_val is not None:
+                totals["N/O"] = NO_val
+                totals["NO_icf_name"] = NO_icf_name
+                totals["icf_method"] = "martinez25"
+            else:
+                # Fall back to Izotov+06 if no suitable ionic ratios.
+                N_plus = ionic.get("N+/H+", 0.0)
+                if N_plus > 0 and O_plus > 0:
+                    icf_n = icf_nitrogen(O_plus, OH)
+                    totals["N/O"] = icf_n * N_plus / O_plus
+                    totals["icf_method"] = "izotov06"
+        else:
+            N_plus = ionic.get("N+/H+", 0.0)
+            if N_plus > 0 and O_plus > 0:
+                icf_n = icf_nitrogen(O_plus, OH)
+                totals["N/O"] = icf_n * N_plus / O_plus
+                totals["icf_method"] = "izotov06"
 
         # S/O
         S_plus = ionic.get("S+/H+", 0.0)
@@ -510,14 +642,12 @@ def compute_total_abundances(
         if (C_pp + C_ppp) > 0 and O_pp > 0:
             totals["C/O"] = (C_pp + C_ppp) / O_pp
 
-        # UV N/O — (N2+ + N3+ + N4+) / O2+
+        # UV N/O — raw ionic sum without ICF (for comparison).
         N_pp = ionic.get("N++/H+", 0.0)
         N_ppp = ionic.get("N+++/H+", 0.0)
         N_pppp = ionic.get("N4+/H+", 0.0)
         N_uv = N_pp + N_ppp + N_pppp
         if N_uv > 0 and O_pp > 0:
-            if "N/O" not in totals:
-                totals["N/O"] = N_uv / O_pp
-            totals["N/O_UV"] = N_uv / O_pp
+            totals["N/O_UV_raw"] = N_uv / O_pp
 
     return totals
