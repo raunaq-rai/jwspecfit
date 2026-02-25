@@ -195,11 +195,13 @@ def plot_fit(
 
             is_broad = "BROAD" in name
 
+            is_abs = name.startswith("abs_")
+
             # Fractional uncertainty for shading.
             lr = result.lines.get(name)
             frac_err = 0.0
-            if lr is not None and lr.flux > 0 and lr.flux_err > 0:
-                frac_err = lr.flux_err / lr.flux
+            if lr is not None and abs(lr.flux) > 0 and lr.flux_err > 0:
+                frac_err = lr.flux_err / abs(lr.flux)
 
             if is_broad:
                 colour = broad_colours[n_broad % len(broad_colours)]
@@ -236,14 +238,18 @@ def plot_fit(
                 else:
                     x_label = centroid_A * 1e-4
                 y_label = comp_plot[np.argmin(np.abs(spec.wave_A - centroid_obs_A))]
-                display_name = name.replace("_", " ")
+                display_name = name.replace("abs_", "").replace("_", " ")
+                # Absorption labels below the trough; emission labels above.
+                y_offset = -10 if is_abs else 8
+                va = "top" if is_abs else "baseline"
                 ax_main.annotate(
                     display_name,
                     xy=(x_label, y_label),
-                    xytext=(0, 8),
+                    xytext=(0, y_offset),
                     textcoords="offset points",
                     fontsize=7,
                     ha="center",
+                    va=va,
                     color=colour,
                     fontweight="bold" if is_broad else "normal",
                     rotation=45,
@@ -271,13 +277,15 @@ def plot_fit(
     if result.spectrum.z is not None:
         ax_main.set_title(f"z = {result.spectrum.z:.4f}   |   χ²/dof = {result.chi2:.2f}")
 
-    # --- Y-axis limits based on emission-line peaks ---
+    # --- Y-axis limits based on emission-line peaks / absorption troughs ---
     model_peak = np.nanmax(model_total[show]) if np.any(show) else 1.0
+    model_trough = np.nanmin(model_total[show]) if np.any(show) else 0.0
     cont_median = np.nanmedian(cont[show]) if np.any(show) else 0.0
     # Upper limit: tallest line peak × y_pad
     y_upper = cont_median + (model_peak - cont_median) * y_pad
-    # Lower limit: slightly below zero or the minimum continuum
-    y_lower = min(0.0, np.nanmin(cont[show]) * 1.1) if np.any(show) else -0.1
+    # Lower limit: accommodate absorption troughs or minimum continuum
+    y_lower_cont = np.nanmin(cont[show]) * 1.1 if np.any(show) else -0.1
+    y_lower = min(0.0, y_lower_cont, model_trough - abs(model_trough) * 0.15)
     if y_upper > y_lower:
         ax_main.set_ylim(y_lower, y_upper)
 
@@ -470,8 +478,10 @@ def plot_fit_interactive(
             mu_A = result.params[nL + i]
             sig_A = result.params[2 * nL + i]
 
-            if amp <= 0 or sig_A <= 0:
+            if amp == 0 or sig_A <= 0:
                 continue
+
+            is_abs = name.startswith("abs_")
 
             # Fine wavelength grid around ±5σ of the line.
             w_lo = max(mu_A - 5 * sig_A, spec.wave_A.min())
@@ -506,15 +516,20 @@ def plot_fit_interactive(
             cont_fine_masked[~keep_fine] = np.nan
 
             is_broad = "BROAD" in name
-            colour = "rgba(255,140,0,0.6)" if is_broad else palette[i % len(palette)]
-            display_name = name.replace("_", " ")
+            if is_abs:
+                colour = "rgba(70,130,180,0.8)"  # steel blue for absorption
+            elif is_broad:
+                colour = "rgba(255,140,0,0.6)"
+            else:
+                colour = palette[i % len(palette)]
+            display_name = name.replace("abs_", "").replace("_", " ")
             dash = "dot" if is_broad else "solid"
 
             # Uncertainty shading (±1σ).
             lr = result.lines.get(name)
             frac_err = 0.0
-            if lr is not None and lr.flux > 0 and lr.flux_err > 0:
-                frac_err = lr.flux_err / lr.flux
+            if lr is not None and abs(lr.flux) > 0 and lr.flux_err > 0:
+                frac_err = lr.flux_err / abs(lr.flux)
 
             if frac_err > 0:
                 line_only = gauss_masked - cont_fine_masked
@@ -537,7 +552,7 @@ def plot_fit_interactive(
                 showlegend=False,
             ), row=1)
 
-            # Store peak position for annotation label.
+            # Store peak/trough position for annotation label.
             gauss_peak_flam = amp / (sqrt(2 * pi) * sig_A)
             cont_at_peak_ujy = np.interp(
                 mu_A * 1e-4, spec.wave_um, result.continuum,
@@ -556,17 +571,18 @@ def plot_fit_interactive(
                     + cont_at_peak_ujy
                 )
             x_peak = mu_A / zp1 if wave_unit == "A" else mu_A * 1e-4 / zp1
-            peak_info.append((name, x_peak, float(y_peak), colour))
+            peak_info.append((name, x_peak, float(y_peak), colour, is_abs))
 
-        # Line name annotations above fitted peaks.
-        for name, x_peak, y_peak, colour in peak_info:
-            display_name = name.replace("_", " ")
+        # Line name annotations.
+        for name, x_peak, y_peak, colour, is_abs in peak_info:
+            display_name = name.replace("abs_", "").replace("_", " ")
             is_broad = "BROAD" in name
             # Full opacity for readable text.
             if "rgba" in colour:
                 ann_colour = colour.rsplit(",", 1)[0] + ",1.0)"
             else:
                 ann_colour = colour
+            # Absorption labels below the trough; emission labels above the peak.
             fig.add_annotation(
                 x=x_peak,
                 y=y_peak,
@@ -574,10 +590,10 @@ def plot_fit_interactive(
                 yref="y",
                 text=f"<b>{display_name}</b>" if is_broad else display_name,
                 showarrow=False,
-                yshift=10,
+                yshift=-12 if is_abs else 10,
                 font=dict(size=9, color=ann_colour),
                 xanchor="center",
-                yanchor="bottom",
+                yanchor="top" if is_abs else "bottom",
             )
 
     # Data (steps).
@@ -629,11 +645,13 @@ def plot_fit_interactive(
             hovertemplate=f"Residual<br>λ=%{{x:.1f}}<br>resid=%{{y:.4e}} {flux_label}<extra></extra>",
         ), row=2)
 
-    # Y limits.
+    # Y limits — account for absorption troughs.
     model_peak = np.nanmax(model_total[show]) if np.any(show) else 1.0
+    model_trough = np.nanmin(model_total[show]) if np.any(show) else 0.0
     cont_median = np.nanmedian(cont[show]) if np.any(show) else 0.0
     y_upper = cont_median + (model_peak - cont_median) * y_pad
-    y_lower = min(0.0, np.nanmin(cont[show]) * 1.1) if np.any(show) else -0.1
+    y_lower_cont = np.nanmin(cont[show]) * 1.1 if np.any(show) else -0.1
+    y_lower = min(0.0, y_lower_cont, model_trough - abs(model_trough) * 0.15)
 
     title = ""
     if spec.z is not None:
