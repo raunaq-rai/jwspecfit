@@ -73,6 +73,33 @@ class TestFitLinesCustomLines:
         assert not result.success or len(result.lines) == 0
 
 
+class TestAbsorptionLines:
+    """Test absorption line fitting (negative Gaussians)."""
+
+    def test_absorption_fit_succeeds(self, absorption_spectrum):
+        result = fit_lines(
+            absorption_spectrum, z=1.0, R=500.0,
+            lines=["abs_SiII1260"], n_boot=0,
+        )
+        assert result.success
+
+    def test_absorption_amplitude_negative(self, absorption_spectrum):
+        result = fit_lines(
+            absorption_spectrum, z=1.0, R=500.0,
+            lines=["abs_SiII1260"], n_boot=0,
+        )
+        lr = result.lines["abs_SiII1260"]
+        assert lr.amplitude < 0, "Absorption line amplitude should be negative"
+
+    def test_absorption_flux_negative(self, absorption_spectrum):
+        result = fit_lines(
+            absorption_spectrum, z=1.0, R=500.0,
+            lines=["abs_SiII1260"], n_boot=0,
+        )
+        lr = result.lines["abs_SiII1260"]
+        assert lr.flux < 0, "Absorption line flux should be negative"
+
+
 class TestLineResult:
     def test_line_result_fields(self, prism_spectrum):
         result = fit_lines(prism_spectrum, z=6.0, grating="PRISM", n_boot=0)

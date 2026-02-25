@@ -29,6 +29,12 @@ REST_LINES_A: dict[str, float] = {
     "SiIII_2": 1892.03,
     "CIII]_1907": 1906.683,
     "CIII]": 1908.734,
+    # UV absorption lines
+    "abs_SiII1260": 1260.422,
+    "abs_CII1334":  1334.532,
+    "abs_SiIV1394": 1393.755,
+    "abs_SiIV1403": 1402.770,
+    "abs_AlII1672": 1670.787,
     # Semi-forbidden / weak
     "OIII]_2321": 2322.41306535397,
     "OIII]_2331": 2332.015190970458,
@@ -92,6 +98,12 @@ _PRISM_LINES = [
     "NIV_doublet",
     "CIV_doublet",
     "HEII_1640",
+    # UV absorption lines
+    "abs_SiII1260",
+    "abs_CII1334",
+    "abs_SiIV1394",
+    "abs_SiIV1403",
+    "abs_AlII1672",
     "NIII_doublet",
     "CIII]",
     # Semi-forbidden / weak UV
@@ -131,6 +143,12 @@ _GRATING_LINES = [
     "CIV_1",
     "CIV_2",
     "HEII_1640",
+    # UV absorption lines
+    "abs_SiII1260",
+    "abs_CII1334",
+    "abs_SiIV1394",
+    "abs_SiIV1403",
+    "abs_AlII1672",
     "OIII_1661",
     "OIII_1666",
     "NIII_1749",

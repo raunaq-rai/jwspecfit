@@ -81,3 +81,62 @@ def synthetic_spectrum():
         z=1.0,
         R=100.0,
     )
+
+
+@pytest.fixture
+def absorption_spectrum():
+    """Create a synthetic spectrum with a known absorption line.
+
+    Negative Gaussian (absorption trough) for abs_SiII1260 at z=1.0,
+    observed at 2520.844 Å = 0.2521 µm.  We place the spectrum window
+    around this wavelength with a flat continuum.
+    """
+    from jwspecfit import Spectrum
+    from scipy.special import erf
+
+    rng = np.random.default_rng(456)
+
+    # abs_SiII1260 rest = 1260.422 Å, z = 1.0 → obs = 2520.844 Å = 0.2521 µm
+    z = 1.0
+    mu_A = 1260.422 * (1.0 + z)  # 2520.844 Å
+    centre_um = mu_A * 1e-4
+
+    wave_um = np.linspace(centre_um - 0.02, centre_um + 0.02, 400)
+    wave_A = wave_um * 1e4
+
+    # Flat continuum at 1.0 µJy.
+    continuum_ujy = np.full_like(wave_A, 1.0)
+
+    # Inject a negative Gaussian (absorption) in F_λ then convert to µJy.
+    sigma_A = 3.0
+    amplitude = -2.0e-17  # negative → absorption
+    inv = 1.0 / (np.sqrt(2.0) * sigma_A)
+    edges = np.zeros(len(wave_A) + 1)
+    edges[1:-1] = 0.5 * (wave_A[:-1] + wave_A[1:])
+    edges[0] = 2 * wave_A[0] - edges[1]
+    edges[-1] = 2 * wave_A[-1] - edges[-2]
+    left, right = edges[:-1], edges[1:]
+    cdf_r = 0.5 * (1.0 + erf((right - mu_A) * inv))
+    cdf_l = 0.5 * (1.0 + erf((left - mu_A) * inv))
+    width = right - left
+    profile = (cdf_r - cdf_l) / width
+    line_flam = amplitude * profile
+
+    C_CGS = 2.99792458e10
+    lam_cm = wave_um * 1e-4
+    fnu_cgs = line_flam * 1e8 * lam_cm**2 / C_CGS
+    line_ujy = fnu_cgs / 1e-29
+
+    flux_ujy = continuum_ujy + line_ujy
+    noise_level = 0.005
+    err_ujy = np.full_like(flux_ujy, noise_level)
+    flux_ujy += rng.normal(0, noise_level, len(flux_ujy))
+
+    return Spectrum(
+        wave_um=wave_um,
+        flux_ujy=flux_ujy,
+        err_ujy=err_ujy,
+        grating=None,
+        z=z,
+        R=500.0,
+    )

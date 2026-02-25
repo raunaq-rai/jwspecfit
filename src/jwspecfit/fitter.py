@@ -381,13 +381,23 @@ def fit_lines(
         lam_obs_A = REST_LINES_A[name] * (1.0 + z)
         sig_lo, sig_seed, sig_hi = _grating_bounds(grating, sig_inst, dlam, lam_obs_A, sigma_factor)
 
-        # Find peak flux near the line for amplitude seeding.
+        # Find peak/trough flux near the line for amplitude seeding.
         near = np.abs(spec.wave_A - lam_obs_A)
         idx_near = np.where(near < 5 * sig_seed)[0]
-        if len(idx_near) > 0:
-            peak_flam = np.nanmax(flam[idx_near])
+        is_abs = name.startswith("abs_")
+
+        if is_abs:
+            # Absorption line: seed from the deepest trough.
+            if len(idx_near) > 0:
+                peak_flam = abs(np.nanmin(flam[idx_near]))
+            else:
+                peak_flam = 1.0
         else:
-            peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
+            # Emission line: seed from the peak.
+            if len(idx_near) > 0:
+                peak_flam = np.nanmax(flam[idx_near])
+            else:
+                peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
         if not np.isfinite(peak_flam) or peak_flam <= 0:
             peak_flam = 1.0
 
@@ -395,9 +405,15 @@ def fit_lines(
         A_seed = max(peak_flam * _SQRT2PI * sig_seed, 1e-30)
 
         # Amplitude bounds.
-        p0[i] = A_seed
-        lb[i] = 0.0
-        ub[i] = 150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
+        if is_abs:
+            # Absorption: amplitude must be ≤ 0 (negative Gaussian).
+            p0[i] = -A_seed
+            lb[i] = -150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
+            ub[i] = 0.0
+        else:
+            p0[i] = A_seed
+            lb[i] = 0.0
+            ub[i] = 150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
 
         # Centroid bounds — expressed as a velocity offset (km/s) converted
         # to Å at the observed wavelength.  For stacked spectra the redshift
