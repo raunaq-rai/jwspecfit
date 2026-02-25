@@ -251,22 +251,22 @@ def compute_Av_from_balmer(
     flux_num_err: float,
     flux_den_err: float,
     law: str = "salim",
-    intrinsic_ratio: float = 2.86,
-    wave_num_A: float = 6564.61,
+    intrinsic_ratio: float = 0.468,
+    wave_num_A: float = 4341.68,
     wave_den_A: float = 4862.68,
     **kwargs,
 ) -> tuple[float, float]:
     """Derive A_V from a Balmer decrement.
 
-    By default uses Ha/Hb, but any pair of Balmer lines can be used
-    by specifying the wavelengths and intrinsic ratio.
+    By default uses Hgamma/Hbeta, but any pair of Balmer lines can be
+    used by specifying the wavelengths and intrinsic ratio.
 
     Parameters
     ----------
     flux_num : float
-        Observed flux of the numerator line (e.g. Ha).
+        Observed flux of the numerator line (e.g. Hgamma).
     flux_den : float
-        Observed flux of the denominator line (e.g. Hb).
+        Observed flux of the denominator line (e.g. Hbeta).
     flux_num_err : float
         Error on numerator flux.
     flux_den_err : float
@@ -274,11 +274,11 @@ def compute_Av_from_balmer(
     law : str
         ``"salim"`` (default) or ``"cardelli"``.
     intrinsic_ratio : float
-        Intrinsic flux ratio (default 2.86 for Ha/Hb).
+        Intrinsic flux ratio (default 0.468 for Hgamma/Hbeta).
     wave_num_A : float
-        Rest wavelength of numerator line in Angstroms (default Ha).
+        Rest wavelength of numerator line in Angstroms (default Hgamma).
     wave_den_A : float
-        Rest wavelength of denominator line in Angstroms (default Hb).
+        Rest wavelength of denominator line in Angstroms (default Hbeta).
     **kwargs
         Extra arguments to the attenuation law.
 

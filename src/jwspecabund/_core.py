@@ -741,20 +741,8 @@ def compute_abundances(
     Av_derived = None
     if dust_correct:
         if Av is None:
-            # Derive A_V from Balmer decrement (Ha/Hb preferred, Hg/Hb fallback).
-            if "Ha" in fluxes and "HBETA" in fluxes and fluxes["Ha"] > 0 and fluxes["HBETA"] > 0:
-                Av_val, Av_err = compute_Av_from_balmer(
-                    fluxes["Ha"], fluxes["HBETA"],
-                    errors["Ha"], errors["HBETA"],
-                    law=dust_law,
-                    intrinsic_ratio=2.86,
-                    wave_num_A=REST_LINES_A.get("Ha", 6564.61),
-                    wave_den_A=REST_LINES_A.get("HBETA", 4862.68),
-                    **dust_kwargs,
-                )
-                Av_derived = Av_val
-                logger.info("A_V from Ha/Hb = %.3f +/- %.3f", Av_val, Av_err)
-            elif "HGAMMA" in fluxes and "HBETA" in fluxes and fluxes["HGAMMA"] > 0 and fluxes["HBETA"] > 0:
+            # Derive A_V from Balmer decrement (Hgamma/Hbeta).
+            if "HGAMMA" in fluxes and "HBETA" in fluxes and fluxes["HGAMMA"] > 0 and fluxes["HBETA"] > 0:
                 Av_val, Av_err = compute_Av_from_balmer(
                     fluxes["HGAMMA"], fluxes["HBETA"],
                     errors["HGAMMA"], errors["HBETA"],
