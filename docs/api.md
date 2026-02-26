@@ -1,6 +1,269 @@
 # jwspecfit, jwspecmcmc & jwspecabund API Reference
 
 Full API documentation for all public modules, classes, and functions.
+For tutorials, see the [README](../README.md).
+
+---
+
+## Module overview
+
+### `jwspecfit`
+
+| Module | Description |
+|--------|-------------|
+| `io` | `Spectrum` container, FITS/npz/dict readers, save/load/export |
+| `lines` | Rest-frame line database, line-list selection |
+| `resolution` | R(λ) models, instrumental sigma |
+| `continuum` | Polynomial continuum with sigma-clipping |
+| `models` | Bin-averaged Gaussian profiles via erf |
+| `constraints` | [NII] ratio, Balmer-OIII width tying |
+| `fitter` | Core `fit_lines()` engine |
+| `broad` | Broad component fitting + BIC model selection |
+| `lyman_alpha` | Skewed Gaussian + IGM absorption |
+| `plotting` | Static and interactive visualisation |
+
+### `jwspecmcmc`
+
+| Module | Description |
+|--------|-------------|
+| `__init__` | Public API: `fit_lines()`, `fit_with_broad()`, plotting wrappers |
+| `_engine` | MCMC fitting engine (emcee / nautilus backends) |
+| `samplers` | `run_emcee()`, `run_nautilus()` sampler wrappers |
+| `likelihood` | Log-likelihood for Gaussian emission-line models |
+| `priors` | `UniformPrior`, `GaussianPrior`, `LogUniformPrior`, `PriorSet` |
+| `result` | `MCMCResult`, `MCMCBroadFitResult`, `MCMCLineResult` |
+| `diagnostics` | Gelman-Rubin R-hat, effective sample size (ESS) |
+| `plotting` | Corner plots, trace plots, flux posterior histograms |
+
+### `jwspecabund`
+
+| Module | Description |
+|--------|-------------|
+| `_core` | `compute_abundances()` orchestrator, method selection, dust correction |
+| `direct` | Direct T_e method via PyNEB: T_e, n_e, ionic abundances |
+| `forward` | Bayesian forward model (Cullen+25): emcee / dynesty sampling |
+| `strong_line` | Sanders+25 simultaneous polynomial calibrations |
+| `dust` | Salim+18 and Cardelli+89 attenuation curves, Balmer decrement A_V |
+| `icf` | Ionisation correction factors (Izotov+06) |
+| `result` | `AbundanceResult` dataclass |
+
+---
+
+## Loading non-standard spectra
+
+`jwspecfit` requires wavelength in **microns** and flux/error in
+**micro-Jansky**.  Below are recipes for common conversions.
+
+### Unit conversions
+
+```python
+# Angstroms -> microns
+wave_um = wave_angstrom * 1e-4
+
+# Nanometres -> microns
+wave_um = wave_nm * 1e-3
+
+# Jansky -> µJy
+flux_ujy = flux_jy * 1e6
+
+# erg/s/cm²/Å (F_lambda) -> µJy
+c_cgs = 2.99792458e18   # Å/s
+flux_ujy = flux_flam * (wave_angstrom ** 2) / c_cgs * 1e29
+
+# erg/s/cm²/Hz (F_nu in CGS) -> µJy
+flux_ujy = flux_fnu * 1e29
+```
+
+### From a CSV or ASCII table
+
+```python
+import numpy as np
+
+data = np.genfromtxt("spectrum.csv", delimiter=",", names=True)
+wave_um = data["wavelength_A"] * 1e-4
+c_cgs = 2.99792458e18
+flux_ujy = data["flux_flam"] * (data["wavelength_A"] ** 2) / c_cgs * 1e29
+err_ujy  = data["err_flam"]  * (data["wavelength_A"] ** 2) / c_cgs * 1e29
+
+spec = jwspecfit.read_dict(
+    {"wave": wave_um, "flux": flux_ujy, "err": err_ujy},
+    z=2.5,
+)
+```
+
+### From a non-standard FITS file
+
+```python
+from astropy.io import fits
+
+with fits.open("other_pipeline.fits") as hdul:
+    tbl = hdul[1].data
+    wave_um = tbl["WAVELENGTH"] * 1e-4   # e.g. Å -> µm
+    flux_ujy = tbl["FLUX"] * 1e6         # e.g. Jy -> µJy
+    err_ujy  = tbl["ERROR"] * 1e6
+
+spec = jwspecfit.read_dict(
+    {"wave": wave_um, "flux": flux_ujy, "err": err_ujy},
+    z=3.0, grating="G395M",
+)
+```
+
+### Building a `Spectrum` directly
+
+```python
+from jwspecfit.io import Spectrum
+
+spec = Spectrum(
+    wave_um=wave_um,
+    flux_ujy=flux_ujy,
+    err_ujy=err_ujy,
+    grating=None,       # or "PRISM", "G395M", etc.
+    z=4.5,
+    R=150.0,            # optional — estimated from pixels if omitted
+    meta={"source": "my_pipeline", "target": "GN-z11"},
+)
+```
+
+---
+
+## Multi-window fitting
+
+For stacked spectra where the continuum shape varies across the full
+wavelength range, fitting in a single pass can produce poor continuum
+estimates.  Use `wave_windows_A` to fit multiple independent wavelength
+windows, each with its own continuum subtraction:
+
+```python
+result = jwspecfit.fit_lines(
+    spec, z=0.0,
+    wave_windows_A=[
+        (3500, 5200),   # blue window: [OII] -> Hbeta + [OIII]
+        (5500, 7000),   # red window:  [NII] + Halpha + [SII]
+    ],
+    sigma_factor=2.0,   # wider width bounds for stacked spectra
+)
+```
+
+Each window gets its own continuum fit and automatic line detection.
+Results are merged into a single `FitResult`.  `wave_windows_A` is
+mutually exclusive with `wave_range_A`.
+
+---
+
+## Broad Balmer component detection
+
+`fit_with_broad()` compares narrow-only vs narrow+broad Balmer models
+using BIC.  Four model variants are tested:
+
+| Model | Description |
+|-------|-------------|
+| **narrow** | Narrow lines only |
+| **broad1** | + intermediate broad (FWHM ~ 500-2000 km/s) |
+| **broad2** | + very broad / BLR (FWHM ~ 2000-5000 km/s) |
+| **both** | + both broad components |
+
+```python
+result = jwspecfit.fit_with_broad(
+    spec, z=2.5,
+    mode="auto",            # "auto" | "off" | "broad1" | "broad2" | "both"
+    n_boot_bic=100,         # bootstrap iterations for robust BIC comparison
+    snr_threshold=5.0,      # min Halpha SNR to attempt broad fitting
+    bic_delta=6.0,          # delta-BIC threshold for model acceptance
+)
+
+print(f"Selected model: {result.selected_model}")
+```
+
+Broad components are added for Halpha, Hbeta, Hdelta, and Hgamma.  NII
+kinematics are tied to OIII to prevent broad Halpha from absorbing NII
+flux.
+
+---
+
+## Parameter constraints
+
+Applied automatically during fitting:
+
+- **[NII] doublet ratio**: A(6549) / A(6585) = 1/2.96 (Storey & Zeippen
+  2000) with tied kinematics.
+- **Balmer-OIII width tying**: Halpha, Hbeta, Hdelta, Hgamma, and
+  NII_6585 widths are tied to OIII_5007 in velocity space.
+- **Centroid bounds**: limited by `centroid_vmax` (default 500 km/s),
+  capped at half the separation to the nearest line.
+- **Broad components**: unconstrained (not subject to width tying).
+
+---
+
+## Lyman-alpha modelling
+
+Lya is modelled as a skewed Gaussian attenuated by mean IGM transmission
+(Inoue et al. 2014).
+
+```python
+from jwspecfit.lyman_alpha import igm_transmission, lya_model
+
+T = igm_transmission(wave_obs_A, z_source=7.0)  # T(lambda) in [0, 1]
+model = lya_model(lam_left, lam_right, z, amplitude, mu, sigma, skew)
+```
+
+---
+
+## MCMC fitting with `jwspecmcmc`
+
+`jwspecmcmc` replaces bootstrap uncertainties with full Bayesian
+posterior sampling via **emcee** or **nautilus**.  It reuses the same
+`Spectrum`, line database, and plotting infrastructure from `jwspecfit`.
+
+### Quick start
+
+```python
+import jwspecmcmc
+
+result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="emcee", n_steps=2000)
+
+print(result.selected_model)
+print(result.lines["OIII_5007"].flux_err)   # asymmetric (lo, hi) 68% CI
+
+# Flux-ratio posterior
+ratio = result.flux_ratio_posterior("OIII_5007", "HBETA")
+
+# Convergence diagnostics
+print(result.convergence)
+
+# Diagnostic plots
+jwspecmcmc.plot_traces(result, params=["A_OIII_5007", "A_HBETA"])
+jwspecmcmc.plot_corner(result, params=["A_OIII_5007", "A_HBETA"])
+jwspecmcmc.plot_flux_posterior(result, "OIII_5007")
+
+# Convert to FitResult for jwspecfit plotting
+fig = jwspecfit.plot_fit(result.to_fit_result())
+```
+
+### Custom priors
+
+```python
+from jwspecmcmc import GaussianPrior
+
+result = jwspecmcmc.fit_lines(
+    spec, z=6.0,
+    mode="off",
+    prior_overrides={
+        "A_OIII_5007": GaussianPrior(mean=8e-18, std=2e-18, lo=0, hi=1e-15),
+    },
+)
+```
+
+### Nautilus nested sampling
+
+```python
+result = jwspecmcmc.fit_lines(
+    spec, z=6.0,
+    sampler="nautilus",
+    mode="off",
+    n_live=1000,
+    n_eff=5000,
+)
+```
 
 ---
 
