@@ -487,12 +487,12 @@ def _compute_logU(
                 logger.info("log(U) from N43 = %.2f (N43=%.3f).", logU, N43)
                 return logU, "N43"
             else:
-                logger.warning(
+                logger.debug(
                     "N43 gives log(U)=%.2f outside validity [%.1f, %.1f]; "
                     "falling back to O32.", logU, *_LOG_U_VALID,
                 )
         else:
-            logger.warning(
+            logger.debug(
                 "log(N43)=%.2f outside validity [%.1f, %.1f]; "
                 "falling back to O32.", log_N43, *_LOG_N43_VALID,
             )
