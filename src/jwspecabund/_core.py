@@ -443,7 +443,10 @@ def _compute_logU(
         ``"O32"``.  Returns ``(None, None)`` if neither diagnostic
         is available.
     """
-    from .martinez25_icf import LOG_OH_SOLAR, log_U_from_N43, log_U_from_O32
+    from .martinez25_icf import (
+        LOG_OH_SOLAR, _LOG_N43_VALID, _LOG_U_VALID,
+        log_U_from_N43, log_U_from_O32,
+    )
 
     def _doublet_ok(name_a: str, name_b: str) -> tuple[bool, float]:
         """Check both members present and total doublet SNR above cut.
@@ -476,9 +479,23 @@ def _compute_logU(
 
     if niv_flux > 0 and niii_flux > 0:
         N43 = niv_flux / niii_flux
-        logU = log_U_from_N43(np.log10(N43), Z_Zsun, ne_high)
-        logger.info("log(U) from N43 = %.2f (N43=%.3f).", logU, N43)
-        return logU, "N43"
+        log_N43 = np.log10(N43)
+        # Reject N43 if the ratio is outside the calibration range.
+        if _LOG_N43_VALID[0] <= log_N43 <= _LOG_N43_VALID[1]:
+            logU = log_U_from_N43(log_N43, Z_Zsun, ne_high)
+            if _LOG_U_VALID[0] <= logU <= _LOG_U_VALID[1]:
+                logger.info("log(U) from N43 = %.2f (N43=%.3f).", logU, N43)
+                return logU, "N43"
+            else:
+                logger.warning(
+                    "N43 gives log(U)=%.2f outside validity [%.1f, %.1f]; "
+                    "falling back to O32.", logU, *_LOG_U_VALID,
+                )
+        else:
+            logger.warning(
+                "log(N43)=%.2f outside validity [%.1f, %.1f]; "
+                "falling back to O32.", log_N43, *_LOG_N43_VALID,
+            )
 
     # O32 = [OIII]5007 / [OII]3727 — density-sensitive fallback.
     oiii = fluxes.get("OIII_5007", 0.0)

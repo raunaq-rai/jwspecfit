@@ -995,9 +995,12 @@ class TestDoubletCompleteness:
         """_compute_logU should use N43 when both doublets are complete."""
         from jwspecabund._core import _compute_logU
 
+        # Use fluxes that give a log(N43) within the validity range
+        # [-3.0, 0.5] and a logU within [-3.5, -1.0].
+        # NIV total = 4e-19, NIII total = 8e-18 → N43 = 0.05, log(N43) = -1.3.
         fluxes = {
-            "NIV_1483": 1.0e-17,
-            "NIV_1486": 5.0e-18,
+            "NIV_1483": 2.0e-19,
+            "NIV_1486": 2.0e-19,
             "NIII_1749": 5.0e-18,
             "NIII_1752": 3.0e-18,
         }
