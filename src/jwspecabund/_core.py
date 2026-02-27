@@ -354,6 +354,52 @@ def _compute_multi_ne(
     return ne_low, ne_high
 
 
+def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
+    """Return ionic species derived from incomplete UV doublets.
+
+    When a UV doublet has only one member present (e.g. after SNR
+    filtering removes the other), the single-member ionic abundance
+    is still physically valid, but should *not* be fed into ICF
+    computations.  The ICF corrections (especially Martinez+25) are
+    calibrated assuming reliable doublet measurements; using a
+    single-member abundance with logU from a fallback diagnostic
+    (O32 instead of N43) can produce severely biased N/O or C/O.
+
+    These ions are kept in the result's ``ionic`` dict for display,
+    but excluded from the dict passed to ``compute_total_abundances``.
+
+    Parameters
+    ----------
+    fluxes : dict
+        Emission-line flux dict (dust-corrected).
+
+    Returns
+    -------
+    set of str
+        Ionic species keys to exclude from ICF computation,
+        e.g. ``{"N++/H+", "N+++/H+"}``.
+    """
+    exclude: set[str] = set()
+
+    _uv_doublets = [
+        (("NIII_1749", "NIII_1752"), "N++/H+"),
+        (("NIV_1483", "NIV_1486"), "N+++/H+"),
+        (("NV_1", "NV_2"), "N4+/H+"),
+        (("CIV_1", "CIV_2"), "C+++/H+"),
+    ]
+    for (name_a, name_b), ion_key in _uv_doublets:
+        has_a = fluxes.get(name_a, 0.0) > 0
+        has_b = fluxes.get(name_b, 0.0) > 0
+        if has_a != has_b:  # one but not both
+            exclude.add(ion_key)
+            logger.info(
+                "Incomplete doublet (%s/%s): excluding %s from ICF.",
+                name_a, name_b, ion_key,
+            )
+
+    return exclude
+
+
 def _compute_logU(
     fluxes: dict[str, float],
     Z_Zsun: float,
@@ -506,8 +552,11 @@ def _run_direct(
         logU, logU_diag = _compute_logU(fluxes, Z_Zsun, ne_high)
 
     # --- Step 6: Total abundances with ICFs ---
+    # Exclude single-member UV ions from ICF to prevent biased N/O, C/O.
+    _exclude = _ions_from_incomplete_doublets(fluxes)
+    ionic_for_icf = {k: v for k, v in ionic.items() if k not in _exclude}
     totals = compute_total_abundances(
-        ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
+        ionic_for_icf, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
     )
 
     NO = totals.get("N/O")
@@ -569,8 +618,9 @@ def _run_direct(
                 if logU_mc_val is not None:
                     logU_mc = float(np.clip(logU_mc_val, *_LOG_U_VALID))
 
+            ionic_mc_icf = {k: v for k, v in ionic_mc.items() if k not in _exclude}
             totals_mc = compute_total_abundances(
-                ionic_mc, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
+                ionic_mc_icf, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
             )
 
             oh_mc = totals_mc.get("O/H", np.nan)
@@ -719,8 +769,11 @@ def _run_direct_mcmc(
     if Z_Zsun_pt is not None:
         logU_pt, logU_diag = _compute_logU(med_fluxes, Z_Zsun_pt, ne_high)
 
+    # Exclude single-member UV ions from ICF (same as _run_direct).
+    _exclude_mcmc = _ions_from_incomplete_doublets(med_fluxes)
+    ionic_pt_icf = {k: v for k, v in ionic_pt.items() if k not in _exclude_mcmc}
     totals_pt = compute_total_abundances(
-        ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
+        ionic_pt_icf, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
     ) if ionic_pt else {}
     icf_method = totals_pt.get("icf_method")
     NO_icf_name = totals_pt.get("NO_icf_name")
@@ -751,8 +804,9 @@ def _run_direct_mcmc(
                 if logU_val is not None:
                     logU_i = float(np.clip(logU_val, *_LOG_U_VALID))
 
+            ionic_i_icf = {k: v for k, v in ionic_i.items() if k not in _exclude_mcmc}
             totals_i = compute_total_abundances(
-                ionic_i, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,
+                ionic_i_icf, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,
             )
 
             oh = totals_i.get("O/H", np.nan)

@@ -1061,3 +1061,66 @@ class TestDoubletCompleteness:
         assert "N++/H+" not in ionic
         assert "N+++/H+" not in ionic
         assert "C++/H+" not in ionic
+
+    def test_incomplete_doublet_excluded_from_icf(self):
+        """Single-member N++ and N+++ should be excluded from ICF computation.
+
+        When one member of NIII] or NIV] is missing, the Martinez+25 ICF 5
+        (NppNppp_Opp) should NOT be selected.  Instead the code should fall
+        back to optical ICFs (e.g. Izotov+06 N+/O+).
+        """
+        from jwspecabund._core import _ions_from_incomplete_doublets
+
+        # One member of each nitrogen doublet missing.
+        fluxes_partial = {
+            "NIII_1749": 5.0e-18,
+            # NIII_1752 missing
+            "NIV_1486": 2.0e-18,
+            # NIV_1483 missing
+        }
+        exclude = _ions_from_incomplete_doublets(fluxes_partial)
+        assert "N++/H+" in exclude
+        assert "N+++/H+" in exclude
+
+        # Complete doublets should NOT be excluded.
+        fluxes_complete = {
+            "NIII_1749": 5.0e-18,
+            "NIII_1752": 3.0e-18,
+            "NIV_1483": 1.0e-17,
+            "NIV_1486": 2.0e-18,
+        }
+        exclude2 = _ions_from_incomplete_doublets(fluxes_complete)
+        assert "N++/H+" not in exclude2
+        assert "N+++/H+" not in exclude2
+
+    def test_incomplete_doublet_falls_back_to_optical_icf(self):
+        """With incomplete UV N doublets, total N/O should use optical ICF.
+
+        When N++ and N+++ are excluded from ICF input, compute_total_abundances
+        should fall through Martinez+25 ICF 5 → ICF 4 → ICF 2 → ICF 1 (N+/O+)
+        and land on the optical Izotov+06 or Martinez+25 ICF 1 path.
+        """
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {
+            "O+/H+": 1.0e-5,
+            "O++/H+": 5.0e-5,
+            "N+/H+": 3.0e-7,
+            "N++/H+": 8.0e-7,   # from single NIII member
+            "N+++/H+": 2.0e-7,  # from single NIV member
+        }
+
+        # With all ions (as if doublets were complete): Martinez+25 ICF 5.
+        totals_full = compute_total_abundances(
+            ionic, logU=-2.5, Z_Zsun=0.1, ne=300.0,
+        )
+        assert totals_full.get("NO_icf_name") == "NppNppp_Opp"
+
+        # With N++ and N+++ removed (incomplete doublets): should NOT be ICF 5.
+        ionic_filtered = {k: v for k, v in ionic.items() if k not in ("N++/H+", "N+++/H+")}
+        totals_filtered = compute_total_abundances(
+            ionic_filtered, logU=-2.5, Z_Zsun=0.1, ne=300.0,
+        )
+        assert totals_filtered.get("NO_icf_name") != "NppNppp_Opp"
+        # Should have fallen to ICF 1 (NpOp) since N+/O+ is available.
+        assert "N/O" in totals_filtered
