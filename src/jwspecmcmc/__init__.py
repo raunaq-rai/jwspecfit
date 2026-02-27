@@ -25,6 +25,7 @@ from typing import Any, Callable
 from jwspecfit.io import Spectrum
 
 from ._engine import _fit_lines_mcmc, _fit_with_broad_mcmc
+from .io import load_mcmc_result, save_mcmc_result
 from .priors import GaussianPrior, LogUniformPrior, PriorSet, UniformPrior, priors_from_bounds
 from .result import MCMCBroadFitResult, MCMCLineResult, MCMCResult
 
@@ -39,6 +40,8 @@ __all__ = [
     "LogUniformPrior",
     "PriorSet",
     "priors_from_bounds",
+    "save_mcmc_result",
+    "load_mcmc_result",
     "plot_corner",
     "plot_traces",
     "plot_flux_posterior",
