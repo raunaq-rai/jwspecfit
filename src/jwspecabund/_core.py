@@ -531,15 +531,16 @@ def _gate_nitrogen_ions(
     ionic: dict[str, float],
     fluxes: dict[str, float],
     errors: dict[str, float],
-    snr_NO: float = 3.0,
+    snr_NO: float = 1.5,
 ) -> dict[str, float]:
     """Remove nitrogen ionic abundances whose source lines are too noisy.
 
-    For each nitrogen ion, compute the **total** SNR of its contributing
-    line(s): sum(flux) / sqrt(sum(err²)).  If below *snr_NO*, the ionic
-    abundance is set to zero so that the ``direct_sum`` tier logic in
-    :func:`~jwspecabund.direct.compute_total_abundances` naturally skips
-    the ion.
+    For **doublets** (NIII], NIV], NV): both members must have positive
+    flux, and the total doublet SNR (sum(flux) / sqrt(sum(err²))) must
+    be >= *snr_NO*.  If only one member is detected, the ion is excluded
+    regardless of SNR.
+
+    For **single lines** (NII 6585): the line SNR must be >= *snr_NO*.
 
     Parameters
     ----------
@@ -550,7 +551,7 @@ def _gate_nitrogen_ions(
     errors : dict
         Dust-corrected errors.
     snr_NO : float
-        Minimum total-line SNR for each nitrogen ion (default 3.0).
+        Minimum total-line SNR for each nitrogen ion (default 1.5).
 
     Returns
     -------
@@ -563,7 +564,25 @@ def _gate_nitrogen_ions(
     for ion_key, line_names in _N_ION_LINES.items():
         if ion_key not in ionic or ionic[ion_key] <= 0:
             continue
-        # Sum flux and quadrature-sum errors for the contributing lines.
+
+        is_doublet = len(line_names) > 1
+
+        if is_doublet:
+            # Both members must be present (positive flux).
+            member_fluxes = [fluxes.get(n, 0.0) for n in line_names]
+            if any(f <= 0 for f in member_fluxes):
+                logger.info(
+                    "direct_sum: %s incomplete doublet (%s); excluding.",
+                    ion_key,
+                    ", ".join(
+                        f"{n} {'OK' if fluxes.get(n, 0) > 0 else 'missing'}"
+                        for n in line_names
+                    ),
+                )
+                ionic[ion_key] = 0.0
+                continue
+
+        # Total SNR check.
         total_flux = sum(fluxes.get(n, 0.0) for n in line_names)
         total_err2 = sum(errors.get(n, 0.0) ** 2 for n in line_names)
         total_err = np.sqrt(total_err2) if total_err2 > 0 else 0.0
@@ -572,7 +591,7 @@ def _gate_nitrogen_ions(
         snr = total_flux / total_err
         if snr < snr_NO:
             logger.info(
-                "direct_sum: %s total-line SNR=%.1f < %.1f; excluding.",
+                "direct_sum: %s total SNR=%.1f < %.1f; excluding.",
                 ion_key, snr, snr_NO,
             )
             ionic[ion_key] = 0.0
@@ -590,7 +609,7 @@ def _run_direct(
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
     icf_method: str = "auto",
-    snr_NO: float = 3.0,
+    snr_NO: float = 1.5,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -620,7 +639,7 @@ def _run_direct(
         is used instead.
     snr_NO : float
         Minimum total-line SNR for each nitrogen ion when using
-        ``icf_method="direct_sum"`` (default 3.0).  Ions whose
+        ``icf_method="direct_sum"`` (default 1.5).  Ions whose
         contributing lines fall below this are excluded from the sum.
 
     Returns
@@ -818,7 +837,7 @@ def _run_direct_mcmc(
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
     icf_method: str = "auto",
-    snr_NO: float = 3.0,
+    snr_NO: float = 1.5,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -1035,7 +1054,7 @@ def compute_abundances(
     delta: float = -0.35,
     B_bump: float = 2.27,
     icf_method: str = "auto",
-    snr_NO: float = 3.0,
+    snr_NO: float = 1.5,
     # Forward model kwargs (method="forward")
     forward_sampler: str = "emcee",
     forward_n_walkers: int = 32,

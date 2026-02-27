@@ -1160,7 +1160,7 @@ class TestDirectSum:
         np.testing.assert_allclose(totals["N/O"], expected_NO)
 
     def test_gate_nitrogen_ions_removes_low_snr(self):
-        """Low-SNR UV nitrogen lines should be excluded from the sum."""
+        """Low-SNR UV nitrogen doublets should be excluded."""
         from jwspecabund._core import _gate_nitrogen_ions
 
         ionic = {
@@ -1185,7 +1185,7 @@ class TestDirectSum:
             "NIV_1486": 1.0e-18,
         }
 
-        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=2.0)
+        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=1.5)
 
         # N+ kept (SNR=5), N++ removed (SNR~1.4), N+++ removed (SNR~1.4)
         assert ionic["N+/H+"] == 3e-7
@@ -1193,7 +1193,7 @@ class TestDirectSum:
         assert ionic["N+++/H+"] == 0.0
 
     def test_gate_nitrogen_ions_keeps_high_snr(self):
-        """High-SNR nitrogen lines should be kept."""
+        """Complete high-SNR doublets should be kept."""
         from jwspecabund._core import _gate_nitrogen_ions
 
         ionic = {
@@ -1213,11 +1213,32 @@ class TestDirectSum:
             "NIII_1752": 0.5e-18,
         }
 
-        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=2.0)
+        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=1.5)
 
         # doublet SNR = 8e-18 / sqrt(1e-36 + 0.25e-36) = 8e-18 / 1.12e-18 = 7.1
         assert ionic["N+/H+"] == 3e-7
         assert ionic["N++/H+"] == 1e-5
+
+    def test_gate_incomplete_doublet_excluded(self):
+        """Doublet with only one member detected should be excluded."""
+        from jwspecabund._core import _gate_nitrogen_ions
+
+        ionic = {
+            "O++/H+": 5e-5,
+            "N++/H+": 1e-5,
+        }
+        fluxes = {
+            "NIII_1749": 5.0e-18,  # only one member
+            # NIII_1752 missing (flux=0)
+        }
+        errors = {
+            "NIII_1749": 0.5e-18,  # high SNR on the one member
+        }
+
+        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=1.5)
+
+        # Excluded because only one doublet member present.
+        assert ionic["N++/H+"] == 0.0
 
     def test_gate_disabled_when_snr_zero(self):
         """snr_NO=0 should disable gating."""
