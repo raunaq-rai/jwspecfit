@@ -230,8 +230,28 @@ def _apply_dust_correction(
     return corr_fluxes, corr_errors
 
 
+def _doublet_snr_ok(
+    line1: str,
+    line2: str,
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    snr_ne: float,
+) -> bool:
+    """Return True if both doublet members have SNR >= *snr_ne*."""
+    for name in (line1, line2):
+        if name not in fluxes or name not in errors:
+            return False
+        err = errors.get(name, 0.0)
+        snr = fluxes[name] / err if err > 0 else np.inf
+        if snr < snr_ne:
+            return False
+    return True
+
+
 def _compute_multi_ne(
     fluxes: dict[str, float],
+    errors: dict[str, float] | None = None,
+    snr_ne: float = 3.0,
     ne_high_max: float = 1e5,
 ) -> tuple[float, float]:
     """Compute multi-phase electron densities (Berg+2025 step 1).
@@ -240,6 +260,13 @@ def _compute_multi_ne(
     ----------
     fluxes : dict
         Dust-corrected emission-line fluxes.
+    errors : dict, optional
+        Dust-corrected flux errors.  Required for SNR gating.
+    snr_ne : float
+        Minimum SNR for both members of a density-sensitive doublet
+        (default 3.0).  If either member falls below this, the
+        doublet is skipped and the code falls back to the default
+        density.  Set to 0 to disable gating.
     ne_high_max : float
         Maximum allowed high-ionisation electron density in cm^-3
         (default 1e5).  If n_e(high) exceeds this, falls back to
@@ -250,37 +277,65 @@ def _compute_multi_ne(
     tuple
         ``(ne_low, ne_high)`` in cm^-3.  ``ne_low`` is from [SII] or
         [OII]; ``ne_high`` is from NIV] or CIII].  Falls back to
-        ne_low or 100 cm^-3 when UV diagnostics are unavailable.
+        ``NE_DEFAULT`` (300 cm^-3) when diagnostics are unavailable
+        or fail the SNR cut.
     """
-    from .direct import compute_ne, compute_ne_CIII, compute_ne_NIV
+    from .direct import NE_DEFAULT, compute_ne, compute_ne_CIII, compute_ne_NIV
+
+    if errors is None:
+        errors = {}
 
     # Low-ionisation zone: [SII] 6718/6732 or [OII] 3726/3729.
-    ne_low = 100.0
+    ne_low = NE_DEFAULT
     if "SII_6718" in fluxes and "SII_6732" in fluxes:
-        try:
-            ne_low = compute_ne(fluxes["SII_6718"], fluxes["SII_6732"], doublet="SII")
-        except Exception:
-            logger.warning("n_e(SII) failed; using 100 cm^-3.")
+        if _doublet_snr_ok("SII_6718", "SII_6732", fluxes, errors, snr_ne):
+            try:
+                ne_low = compute_ne(fluxes["SII_6718"], fluxes["SII_6732"], doublet="SII")
+            except Exception:
+                logger.warning("n_e(SII) failed; using %.0f cm^-3.", NE_DEFAULT)
+        else:
+            logger.warning(
+                "n_e(SII) doublet below SNR threshold (%.1f); "
+                "using %.0f cm^-3.", snr_ne, NE_DEFAULT,
+            )
     elif "OII_3726" in fluxes and "OII_3729" in fluxes:
-        try:
-            ne_low = compute_ne(fluxes["OII_3726"], fluxes["OII_3729"], doublet="OII")
-        except Exception:
-            logger.warning("n_e(OII) failed; using 100 cm^-3.")
+        if _doublet_snr_ok("OII_3726", "OII_3729", fluxes, errors, snr_ne):
+            try:
+                ne_low = compute_ne(fluxes["OII_3726"], fluxes["OII_3729"], doublet="OII")
+            except Exception:
+                logger.warning("n_e(OII) failed; using %.0f cm^-3.", NE_DEFAULT)
+        else:
+            logger.warning(
+                "n_e(OII) doublet below SNR threshold (%.1f); "
+                "using %.0f cm^-3.", snr_ne, NE_DEFAULT,
+            )
 
     # High-ionisation zone: NIV] 1483/1486 (preferred) or CIII] 1907/1909.
     ne_high = None
     if "NIV_1483" in fluxes and "NIV_1486" in fluxes:
-        try:
-            ne_high = compute_ne_NIV(fluxes["NIV_1483"], fluxes["NIV_1486"])
-            logger.info("n_e(high) from NIV] = %.0f cm^-3.", ne_high)
-        except Exception:
-            logger.warning("n_e(NIV]) failed.")
+        if _doublet_snr_ok("NIV_1483", "NIV_1486", fluxes, errors, snr_ne):
+            try:
+                ne_high = compute_ne_NIV(fluxes["NIV_1483"], fluxes["NIV_1486"])
+                logger.info("n_e(high) from NIV] = %.0f cm^-3.", ne_high)
+            except Exception:
+                logger.warning("n_e(NIV]) failed.")
+        else:
+            logger.warning(
+                "n_e(NIV]) doublet below SNR threshold (%.1f); skipping.",
+                snr_ne,
+            )
     if ne_high is None and "CIII]_1907" in fluxes and "CIII]" in fluxes:
-        try:
-            ne_high = compute_ne_CIII(fluxes["CIII]_1907"], fluxes["CIII]"])
-            logger.info("n_e(high) from CIII] = %.0f cm^-3.", ne_high)
-        except Exception:
-            logger.warning("n_e(CIII]) failed.")
+        if _doublet_snr_ok("CIII]_1907", "CIII]", fluxes, errors, snr_ne):
+            try:
+                ne_high = compute_ne_CIII(fluxes["CIII]_1907"], fluxes["CIII]"])
+                logger.info("n_e(high) from CIII] = %.0f cm^-3.", ne_high)
+            except Exception:
+                logger.warning("n_e(CIII]) failed.")
+        else:
+            logger.warning(
+                "n_e(CIII]) doublet below SNR threshold (%.1f); skipping.",
+                snr_ne,
+            )
 
     # Fall back to ne_low if no high-ionisation density available.
     if ne_high is None:
@@ -365,6 +420,7 @@ def _run_direct(
     seed: int = 42,
     progress: bool = True,
     ne_high_max: float = 1e5,
+    snr_ne: float = 3.0,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -388,6 +444,10 @@ def _run_direct(
         Show a ``tqdm`` progress bar (default ``True``).
     ne_high_max : float
         Maximum allowed n_e(high) in cm^-3 (default 1e5).
+    snr_ne : float
+        Minimum SNR for density-sensitive doublet members (default 3.0).
+        Doublets failing this cut are skipped and the default density
+        is used instead.
 
     Returns
     -------
@@ -404,7 +464,9 @@ def _run_direct(
     from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
 
     # --- Step 1: Multi-phase electron density ---
-    ne_low, ne_high = _compute_multi_ne(fluxes, ne_high_max=ne_high_max)
+    ne_low, ne_high = _compute_multi_ne(
+        fluxes, errors=errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
+    )
 
     # --- Step 2: Electron temperature with zone-appropriate ne ---
     Te_high = compute_Te_OIII(
@@ -560,6 +622,7 @@ def _run_direct_mcmc(
     progress: bool = True,
     seed: int = 42,
     ne_high_max: float = 1e5,
+    snr_ne: float = 3.0,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -580,6 +643,10 @@ def _run_direct_mcmc(
         Random seed for subsampling (default 42).
     ne_high_max : float
         Maximum allowed n_e(high) in cm^-3 (default 1e5).
+    snr_ne : float
+        Minimum SNR for density-sensitive doublet members (default 3.0).
+        SNR is computed from the median/std of the posterior for each
+        doublet member.
 
     Returns
     -------
@@ -609,9 +676,12 @@ def _run_direct_mcmc(
     NO_post = np.full(n_samples, np.nan)
     CO_post = np.full(n_samples, np.nan)
 
-    # Compute medians for the point estimate and multi-phase ne.
+    # Compute medians and errors for the point estimate and multi-phase ne.
     med_fluxes = {name: float(np.median(post)) for name, post in posteriors.items()}
-    ne_low, ne_high = _compute_multi_ne(med_fluxes, ne_high_max=ne_high_max)
+    med_errors = {name: float(np.std(post)) for name, post in posteriors.items()}
+    ne_low, ne_high = _compute_multi_ne(
+        med_fluxes, errors=med_errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
+    )
 
     # Point estimate: logU and Z_Zsun from medians.
     try:
@@ -737,6 +807,7 @@ def compute_abundances(
     snr_auroral: float = 3.0,
     snr_line: float = 2.0,
     ne_high_max: float = 1e5,
+    snr_ne: float = 3.0,
     n_mc: int = 1000,
     Te_relation: str = "desi",
     Rv: float = 3.15,
@@ -786,6 +857,11 @@ def compute_abundances(
         (default 1e5).  If n_e(high) from a UV doublet exceeds this,
         the code falls back to n_e(low).  Prevents unphysical density
         estimates from noisy doublet ratios.
+    snr_ne : float
+        Minimum SNR for both members of a density-sensitive doublet
+        (default 3.0).  Doublets where either member has
+        ``flux / error < snr_ne`` are skipped, and the default
+        density (300 cm^-3) is used.  Set to 0 to disable.
     n_mc : int
         Monte Carlo iterations for error propagation (default 1000).
     Te_relation : str
@@ -956,11 +1032,13 @@ def compute_abundances(
             direct_out = _run_direct_mcmc(
                 posteriors, Te_relation, n_posterior=n_posterior,
                 progress=progress, ne_high_max=ne_high_max,
+                snr_ne=snr_ne,
             )
         else:
             direct_out = _run_direct(
                 fluxes, errors, Te_relation, n_mc,
                 progress=progress, ne_high_max=ne_high_max,
+                snr_ne=snr_ne,
             )
 
         return AbundanceResult(

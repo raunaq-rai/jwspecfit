@@ -826,3 +826,117 @@ class TestSNRGating:
         )
         text = result.summary()
         assert "Excluded" not in text
+
+
+# -----------------------------------------------------------------------
+# Electron density SNR gating tests
+# -----------------------------------------------------------------------
+
+class TestNeSNRGating:
+    """Tests for SNR gating on density-sensitive doublets."""
+
+    def test_low_snr_SII_falls_back_to_default(self):
+        """Low-SNR [SII] doublet should fall back to NE_DEFAULT (300)."""
+        from jwspecabund._core import _compute_multi_ne
+        from jwspecabund.direct import NE_DEFAULT
+
+        fluxes = {
+            "SII_6718": 0.01,
+            "SII_6732": 0.01,
+        }
+        errors = {
+            "SII_6718": 0.1,   # SNR = 0.1
+            "SII_6732": 0.1,   # SNR = 0.1
+        }
+
+        ne_low, ne_high = _compute_multi_ne(fluxes, errors=errors, snr_ne=3.0)
+        assert ne_low == NE_DEFAULT
+        assert ne_high == NE_DEFAULT
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pyneb", reason="PyNEB required"),
+        reason="PyNEB not available",
+    )
+    def test_high_snr_SII_uses_measured_ne(self):
+        """High-SNR [SII] doublet should produce a measured n_e != NE_DEFAULT."""
+        from jwspecabund._core import _compute_multi_ne
+        from jwspecabund.direct import NE_DEFAULT
+
+        # Ratio ~1.4 → low density regime
+        fluxes = {
+            "SII_6718": 1.4,
+            "SII_6732": 1.0,
+        }
+        errors = {
+            "SII_6718": 0.05,  # SNR = 28
+            "SII_6732": 0.05,  # SNR = 20
+        }
+
+        ne_low, ne_high = _compute_multi_ne(fluxes, errors=errors, snr_ne=3.0)
+        # Should be a real measurement, not the default.
+        assert ne_low != NE_DEFAULT
+        assert 10 < ne_low < 5000
+
+    def test_snr_ne_zero_disables_gating(self):
+        """snr_ne=0 should disable the SNR check (all doublets pass)."""
+        from jwspecabund._core import _compute_multi_ne, _doublet_snr_ok
+
+        fluxes = {
+            "SII_6718": 0.001,
+            "SII_6732": 0.001,
+        }
+        errors = {
+            "SII_6718": 1.0,   # SNR = 0.001
+            "SII_6732": 1.0,   # SNR = 0.001
+        }
+
+        # With snr_ne=0, even very low SNR should pass the check.
+        assert _doublet_snr_ok("SII_6718", "SII_6732", fluxes, errors, snr_ne=0.0)
+
+    def test_one_member_low_snr_fails(self):
+        """If only one doublet member has low SNR, the doublet fails."""
+        from jwspecabund._core import _doublet_snr_ok
+
+        fluxes = {
+            "SII_6718": 1.0,
+            "SII_6732": 0.01,
+        }
+        errors = {
+            "SII_6718": 0.05,  # SNR = 20
+            "SII_6732": 0.1,   # SNR = 0.1
+        }
+
+        assert not _doublet_snr_ok("SII_6718", "SII_6732", fluxes, errors, snr_ne=3.0)
+
+    def test_NE_DEFAULT_is_300(self):
+        """NE_DEFAULT constant should be 300 cm^-3."""
+        from jwspecabund.direct import NE_DEFAULT
+
+        assert NE_DEFAULT == 300.0
+
+    def test_no_errors_dict_falls_back(self):
+        """When errors=None, all doublets should still pass (no gating)."""
+        from jwspecabund._core import _compute_multi_ne, _doublet_snr_ok
+
+        fluxes = {
+            "SII_6718": 1.4,
+            "SII_6732": 1.0,
+        }
+
+        # _doublet_snr_ok should return False when lines not in errors.
+        assert not _doublet_snr_ok("SII_6718", "SII_6732", fluxes, {}, snr_ne=3.0)
+
+        # But _compute_multi_ne with errors=None should use empty dict
+        # and fall back to NE_DEFAULT.
+        from jwspecabund.direct import NE_DEFAULT
+        ne_low, _ = _compute_multi_ne(fluxes, errors=None, snr_ne=3.0)
+        assert ne_low == NE_DEFAULT
+
+    def test_missing_doublet_member_fails(self):
+        """Missing doublet member should fail the SNR check."""
+        from jwspecabund._core import _doublet_snr_ok
+
+        fluxes = {"SII_6718": 1.0}
+        errors = {"SII_6718": 0.05}
+
+        assert not _doublet_snr_ok("SII_6718", "SII_6732", fluxes, errors, snr_ne=3.0)

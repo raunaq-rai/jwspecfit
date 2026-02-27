@@ -19,6 +19,10 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Default electron density fallback (cm^-3).
+# Matches the AURORA/EXCELS high-z median (~300-480 cm^-3 at z > 2).
+NE_DEFAULT: float = 300.0
+
 
 def _get_pyneb():
     """Import PyNEB lazily and return the module."""
@@ -63,8 +67,8 @@ def compute_ne(
     pn = _get_pyneb()
 
     if flux_line2 <= 0:
-        logger.warning("Denominator flux <= 0 for n_e; returning 100 cm^-3.")
-        return 100.0
+        logger.warning("Denominator flux <= 0 for n_e; returning %.0f cm^-3.", NE_DEFAULT)
+        return NE_DEFAULT
 
     ratio = flux_line1 / flux_line2
 
@@ -83,8 +87,8 @@ def compute_ne(
 
     # PyNEB can return nan for extreme ratios; fall back to default.
     if np.isnan(ne) or ne <= 0:
-        logger.warning("PyNEB returned invalid n_e=%.1f; using 100 cm^-3.", ne)
-        return 100.0
+        logger.warning("PyNEB returned invalid n_e=%.1f; using %.0f cm^-3.", ne, NE_DEFAULT)
+        return NE_DEFAULT
 
     return float(ne)
 
@@ -115,16 +119,16 @@ def compute_ne_CIII(
     pn = _get_pyneb()
 
     if flux_1909 <= 0:
-        logger.warning("CIII] 1909 flux <= 0; returning 100 cm^-3.")
-        return 100.0
+        logger.warning("CIII] 1909 flux <= 0; returning %.0f cm^-3.", NE_DEFAULT)
+        return NE_DEFAULT
 
     ratio = flux_1907 / flux_1909
     atom = pn.Atom("C", 3)
     ne = atom.getTemDen(ratio, tem=Te_guess, wave1=1907, wave2=1909)
 
     if np.isnan(ne) or ne <= 0:
-        logger.warning("PyNEB returned invalid n_e=%.1f from CIII]; using 100 cm^-3.", ne)
-        return 100.0
+        logger.warning("PyNEB returned invalid n_e=%.1f from CIII]; using %.0f cm^-3.", ne, NE_DEFAULT)
+        return NE_DEFAULT
 
     return float(ne)
 
@@ -155,16 +159,16 @@ def compute_ne_NIV(
     pn = _get_pyneb()
 
     if flux_1486 <= 0:
-        logger.warning("NIV] 1486 flux <= 0; returning 100 cm^-3.")
-        return 100.0
+        logger.warning("NIV] 1486 flux <= 0; returning %.0f cm^-3.", NE_DEFAULT)
+        return NE_DEFAULT
 
     ratio = flux_1483 / flux_1486
     atom = pn.Atom("N", 4)
     ne = atom.getTemDen(ratio, tem=Te_guess, wave1=1483, wave2=1487)
 
     if np.isnan(ne) or ne <= 0:
-        logger.warning("PyNEB returned invalid n_e=%.1f from NIV]; using 100 cm^-3.", ne)
-        return 100.0
+        logger.warning("PyNEB returned invalid n_e=%.1f from NIV]; using %.0f cm^-3.", ne, NE_DEFAULT)
+        return NE_DEFAULT
 
     return float(ne)
 
