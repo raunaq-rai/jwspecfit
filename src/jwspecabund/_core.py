@@ -635,9 +635,14 @@ def _run_direct(
 
             # Compute logU for this MC iteration (clamped to validity
             # range to prevent wild ICF extrapolation).
+            # Pass original errors so the same SNR gating applies as
+            # for the point estimate (prevents switching between N43
+            # and O32 across MC iterations).
             logU_mc = logU  # default to point estimate
             if z_zsun_mc is not None and logU_diag is not None:
-                logU_mc_val, _ = _compute_logU(mc_fluxes, z_zsun_mc, ne_high)
+                logU_mc_val, _ = _compute_logU(
+                    mc_fluxes, z_zsun_mc, ne_high, errors=errors,
+                )
                 if logU_mc_val is not None:
                     logU_mc = float(np.clip(logU_mc_val, *_LOG_U_VALID))
 
@@ -819,9 +824,13 @@ def _run_direct_mcmc(
 
             # logU for this sample (clamped to validity range to
             # prevent wild ICF extrapolation).
+            # Pass med_errors so the same SNR gating applies as for
+            # the point estimate.
             logU_i = logU_pt
             if z_zsun_i is not None and logU_diag is not None:
-                logU_val, _ = _compute_logU(sample, z_zsun_i, ne_high)
+                logU_val, _ = _compute_logU(
+                    sample, z_zsun_i, ne_high, errors=med_errors,
+                )
                 if logU_val is not None:
                     logU_i = float(np.clip(logU_val, *_LOG_U_VALID))
 
