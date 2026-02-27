@@ -531,7 +531,7 @@ def _gate_nitrogen_ions(
     ionic: dict[str, float],
     fluxes: dict[str, float],
     errors: dict[str, float],
-    snr_NO: float = 2.0,
+    snr_NO: float = 3.0,
 ) -> dict[str, float]:
     """Remove nitrogen ionic abundances whose source lines are too noisy.
 
@@ -550,7 +550,7 @@ def _gate_nitrogen_ions(
     errors : dict
         Dust-corrected errors.
     snr_NO : float
-        Minimum total-line SNR for each nitrogen ion (default 2.0).
+        Minimum total-line SNR for each nitrogen ion (default 3.0).
 
     Returns
     -------
@@ -590,7 +590,7 @@ def _run_direct(
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
     icf_method: str = "auto",
-    snr_NO: float = 2.0,
+    snr_NO: float = 3.0,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -620,7 +620,7 @@ def _run_direct(
         is used instead.
     snr_NO : float
         Minimum total-line SNR for each nitrogen ion when using
-        ``icf_method="direct_sum"`` (default 2.0).  Ions whose
+        ``icf_method="direct_sum"`` (default 3.0).  Ions whose
         contributing lines fall below this are excluded from the sum.
 
     Returns
@@ -818,7 +818,7 @@ def _run_direct_mcmc(
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
     icf_method: str = "auto",
-    snr_NO: float = 2.0,
+    snr_NO: float = 3.0,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -1035,7 +1035,7 @@ def compute_abundances(
     delta: float = -0.35,
     B_bump: float = 2.27,
     icf_method: str = "auto",
-    snr_NO: float = 2.0,
+    snr_NO: float = 3.0,
     # Forward model kwargs (method="forward")
     forward_sampler: str = "emcee",
     forward_n_walkers: int = 32,
