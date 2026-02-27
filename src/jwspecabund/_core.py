@@ -514,6 +514,71 @@ def _compute_logU(
     return None, None
 
 
+# ---------------------------------------------------------------------------
+# Nitrogen-ion SNR gating for ``direct_sum``
+# ---------------------------------------------------------------------------
+
+# Mapping from ionic-abundance key to the flux line(s) that produce it.
+_N_ION_LINES: dict[str, list[str]] = {
+    "N+/H+":   ["NII_6585"],
+    "N++/H+":  ["NIII_1749", "NIII_1752"],
+    "N+++/H+": ["NIV_1483", "NIV_1486"],
+    "N4+/H+":  ["NV_1", "NV_2"],
+}
+
+
+def _gate_nitrogen_ions(
+    ionic: dict[str, float],
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    snr_NO: float = 2.0,
+) -> dict[str, float]:
+    """Remove nitrogen ionic abundances whose source lines are too noisy.
+
+    For each nitrogen ion, compute the **total** SNR of its contributing
+    line(s): sum(flux) / sqrt(sum(err²)).  If below *snr_NO*, the ionic
+    abundance is set to zero so that the ``direct_sum`` tier logic in
+    :func:`~jwspecabund.direct.compute_total_abundances` naturally skips
+    the ion.
+
+    Parameters
+    ----------
+    ionic : dict
+        Ionic abundances (modified **in-place** and returned).
+    fluxes : dict
+        Dust-corrected fluxes.
+    errors : dict
+        Dust-corrected errors.
+    snr_NO : float
+        Minimum total-line SNR for each nitrogen ion (default 2.0).
+
+    Returns
+    -------
+    dict
+        The (possibly modified) ionic dict.
+    """
+    if snr_NO <= 0:
+        return ionic
+
+    for ion_key, line_names in _N_ION_LINES.items():
+        if ion_key not in ionic or ionic[ion_key] <= 0:
+            continue
+        # Sum flux and quadrature-sum errors for the contributing lines.
+        total_flux = sum(fluxes.get(n, 0.0) for n in line_names)
+        total_err2 = sum(errors.get(n, 0.0) ** 2 for n in line_names)
+        total_err = np.sqrt(total_err2) if total_err2 > 0 else 0.0
+        if total_flux <= 0 or total_err <= 0:
+            continue
+        snr = total_flux / total_err
+        if snr < snr_NO:
+            logger.info(
+                "direct_sum: %s total-line SNR=%.1f < %.1f; excluding.",
+                ion_key, snr, snr_NO,
+            )
+            ionic[ion_key] = 0.0
+    return ionic
+
+
 def _run_direct(
     fluxes: dict[str, float],
     errors: dict[str, float],
@@ -525,6 +590,7 @@ def _run_direct(
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
     icf_method: str = "auto",
+    snr_NO: float = 2.0,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -552,6 +618,10 @@ def _run_direct(
         Minimum SNR for density-sensitive doublet members (default 3.0).
         Doublets failing this cut are skipped and the default density
         is used instead.
+    snr_NO : float
+        Minimum total-line SNR for each nitrogen ion when using
+        ``icf_method="direct_sum"`` (default 2.0).  Ions whose
+        contributing lines fall below this are excluded from the sum.
 
     Returns
     -------
@@ -599,6 +669,10 @@ def _run_direct(
         )
 
     # --- Step 6: Total abundances with ICFs ---
+    # SNR-gate nitrogen ions for direct_sum to avoid noise-dominated N/O.
+    if icf_method == "direct_sum":
+        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=snr_NO)
+
     totals = compute_total_abundances(
         ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
         icf_method=icf_method,
@@ -668,6 +742,11 @@ def _run_direct(
                 )
                 if logU_mc_val is not None:
                     logU_mc = float(np.clip(logU_mc_val, *_LOG_U_VALID))
+
+            # Gate nitrogen ions using the *original* errors so the
+            # same ions are included/excluded as in the point estimate.
+            if icf_method == "direct_sum":
+                _gate_nitrogen_ions(ionic_mc, mc_fluxes, errors, snr_NO=snr_NO)
 
             totals_mc = compute_total_abundances(
                 ionic_mc, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
@@ -739,6 +818,7 @@ def _run_direct_mcmc(
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
     icf_method: str = "auto",
+    snr_NO: float = 2.0,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -766,6 +846,9 @@ def _run_direct_mcmc(
     icf_method : str
         ICF scheme: ``"auto"``, ``"izotov06"``, ``"martinez25"``, or
         ``"direct_sum"`` (sum detected N ions; Topping+2024).
+    snr_NO : float
+        Minimum total-line SNR for each nitrogen ion when using
+        ``icf_method="direct_sum"`` (default 2.0).
 
     Returns
     -------
@@ -828,6 +911,9 @@ def _run_direct_mcmc(
             snr_logU=snr_logU,
         )
 
+    if icf_method == "direct_sum" and ionic_pt:
+        _gate_nitrogen_ions(ionic_pt, med_fluxes, med_errors, snr_NO=snr_NO)
+
     totals_pt = compute_total_abundances(
         ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
         icf_method=icf_method,
@@ -865,6 +951,11 @@ def _run_direct_mcmc(
                 )
                 if logU_val is not None:
                     logU_i = float(np.clip(logU_val, *_LOG_U_VALID))
+
+            # Gate nitrogen ions using median errors (same ions as
+            # point estimate to prevent tier-switching across samples).
+            if icf_method == "direct_sum":
+                _gate_nitrogen_ions(ionic_i, sample, med_errors, snr_NO=snr_NO)
 
             totals_i = compute_total_abundances(
                 ionic_i, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,
@@ -944,6 +1035,7 @@ def compute_abundances(
     delta: float = -0.35,
     B_bump: float = 2.27,
     icf_method: str = "auto",
+    snr_NO: float = 2.0,
     # Forward model kwargs (method="forward")
     forward_sampler: str = "emcee",
     forward_n_walkers: int = 32,
@@ -1018,6 +1110,13 @@ def compute_abundances(
         ``"direct_sum"``: sum all detected nitrogen ions directly
         (Topping+2024, Yanagisawa+2025, Cameron+2023).  No ICF or logU
         needed; falls back to Izotov+06 if only N⁺ is available.
+    snr_NO : float
+        Minimum total-line SNR for each nitrogen ion when using
+        ``icf_method="direct_sum"`` (default 2.0).  For doublets
+        (NIII], NIV], NV), the summed flux is divided by the
+        quadrature-summed error.  Ions below this threshold are
+        excluded from the direct sum, causing the code to fall
+        through to a lower tier (or Izotov+06).
     forward_sampler : str
         Sampler for forward model: ``"emcee"`` or ``"dynesty"`` (default ``"emcee"``).
     forward_n_walkers : int
@@ -1179,14 +1278,14 @@ def compute_abundances(
                 posteriors, Te_relation, n_posterior=n_posterior,
                 progress=progress, ne_high_max=ne_high_max,
                 snr_ne=snr_ne, snr_logU=snr_logU,
-                icf_method=icf_method,
+                icf_method=icf_method, snr_NO=snr_NO,
             )
         else:
             direct_out = _run_direct(
                 fluxes, errors, Te_relation, n_mc,
                 progress=progress, ne_high_max=ne_high_max,
                 snr_ne=snr_ne, snr_logU=snr_logU,
-                icf_method=icf_method,
+                icf_method=icf_method, snr_NO=snr_NO,
             )
 
         return AbundanceResult(

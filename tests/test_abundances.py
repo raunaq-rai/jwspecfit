@@ -1159,6 +1159,78 @@ class TestDirectSum:
         expected_NO = (3e-7 + 1e-5 + 8e-6 + 1e-7) / OH
         np.testing.assert_allclose(totals["N/O"], expected_NO)
 
+    def test_gate_nitrogen_ions_removes_low_snr(self):
+        """Low-SNR UV nitrogen lines should be excluded from the sum."""
+        from jwspecabund._core import _gate_nitrogen_ions
+
+        ionic = {
+            "O+/H+": 1e-5,
+            "O++/H+": 5e-5,
+            "N+/H+": 3e-7,    # from NII 6585
+            "N++/H+": 1e-5,   # from NIII 1749+1752
+            "N+++/H+": 8e-6,  # from NIV 1483+1486
+        }
+        fluxes = {
+            "NII_6585": 0.1,          # SNR = 5.0 → kept
+            "NIII_1749": 4.0e-18,      # doublet SNR = 5e-18 / 3.6e-18 = 1.4
+            "NIII_1752": 1.0e-18,
+            "NIV_1483": 2.0e-18,       # doublet SNR = 3e-18 / 2.2e-18 = 1.4
+            "NIV_1486": 1.0e-18,
+        }
+        errors = {
+            "NII_6585": 0.02,
+            "NIII_1749": 3.0e-18,
+            "NIII_1752": 2.0e-18,
+            "NIV_1483": 2.0e-18,
+            "NIV_1486": 1.0e-18,
+        }
+
+        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=2.0)
+
+        # N+ kept (SNR=5), N++ removed (SNR~1.4), N+++ removed (SNR~1.4)
+        assert ionic["N+/H+"] == 3e-7
+        assert ionic["N++/H+"] == 0.0
+        assert ionic["N+++/H+"] == 0.0
+
+    def test_gate_nitrogen_ions_keeps_high_snr(self):
+        """High-SNR nitrogen lines should be kept."""
+        from jwspecabund._core import _gate_nitrogen_ions
+
+        ionic = {
+            "O+/H+": 1e-5,
+            "O++/H+": 5e-5,
+            "N+/H+": 3e-7,
+            "N++/H+": 1e-5,
+        }
+        fluxes = {
+            "NII_6585": 0.1,
+            "NIII_1749": 5.0e-18,
+            "NIII_1752": 3.0e-18,
+        }
+        errors = {
+            "NII_6585": 0.02,
+            "NIII_1749": 1.0e-18,
+            "NIII_1752": 0.5e-18,
+        }
+
+        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=2.0)
+
+        # doublet SNR = 8e-18 / sqrt(1e-36 + 0.25e-36) = 8e-18 / 1.12e-18 = 7.1
+        assert ionic["N+/H+"] == 3e-7
+        assert ionic["N++/H+"] == 1e-5
+
+    def test_gate_disabled_when_snr_zero(self):
+        """snr_NO=0 should disable gating."""
+        from jwspecabund._core import _gate_nitrogen_ions
+
+        ionic = {"N++/H+": 1e-5, "O++/H+": 5e-5}
+        fluxes = {"NIII_1749": 1e-19, "NIII_1752": 1e-20}
+        errors = {"NIII_1749": 1e-18, "NIII_1752": 1e-18}
+
+        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=0.0)
+
+        assert ionic["N++/H+"] == 1e-5  # unchanged
+
 
 class TestDoubletCompletenessLogU:
     """Tests for logU SNR gating with partial doublets (split from TestDoubletCompleteness)."""
