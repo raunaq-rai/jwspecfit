@@ -584,6 +584,10 @@ def compute_total_abundances(
         fall back to Izotov+06 otherwise.
         ``"martinez25"``: force Martinez+25 ICFs (requires logU and Z_Zsun).
         ``"izotov06"``: use Izotov+06 ICFs only.
+        ``"direct_sum"``: sum all detected nitrogen ions directly
+        (Topping+2024, Yanagisawa+2025, Cameron+2023).  Tiered fallback:
+        Tier 1 (N⁺ + N²⁺ + N³⁺) / (O⁺ + O²⁺),
+        Tier 2/3 (N²⁺ + N³⁺) / O²⁺, Tier 4 Izotov+06 optical fallback.
 
     Returns
     -------
@@ -615,8 +619,32 @@ def compute_total_abundances(
         OH = O_plus + O_pp
         totals["O/H"] = OH
 
-        # N/O
-        if use_martinez:
+        # N/O — direct_sum: sum all detected nitrogen ions (no ICF/logU).
+        if icf_method == "direct_sum":
+            N_plus = ionic.get("N+/H+", 0.0)
+            N_pp = ionic.get("N++/H+", 0.0)
+            N_ppp = ionic.get("N+++/H+", 0.0)
+            N_pppp = ionic.get("N4+/H+", 0.0)
+
+            if N_plus > 0 and (N_pp + N_ppp) > 0:
+                # Tier 1: all zones — Topping+2024
+                totals["N/O"] = (N_plus + N_pp + N_ppp + N_pppp) / OH
+                totals["icf_method"] = "direct_sum"
+                totals["NO_icf_name"] = "Np_Npp_Nppp"
+            elif (N_pp + N_ppp) > 0 and O_pp > 0:
+                # Tier 2/3: UV only — Yanagisawa+25 / Cameron+23
+                totals["N/O"] = (N_pp + N_ppp + N_pppp) / O_pp
+                totals["icf_method"] = "direct_sum"
+                totals["NO_icf_name"] = "Npp_Nppp_Opp" if N_ppp > 0 else "Npp_Opp"
+            elif N_plus > 0 and O_plus > 0:
+                # Tier 4: optical fallback — Izotov+06
+                icf_n = icf_nitrogen(O_plus, OH)
+                totals["N/O"] = icf_n * N_plus / O_plus
+                totals["icf_method"] = "izotov06"
+                totals["NO_icf_name"] = "izotov06_fallback"
+
+        # N/O — Martinez+25 or Izotov+06
+        elif use_martinez:
             from .martinez25_icf import compute_NO_martinez25
             ne_icf = ne if ne is not None else NE_DEFAULT
             NO_val, NO_icf_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)

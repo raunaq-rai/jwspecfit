@@ -1065,6 +1065,109 @@ class TestDoubletCompleteness:
         assert "N+++/H+" not in ionic
         assert "C++/H+" not in ionic
 
+
+# -----------------------------------------------------------------------
+# Direct-sum N/O tests
+# -----------------------------------------------------------------------
+
+class TestDirectSum:
+    """Tests for icf_method='direct_sum' tiered N/O calculation."""
+
+    def test_direct_sum_all_ions(self):
+        """Tier 1: N+ + N++ + N+++ all present → denominator is O+ + O++."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {
+            "O+/H+": 1e-5,
+            "O++/H+": 5e-5,
+            "N+/H+": 3e-7,
+            "N++/H+": 1e-5,
+            "N+++/H+": 8e-6,
+        }
+        totals = compute_total_abundances(ionic, icf_method="direct_sum")
+
+        OH = 1e-5 + 5e-5
+        expected_NO = (3e-7 + 1e-5 + 8e-6) / OH
+        np.testing.assert_allclose(totals["N/O"], expected_NO)
+        assert totals["icf_method"] == "direct_sum"
+        assert totals["NO_icf_name"] == "Np_Npp_Nppp"
+
+    def test_direct_sum_uv_only(self):
+        """Tier 2: only N++ + N+++ (no N+) → denominator is O++."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {
+            "O+/H+": 1e-5,
+            "O++/H+": 5e-5,
+            "N++/H+": 1e-5,
+            "N+++/H+": 8e-6,
+        }
+        totals = compute_total_abundances(ionic, icf_method="direct_sum")
+
+        expected_NO = (1e-5 + 8e-6) / 5e-5
+        np.testing.assert_allclose(totals["N/O"], expected_NO)
+        assert totals["icf_method"] == "direct_sum"
+        assert totals["NO_icf_name"] == "Npp_Nppp_Opp"
+
+    def test_direct_sum_npp_only(self):
+        """Tier 3: only N++ (no N+, no N+++) → denominator is O++."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {
+            "O+/H+": 1e-5,
+            "O++/H+": 5e-5,
+            "N++/H+": 1e-5,
+        }
+        totals = compute_total_abundances(ionic, icf_method="direct_sum")
+
+        expected_NO = 1e-5 / 5e-5
+        np.testing.assert_allclose(totals["N/O"], expected_NO)
+        assert totals["icf_method"] == "direct_sum"
+        assert totals["NO_icf_name"] == "Npp_Opp"
+
+    def test_direct_sum_optical_fallback(self):
+        """Tier 4: only N+ (no UV) → falls back to Izotov+06."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {
+            "O+/H+": 1e-5,
+            "O++/H+": 5e-5,
+            "N+/H+": 3e-7,
+        }
+        totals = compute_total_abundances(ionic, icf_method="direct_sum")
+
+        assert totals["icf_method"] == "izotov06"
+        assert totals["NO_icf_name"] == "izotov06_fallback"
+        # N/O should be ICF(N) × N+/O+, which is > 0.
+        assert totals["N/O"] > 0
+
+    def test_direct_sum_includes_n4plus(self):
+        """N4+ (NV) should be included in the sum when detected."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {
+            "O+/H+": 1e-5,
+            "O++/H+": 5e-5,
+            "N+/H+": 3e-7,
+            "N++/H+": 1e-5,
+            "N+++/H+": 8e-6,
+            "N4+/H+": 1e-7,
+        }
+        totals = compute_total_abundances(ionic, icf_method="direct_sum")
+
+        OH = 1e-5 + 5e-5
+        expected_NO = (3e-7 + 1e-5 + 8e-6 + 1e-7) / OH
+        np.testing.assert_allclose(totals["N/O"], expected_NO)
+
+
+class TestDoubletCompletenessLogU:
+    """Tests for logU SNR gating with partial doublets (split from TestDoubletCompleteness)."""
+
+    @pytest.fixture(autouse=True)
+    def _check_pyneb(self):
+        """Skip all tests in this class if PyNEB is not installed."""
+        pytest.importorskip("pyneb")
+
     def test_logU_skips_N43_when_member_low_snr(self):
         """_compute_logU should skip N43 when a doublet member has low SNR.
 

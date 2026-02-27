@@ -764,7 +764,8 @@ def _run_direct_mcmc(
         SNR is computed from the median/std of the posterior for each
         doublet member.
     icf_method : str
-        ICF scheme: ``"auto"``, ``"izotov06"``, or ``"martinez25"``.
+        ICF scheme: ``"auto"``, ``"izotov06"``, ``"martinez25"``, or
+        ``"direct_sum"`` (sum detected N ions; Topping+2024).
 
     Returns
     -------
@@ -1014,6 +1015,9 @@ def compute_abundances(
         ``"izotov06"``: always use Izotov+06 ICFs (N/O = ICF × N⁺/O⁺,
         independent of logU).
         ``"martinez25"``: force Martinez+25 ICFs (requires logU).
+        ``"direct_sum"``: sum all detected nitrogen ions directly
+        (Topping+2024, Yanagisawa+2025, Cameron+2023).  No ICF or logU
+        needed; falls back to Izotov+06 if only N⁺ is available.
     forward_sampler : str
         Sampler for forward model: ``"emcee"`` or ``"dynesty"`` (default ``"emcee"``).
     forward_n_walkers : int
