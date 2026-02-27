@@ -705,28 +705,28 @@ class TestSNRGating:
     """Tests for per-line SNR filtering in the direct method."""
 
     def test_filter_low_snr_removes_noisy_lines(self):
-        """Lines with SNR < threshold are excluded."""
+        """Lines with SNR < threshold are excluded (except protected lines)."""
         from jwspecabund._core import _filter_low_snr
 
         fluxes = {
             "OIII_5007": 5.0,
             "HBETA": 1.0,
-            "NIII_1749": 0.01,   # SNR = 0.01/0.1 = 0.1
-            "NIV_1486": 0.05,    # SNR = 0.05/0.025 = 2.0
+            "SII_6718": 0.01,    # SNR = 0.01/0.1 = 0.1 → excluded
+            "Ha": 0.05,          # SNR = 0.05/0.025 = 2.0 → kept
         }
         errors = {
             "OIII_5007": 0.1,
             "HBETA": 0.02,
-            "NIII_1749": 0.1,
-            "NIV_1486": 0.025,
+            "SII_6718": 0.1,
+            "Ha": 0.025,
         }
 
         filt_f, filt_e, excluded = _filter_low_snr(fluxes, errors, snr_thresh=2.0)
 
-        assert "NIII_1749" in excluded
-        assert "NIII_1749" not in filt_f
-        assert "NIII_1749" not in filt_e
-        assert "NIV_1486" in filt_f  # SNR = 2.0, exactly at threshold
+        assert "SII_6718" in excluded
+        assert "SII_6718" not in filt_f
+        assert "SII_6718" not in filt_e
+        assert "Ha" in filt_f  # SNR = 2.0, exactly at threshold
         assert "OIII_5007" in filt_f
         assert "HBETA" in filt_f
 
@@ -1062,65 +1062,46 @@ class TestDoubletCompleteness:
         assert "N+++/H+" not in ionic
         assert "C++/H+" not in ionic
 
-    def test_incomplete_doublet_excluded_from_icf(self):
-        """Single-member N++ and N+++ should be excluded from ICF computation.
+    def test_logU_skips_N43_when_member_low_snr(self):
+        """_compute_logU should skip N43 when a doublet member has low SNR.
 
-        When one member of NIII] or NIV] is missing, the Martinez+25 ICF 5
-        (NppNppp_Opp) should NOT be selected.  Instead the code should fall
-        back to optical ICFs (e.g. Izotov+06 N+/O+).
+        UV doublet members are protected from the per-line SNR filter so
+        they remain in the flux dict for ionic abundances, but the logU
+        diagnostic requires both members to have SNR >= snr_logU.
         """
-        from jwspecabund._core import _ions_from_incomplete_doublets
+        from jwspecabund._core import _compute_logU
 
-        # One member of each nitrogen doublet missing.
-        fluxes_partial = {
-            "NIII_1749": 5.0e-18,
-            # NIII_1752 missing
-            "NIV_1486": 2.0e-18,
-            # NIV_1483 missing
-        }
-        exclude = _ions_from_incomplete_doublets(fluxes_partial)
-        assert "N++/H+" in exclude
-        assert "N+++/H+" in exclude
-
-        # Complete doublets should NOT be excluded.
-        fluxes_complete = {
+        fluxes = {
+            "NIV_1483": 1.0e-18,   # low SNR member
+            "NIV_1486": 5.0e-18,   # decent SNR
             "NIII_1749": 5.0e-18,
             "NIII_1752": 3.0e-18,
-            "NIV_1483": 1.0e-17,
-            "NIV_1486": 2.0e-18,
+            "OIII_5007": 3.0e-16,
+            "OII_doublet": 8.0e-17,
         }
-        exclude2 = _ions_from_incomplete_doublets(fluxes_complete)
-        assert "N++/H+" not in exclude2
-        assert "N+++/H+" not in exclude2
-
-    def test_incomplete_doublet_falls_back_to_optical_icf(self):
-        """With incomplete UV N doublets, total N/O should use optical ICF.
-
-        When N++ and N+++ are excluded from ICF input, compute_total_abundances
-        should fall through Martinez+25 ICF 5 → ICF 4 → ICF 2 → ICF 1 (N+/O+)
-        and land on the optical Izotov+06 or Martinez+25 ICF 1 path.
-        """
-        from jwspecabund.direct import compute_total_abundances
-
-        ionic = {
-            "O+/H+": 1.0e-5,
-            "O++/H+": 5.0e-5,
-            "N+/H+": 3.0e-7,
-            "N++/H+": 8.0e-7,   # from single NIII member
-            "N+++/H+": 2.0e-7,  # from single NIV member
+        errors = {
+            "NIV_1483": 2.0e-18,   # SNR = 0.5 → below threshold
+            "NIV_1486": 1.0e-18,   # SNR = 5.0 → OK
+            "NIII_1749": 1.0e-18,  # SNR = 5.0 → OK
+            "NIII_1752": 1.0e-18,  # SNR = 3.0 → OK
+            "OIII_5007": 5.0e-17,
+            "OII_doublet": 1.5e-17,
         }
 
-        # With all ions (as if doublets were complete): Martinez+25 ICF 5.
-        totals_full = compute_total_abundances(
-            ionic, logU=-2.5, Z_Zsun=0.1, ne=300.0,
-        )
-        assert totals_full.get("NO_icf_name") == "NppNppp_Opp"
+        # With errors → SNR gating should block N43 (NIV_1483 SNR < 3).
+        logU, diag = _compute_logU(fluxes, Z_Zsun=0.1, ne_high=300.0,
+                                    errors=errors, snr_logU=3.0)
+        assert diag != "N43"
 
-        # With N++ and N+++ removed (incomplete doublets): should NOT be ICF 5.
-        ionic_filtered = {k: v for k, v in ionic.items() if k not in ("N++/H+", "N+++/H+")}
-        totals_filtered = compute_total_abundances(
-            ionic_filtered, logU=-2.5, Z_Zsun=0.1, ne=300.0,
-        )
-        assert totals_filtered.get("NO_icf_name") != "NppNppp_Opp"
-        # Should have fallen to ICF 1 (NpOp) since N+/O+ is available.
-        assert "N/O" in totals_filtered
+        # Without errors → no SNR gating, N43 should be used.
+        logU2, diag2 = _compute_logU(fluxes, Z_Zsun=0.1, ne_high=300.0)
+        assert diag2 == "N43"
+
+    def test_uv_doublet_members_snr_protected(self):
+        """UV doublet members should be in _SNR_PROTECTED."""
+        from jwspecabund._core import _SNR_PROTECTED
+
+        for name in ("NIII_1749", "NIII_1752", "NIV_1483", "NIV_1486",
+                      "CIV_1", "CIV_2", "NV_1", "NV_2",
+                      "CIII]_1907", "CIII]"):
+            assert name in _SNR_PROTECTED, f"{name} not in _SNR_PROTECTED"

@@ -32,7 +32,19 @@ _BALMER_LINES = {"Ha", "HBETA", "HGAMMA", "HDELTA"}
 
 # Lines that must never be SNR-filtered (required for Te computation
 # and flux normalisation).
-_SNR_PROTECTED = {"OIII_4363", "OIII_5007", "OIII_4959", "HBETA"}
+# UV doublet members are also protected: their individual SNR may be low,
+# but the summed doublet flux is still useful for ionic abundances.
+# Ratio diagnostics (logU, density) have their own completeness/SNR
+# guards and do not rely on the per-line SNR filter.
+_SNR_PROTECTED = {
+    "OIII_4363", "OIII_5007", "OIII_4959", "HBETA",
+    # UV doublet members used for ionic abundances
+    "NIII_1749", "NIII_1752",
+    "NIV_1483", "NIV_1486",
+    "NV_1", "NV_2",
+    "CIV_1", "CIV_2",
+    "CIII]_1907", "CIII]",
+}
 
 
 def _extract_fluxes(result: Any) -> tuple[dict[str, float], dict[str, float], bool]:
@@ -404,6 +416,8 @@ def _compute_logU(
     fluxes: dict[str, float],
     Z_Zsun: float,
     ne_high: float,
+    errors: dict[str, float] | None = None,
+    snr_logU: float = 3.0,
 ) -> tuple[float | None, str | None]:
     """Compute ionisation parameter (Berg+2025 step 5).
 
@@ -415,6 +429,11 @@ def _compute_logU(
         Gas-phase metallicity in solar units.
     ne_high : float
         High-ionisation zone electron density in cm^-3.
+    errors : dict, optional
+        Flux errors.  When provided, each member of the NIV] and NIII]
+        doublets must have SNR >= *snr_logU* for N43 to be used.
+    snr_logU : float
+        Minimum SNR per doublet member for N43 (default 3.0).
 
     Returns
     -------
@@ -425,28 +444,33 @@ def _compute_logU(
     """
     from .martinez25_icf import LOG_OH_SOLAR, log_U_from_N43, log_U_from_O32
 
+    def _member_ok(name: str) -> bool:
+        """Check that a line is present, positive, and above the SNR cut."""
+        f = fluxes.get(name, 0.0)
+        if f <= 0:
+            return False
+        if errors is not None:
+            e = errors.get(name, 0.0)
+            if e > 0 and f / e < snr_logU:
+                return False
+        return True
+
     # N43 = NIV]1486 / NIII]1750 — density-insensitive, recommended.
-    # Both members of each doublet are required to avoid biased ratios
-    # from partial doublet fluxes (e.g. one member excluded by SNR filter).
+    # Both members of each doublet must be present AND above the SNR cut
+    # to avoid biased ratios from noisy partial-doublet fluxes.
     niv_flux = 0.0
-    niv_complete = (
-        "NIV_1483" in fluxes and fluxes.get("NIV_1483", 0) > 0
-        and "NIV_1486" in fluxes and fluxes.get("NIV_1486", 0) > 0
-    )
-    if niv_complete:
+    niv_ok = _member_ok("NIV_1483") and _member_ok("NIV_1486")
+    if niv_ok:
         niv_flux = fluxes["NIV_1483"] + fluxes["NIV_1486"]
-    elif ("NIV_1483" in fluxes or "NIV_1486" in fluxes):
-        logger.info("N43: only one NIV] member present; skipping N43 diagnostic.")
+    elif fluxes.get("NIV_1483", 0) > 0 or fluxes.get("NIV_1486", 0) > 0:
+        logger.info("N43: NIV] doublet incomplete or below SNR; skipping.")
 
     niii_flux = 0.0
-    niii_complete = (
-        "NIII_1749" in fluxes and fluxes.get("NIII_1749", 0) > 0
-        and "NIII_1752" in fluxes and fluxes.get("NIII_1752", 0) > 0
-    )
-    if niii_complete:
+    niii_ok = _member_ok("NIII_1749") and _member_ok("NIII_1752")
+    if niii_ok:
         niii_flux = fluxes["NIII_1749"] + fluxes["NIII_1752"]
-    elif ("NIII_1749" in fluxes or "NIII_1752" in fluxes):
-        logger.info("N43: only one NIII] member present; skipping N43 diagnostic.")
+    elif fluxes.get("NIII_1749", 0) > 0 or fluxes.get("NIII_1752", 0) > 0:
+        logger.info("N43: NIII] doublet incomplete or below SNR; skipping.")
 
     if niv_flux > 0 and niii_flux > 0:
         N43 = niv_flux / niii_flux
@@ -549,14 +573,13 @@ def _run_direct(
     logU = None
     logU_diag = None
     if Z_Zsun is not None:
-        logU, logU_diag = _compute_logU(fluxes, Z_Zsun, ne_high)
+        logU, logU_diag = _compute_logU(
+            fluxes, Z_Zsun, ne_high, errors=errors,
+        )
 
     # --- Step 6: Total abundances with ICFs ---
-    # Exclude single-member UV ions from ICF to prevent biased N/O, C/O.
-    _exclude = _ions_from_incomplete_doublets(fluxes)
-    ionic_for_icf = {k: v for k, v in ionic.items() if k not in _exclude}
     totals = compute_total_abundances(
-        ionic_for_icf, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
+        ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
     )
 
     NO = totals.get("N/O")
@@ -618,9 +641,8 @@ def _run_direct(
                 if logU_mc_val is not None:
                     logU_mc = float(np.clip(logU_mc_val, *_LOG_U_VALID))
 
-            ionic_mc_icf = {k: v for k, v in ionic_mc.items() if k not in _exclude}
             totals_mc = compute_total_abundances(
-                ionic_mc_icf, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
+                ionic_mc, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
             )
 
             oh_mc = totals_mc.get("O/H", np.nan)
@@ -767,13 +789,12 @@ def _run_direct_mcmc(
     logU_pt = None
     logU_diag = None
     if Z_Zsun_pt is not None:
-        logU_pt, logU_diag = _compute_logU(med_fluxes, Z_Zsun_pt, ne_high)
+        logU_pt, logU_diag = _compute_logU(
+            med_fluxes, Z_Zsun_pt, ne_high, errors=med_errors,
+        )
 
-    # Exclude single-member UV ions from ICF (same as _run_direct).
-    _exclude_mcmc = _ions_from_incomplete_doublets(med_fluxes)
-    ionic_pt_icf = {k: v for k, v in ionic_pt.items() if k not in _exclude_mcmc}
     totals_pt = compute_total_abundances(
-        ionic_pt_icf, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
+        ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
     ) if ionic_pt else {}
     icf_method = totals_pt.get("icf_method")
     NO_icf_name = totals_pt.get("NO_icf_name")
@@ -804,9 +825,8 @@ def _run_direct_mcmc(
                 if logU_val is not None:
                     logU_i = float(np.clip(logU_val, *_LOG_U_VALID))
 
-            ionic_i_icf = {k: v for k, v in ionic_i.items() if k not in _exclude_mcmc}
             totals_i = compute_total_abundances(
-                ionic_i_icf, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,
+                ionic_i, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,
             )
 
             oh = totals_i.get("O/H", np.nan)
