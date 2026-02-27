@@ -430,10 +430,11 @@ def _compute_logU(
     ne_high : float
         High-ionisation zone electron density in cm^-3.
     errors : dict, optional
-        Flux errors.  When provided, each member of the NIV] and NIII]
-        doublets must have SNR >= *snr_logU* for N43 to be used.
+        Flux errors.  When provided, the **total doublet** SNR
+        (summed flux / quadrature-summed error) must be >= *snr_logU*
+        for each doublet in N43 to be used.
     snr_logU : float
-        Minimum SNR per doublet member for N43 (default 3.0).
+        Minimum total-doublet SNR for N43 (default 3.0).
 
     Returns
     -------
@@ -444,33 +445,34 @@ def _compute_logU(
     """
     from .martinez25_icf import LOG_OH_SOLAR, log_U_from_N43, log_U_from_O32
 
-    def _member_ok(name: str) -> bool:
-        """Check that a line is present, positive, and above the SNR cut."""
-        f = fluxes.get(name, 0.0)
-        if f <= 0:
-            return False
+    def _doublet_ok(name_a: str, name_b: str) -> tuple[bool, float]:
+        """Check both members present and total doublet SNR above cut.
+
+        Returns ``(ok, total_flux)``.
+        """
+        fa = fluxes.get(name_a, 0.0)
+        fb = fluxes.get(name_b, 0.0)
+        # Both members must be detected (positive flux).
+        if fa <= 0 or fb <= 0:
+            return False, 0.0
+        total = fa + fb
         if errors is not None:
-            e = errors.get(name, 0.0)
-            if e > 0 and f / e < snr_logU:
-                return False
-        return True
+            ea = errors.get(name_a, 0.0)
+            eb = errors.get(name_b, 0.0)
+            total_err = np.sqrt(ea**2 + eb**2)
+            if total_err > 0 and total / total_err < snr_logU:
+                return False, 0.0
+        return True, total
 
     # N43 = NIV]1486 / NIII]1750 — density-insensitive, recommended.
-    # Both members of each doublet must be present AND above the SNR cut
-    # to avoid biased ratios from noisy partial-doublet fluxes.
-    niv_flux = 0.0
-    niv_ok = _member_ok("NIV_1483") and _member_ok("NIV_1486")
-    if niv_ok:
-        niv_flux = fluxes["NIV_1483"] + fluxes["NIV_1486"]
-    elif fluxes.get("NIV_1483", 0) > 0 or fluxes.get("NIV_1486", 0) > 0:
-        logger.info("N43: NIV] doublet incomplete or below SNR; skipping.")
+    # Total doublet SNR must pass the cut for both NIV] and NIII].
+    niv_ok, niv_flux = _doublet_ok("NIV_1483", "NIV_1486")
+    if not niv_ok and (fluxes.get("NIV_1483", 0) > 0 or fluxes.get("NIV_1486", 0) > 0):
+        logger.info("N43: NIV] doublet below total SNR threshold (%.1f); skipping.", snr_logU)
 
-    niii_flux = 0.0
-    niii_ok = _member_ok("NIII_1749") and _member_ok("NIII_1752")
-    if niii_ok:
-        niii_flux = fluxes["NIII_1749"] + fluxes["NIII_1752"]
-    elif fluxes.get("NIII_1749", 0) > 0 or fluxes.get("NIII_1752", 0) > 0:
-        logger.info("N43: NIII] doublet incomplete or below SNR; skipping.")
+    niii_ok, niii_flux = _doublet_ok("NIII_1749", "NIII_1752")
+    if not niii_ok and (fluxes.get("NIII_1749", 0) > 0 or fluxes.get("NIII_1752", 0) > 0):
+        logger.info("N43: NIII] doublet below total SNR threshold (%.1f); skipping.", snr_logU)
 
     if niv_flux > 0 and niii_flux > 0:
         N43 = niv_flux / niii_flux
@@ -504,6 +506,7 @@ def _run_direct(
     progress: bool = True,
     ne_high_max: float = 1e5,
     snr_ne: float = 3.0,
+    snr_logU: float = 1.5,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -574,7 +577,7 @@ def _run_direct(
     logU_diag = None
     if Z_Zsun is not None:
         logU, logU_diag = _compute_logU(
-            fluxes, Z_Zsun, ne_high, errors=errors,
+            fluxes, Z_Zsun, ne_high, errors=errors, snr_logU=snr_logU,
         )
 
     # --- Step 6: Total abundances with ICFs ---
@@ -642,6 +645,7 @@ def _run_direct(
             if z_zsun_mc is not None and logU_diag is not None:
                 logU_mc_val, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_high, errors=errors,
+                    snr_logU=snr_logU,
                 )
                 if logU_mc_val is not None:
                     logU_mc = float(np.clip(logU_mc_val, *_LOG_U_VALID))
@@ -713,6 +717,7 @@ def _run_direct_mcmc(
     seed: int = 42,
     ne_high_max: float = 1e5,
     snr_ne: float = 3.0,
+    snr_logU: float = 1.5,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -796,6 +801,7 @@ def _run_direct_mcmc(
     if Z_Zsun_pt is not None:
         logU_pt, logU_diag = _compute_logU(
             med_fluxes, Z_Zsun_pt, ne_high, errors=med_errors,
+            snr_logU=snr_logU,
         )
 
     totals_pt = compute_total_abundances(
@@ -830,6 +836,7 @@ def _run_direct_mcmc(
             if z_zsun_i is not None and logU_diag is not None:
                 logU_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_high, errors=med_errors,
+                    snr_logU=snr_logU,
                 )
                 if logU_val is not None:
                     logU_i = float(np.clip(logU_val, *_LOG_U_VALID))
@@ -904,6 +911,7 @@ def compute_abundances(
     snr_line: float = 2.0,
     ne_high_max: float = 1e5,
     snr_ne: float = 3.0,
+    snr_logU: float = 1.5,
     n_mc: int = 1000,
     Te_relation: str = "desi",
     Rv: float = 3.15,
@@ -958,6 +966,11 @@ def compute_abundances(
         (default 3.0).  Doublets where either member has
         ``flux / error < snr_ne`` are skipped, and the default
         density (300 cm^-3) is used.  Set to 0 to disable.
+    snr_logU : float
+        Minimum **total-doublet** SNR for NIV] and NIII] when
+        computing log(U) from N43 (default 1.5).  The summed doublet
+        flux is divided by the quadrature-summed error; if this is
+        below the threshold, N43 is skipped and O32 is used instead.
     n_mc : int
         Monte Carlo iterations for error propagation (default 1000).
     Te_relation : str
@@ -1128,13 +1141,13 @@ def compute_abundances(
             direct_out = _run_direct_mcmc(
                 posteriors, Te_relation, n_posterior=n_posterior,
                 progress=progress, ne_high_max=ne_high_max,
-                snr_ne=snr_ne,
+                snr_ne=snr_ne, snr_logU=snr_logU,
             )
         else:
             direct_out = _run_direct(
                 fluxes, errors, Te_relation, n_mc,
                 progress=progress, ne_high_max=ne_high_max,
-                snr_ne=snr_ne,
+                snr_ne=snr_ne, snr_logU=snr_logU,
             )
 
         return AbundanceResult(
