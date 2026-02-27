@@ -600,7 +600,7 @@ def compute_total_abundances(
         # N/O
         if use_martinez:
             from .martinez25_icf import compute_NO_martinez25
-            ne_icf = ne if ne is not None else 100.0
+            ne_icf = ne if ne is not None else NE_DEFAULT
             NO_val, NO_icf_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)
             if NO_val is not None:
                 totals["N/O"] = NO_val
