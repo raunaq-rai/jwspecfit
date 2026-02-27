@@ -494,48 +494,66 @@ def compute_ionic_abundances(
         ionic["Ar++/H+"] = _ionic_abundance("Ar", 3, fluxes["ArIII_7136"], Hb, Te_mid, ne_lo, 7136)
 
     # --- UV ionic abundances (all use T_high zone) ---
+    # For doublets: if both members are present, sum fluxes and use total
+    # emissivity.  If only one member is present, use that member's flux
+    # with its single-line emissivity to avoid underestimating the
+    # abundance (the other member may have been excluded by SNR filtering).
 
     # C2+/H+ from CIII] 1907 + 1909 — T_high zone
-    ciii_flux = 0.0
-    for name in ("CIII]_1907", "CIII]"):
-        if name in fluxes and fluxes[name] > 0:
-            ciii_flux += fluxes[name]
-    if ciii_flux > 0:
-        ionic["C++/H+"] = _ionic_abundance("C", 3, ciii_flux, Hb, Te_high, ne_hi, [1907, 1909])
+    _c1907 = fluxes.get("CIII]_1907", 0.0)
+    _c1909 = fluxes.get("CIII]", 0.0)
+    if _c1907 > 0 and _c1909 > 0:
+        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1907 + _c1909, Hb, Te_high, ne_hi, [1907, 1909])
+    elif _c1907 > 0:
+        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1907, Hb, Te_high, ne_hi, 1907)
+    elif _c1909 > 0:
+        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1909, Hb, Te_high, ne_hi, 1909)
 
     # C3+/H+ from CIV 1548 + 1551 — T_high zone
-    civ_flux = 0.0
-    for name in ("CIV_1", "CIV_2"):
-        if name in fluxes and fluxes[name] > 0:
-            civ_flux += fluxes[name]
-    if civ_flux > 0:
-        ionic["C+++/H+"] = _ionic_abundance("C", 4, civ_flux, Hb, Te_high, ne_hi, [1548, 1551])
+    _civ1 = fluxes.get("CIV_1", 0.0)
+    _civ2 = fluxes.get("CIV_2", 0.0)
+    if _civ1 > 0 and _civ2 > 0:
+        ionic["C+++/H+"] = _ionic_abundance("C", 4, _civ1 + _civ2, Hb, Te_high, ne_hi, [1548, 1551])
+    elif _civ1 > 0:
+        ionic["C+++/H+"] = _ionic_abundance("C", 4, _civ1, Hb, Te_high, ne_hi, 1548)
+    elif _civ2 > 0:
+        ionic["C+++/H+"] = _ionic_abundance("C", 4, _civ2, Hb, Te_high, ne_hi, 1551)
 
     # N2+/H+ from NIII] 1749 + 1752 — T_high zone
-    niii_flux = 0.0
-    for name in ("NIII_1749", "NIII_1752"):
-        if name in fluxes and fluxes[name] > 0:
-            niii_flux += fluxes[name]
-    if niii_flux > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, niii_flux, Hb, Te_high, ne_hi, [1749, 1752])
+    _n1749 = fluxes.get("NIII_1749", 0.0)
+    _n1752 = fluxes.get("NIII_1752", 0.0)
+    if _n1749 > 0 and _n1752 > 0:
+        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749 + _n1752, Hb, Te_high, ne_hi, [1749, 1752])
+    elif _n1749 > 0:
+        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749, Hb, Te_high, ne_hi, 1749)
+    elif _n1752 > 0:
+        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1752, Hb, Te_high, ne_hi, 1752)
 
     # N3+/H+ from NIV] 1483 + 1486 — T_high zone
-    niv_flux = 0.0
-    for name in ("NIV_1483", "NIV_1486"):
-        if name in fluxes and fluxes[name] > 0:
-            niv_flux += fluxes[name]
-    if niv_flux > 0:
-        ionic["N+++/H+"] = _ionic_abundance("N", 4, niv_flux, Hb, Te_high, ne_hi, [1483, 1487])
+    _n1483 = fluxes.get("NIV_1483", 0.0)
+    _n1486 = fluxes.get("NIV_1486", 0.0)
+    if _n1483 > 0 and _n1486 > 0:
+        ionic["N+++/H+"] = _ionic_abundance("N", 4, _n1483 + _n1486, Hb, Te_high, ne_hi, [1483, 1487])
+    elif _n1483 > 0:
+        ionic["N+++/H+"] = _ionic_abundance("N", 4, _n1483, Hb, Te_high, ne_hi, 1483)
+    elif _n1486 > 0:
+        ionic["N+++/H+"] = _ionic_abundance("N", 4, _n1486, Hb, Te_high, ne_hi, 1487)
 
     # N4+/H+ from NV 1239 + 1243 — T_high zone (manual emissivity)
-    nv_flux = 0.0
-    for name in ("NV_1", "NV_2"):
-        if name in fluxes and fluxes[name] > 0:
-            nv_flux += fluxes[name]
-    if nv_flux > 0:
+    _nv1 = fluxes.get("NV_1", 0.0)
+    _nv2 = fluxes.get("NV_2", 0.0)
+    if _nv1 > 0 or _nv2 > 0:
         from .forward import _nv_emissivity, hbeta_emissivity_aller84
-        eps_nv = _nv_emissivity(Te_high, ne_hi, 1239) + _nv_emissivity(Te_high, ne_hi, 1243)
         eps_Hb = _hbeta_emissivity(Te_high, ne_hi)
+        if _nv1 > 0 and _nv2 > 0:
+            nv_flux = _nv1 + _nv2
+            eps_nv = _nv_emissivity(Te_high, ne_hi, 1239) + _nv_emissivity(Te_high, ne_hi, 1243)
+        elif _nv1 > 0:
+            nv_flux = _nv1
+            eps_nv = _nv_emissivity(Te_high, ne_hi, 1239)
+        else:
+            nv_flux = _nv2
+            eps_nv = _nv_emissivity(Te_high, ne_hi, 1243)
         if eps_nv > 0 and eps_Hb > 0:
             ionic["N4+/H+"] = (nv_flux / Hb) * (eps_Hb / eps_nv)
 

@@ -940,3 +940,124 @@ class TestNeSNRGating:
         errors = {"SII_6718": 0.05}
 
         assert not _doublet_snr_ok("SII_6718", "SII_6732", fluxes, errors, snr_ne=3.0)
+
+
+# -----------------------------------------------------------------------
+# Doublet completeness tests
+# -----------------------------------------------------------------------
+
+class TestDoubletCompleteness:
+    """Tests for partial-doublet handling in logU and ionic abundances."""
+
+    @pytest.fixture(autouse=True)
+    def _check_pyneb(self):
+        """Skip all tests in this class if PyNEB is not installed."""
+        pytest.importorskip("pyneb")
+
+    def test_logU_skips_N43_when_NIV_incomplete(self):
+        """_compute_logU should skip N43 when only one NIV member is present."""
+        from jwspecabund._core import _compute_logU
+
+        fluxes = {
+            "NIV_1483": 1.0e-17,
+            # NIV_1486 missing (excluded by SNR filter)
+            "NIII_1749": 5.0e-18,
+            "NIII_1752": 3.0e-18,
+            "OIII_5007": 3.0e-16,
+            "OII_doublet": 8.0e-17,
+        }
+
+        logU, diag = _compute_logU(fluxes, Z_Zsun=0.1, ne_high=300.0)
+
+        # Should NOT use N43 (incomplete NIV doublet); should fall back to O32.
+        assert diag != "N43"
+        if logU is not None:
+            assert diag == "O32"
+
+    def test_logU_skips_N43_when_NIII_incomplete(self):
+        """_compute_logU should skip N43 when only one NIII member is present."""
+        from jwspecabund._core import _compute_logU
+
+        fluxes = {
+            "NIV_1483": 1.0e-17,
+            "NIV_1486": 5.0e-18,
+            "NIII_1749": 5.0e-18,
+            # NIII_1752 missing
+            "OIII_5007": 3.0e-16,
+            "OII_doublet": 8.0e-17,
+        }
+
+        logU, diag = _compute_logU(fluxes, Z_Zsun=0.1, ne_high=300.0)
+
+        assert diag != "N43"
+
+    def test_logU_uses_N43_when_both_complete(self):
+        """_compute_logU should use N43 when both doublets are complete."""
+        from jwspecabund._core import _compute_logU
+
+        fluxes = {
+            "NIV_1483": 1.0e-17,
+            "NIV_1486": 5.0e-18,
+            "NIII_1749": 5.0e-18,
+            "NIII_1752": 3.0e-18,
+        }
+
+        logU, diag = _compute_logU(fluxes, Z_Zsun=0.1, ne_high=300.0)
+
+        assert diag == "N43"
+        assert logU is not None
+
+    def test_ionic_single_NIII_member(self):
+        """Single NIII member should still give N++/H+ using single-line emissivity."""
+        from jwspecabund.direct import compute_ionic_abundances
+
+        fluxes_both = {
+            "NIII_1749": 5.0e-18,
+            "NIII_1752": 3.0e-18,
+            "HBETA": 5.0e-17,
+        }
+        fluxes_one = {
+            "NIII_1749": 5.0e-18,
+            # NIII_1752 missing
+            "HBETA": 5.0e-17,
+        }
+
+        ionic_both = compute_ionic_abundances(fluxes_both, Te_high=13000.0, Te_low=11000.0, ne=300.0)
+        ionic_one = compute_ionic_abundances(fluxes_one, Te_high=13000.0, Te_low=11000.0, ne=300.0)
+
+        # Both should produce N++/H+.
+        assert "N++/H+" in ionic_both
+        assert "N++/H+" in ionic_one
+        # Single-member result should be larger (uses single-line emissivity,
+        # which is smaller than total, so abundance = flux/Hb * eps_Hb/eps_line is larger).
+        assert ionic_one["N++/H+"] > ionic_both["N++/H+"]
+
+    def test_ionic_complete_doublet_unchanged(self):
+        """Complete doublets should give the same result as before."""
+        from jwspecabund.direct import compute_ionic_abundances
+
+        fluxes = {
+            "CIII]_1907": 1.5e-17,
+            "CIII]": 1.2e-17,
+            "HBETA": 5.0e-17,
+        }
+
+        ionic = compute_ionic_abundances(fluxes, Te_high=13000.0, Te_low=11000.0, ne=300.0)
+
+        assert "C++/H+" in ionic
+        assert ionic["C++/H+"] > 0
+
+    def test_ionic_no_members_skips(self):
+        """No doublet members → no ionic abundance computed."""
+        from jwspecabund.direct import compute_ionic_abundances
+
+        fluxes = {
+            "HBETA": 5.0e-17,
+            "OIII_5007": 3.0e-16,
+        }
+
+        ionic = compute_ionic_abundances(fluxes, Te_high=13000.0, Te_low=11000.0, ne=300.0)
+
+        assert "N++/H+" not in ionic
+        assert "N+++/H+" not in ionic
+        assert "C++/H+" not in ionic

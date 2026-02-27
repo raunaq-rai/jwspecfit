@@ -380,14 +380,27 @@ def _compute_logU(
     from .martinez25_icf import LOG_OH_SOLAR, log_U_from_N43, log_U_from_O32
 
     # N43 = NIV]1486 / NIII]1750 — density-insensitive, recommended.
+    # Both members of each doublet are required to avoid biased ratios
+    # from partial doublet fluxes (e.g. one member excluded by SNR filter).
     niv_flux = 0.0
-    for name in ("NIV_1483", "NIV_1486"):
-        if name in fluxes and fluxes[name] > 0:
-            niv_flux += fluxes[name]
+    niv_complete = (
+        "NIV_1483" in fluxes and fluxes.get("NIV_1483", 0) > 0
+        and "NIV_1486" in fluxes and fluxes.get("NIV_1486", 0) > 0
+    )
+    if niv_complete:
+        niv_flux = fluxes["NIV_1483"] + fluxes["NIV_1486"]
+    elif ("NIV_1483" in fluxes or "NIV_1486" in fluxes):
+        logger.info("N43: only one NIV] member present; skipping N43 diagnostic.")
+
     niii_flux = 0.0
-    for name in ("NIII_1749", "NIII_1752"):
-        if name in fluxes and fluxes[name] > 0:
-            niii_flux += fluxes[name]
+    niii_complete = (
+        "NIII_1749" in fluxes and fluxes.get("NIII_1749", 0) > 0
+        and "NIII_1752" in fluxes and fluxes.get("NIII_1752", 0) > 0
+    )
+    if niii_complete:
+        niii_flux = fluxes["NIII_1749"] + fluxes["NIII_1752"]
+    elif ("NIII_1749" in fluxes or "NIII_1752" in fluxes):
+        logger.info("N43: only one NIII] member present; skipping N43 diagnostic.")
 
     if niv_flux > 0 and niii_flux > 0:
         N43 = niv_flux / niii_flux
