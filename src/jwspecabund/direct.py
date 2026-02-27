@@ -635,7 +635,12 @@ def compute_total_abundances(
                 # Tier 2/3: UV only — Yanagisawa+25 / Cameron+23
                 totals["N/O"] = (N_pp + N_ppp + N_pppp) / O_pp
                 totals["icf_method"] = "direct_sum"
-                totals["NO_icf_name"] = "Npp_Nppp_Opp" if N_ppp > 0 else "Npp_Opp"
+                if N_pp > 0 and N_ppp > 0:
+                    totals["NO_icf_name"] = "Npp_Nppp_Opp"
+                elif N_ppp > 0:
+                    totals["NO_icf_name"] = "Nppp_Opp"
+                else:
+                    totals["NO_icf_name"] = "Npp_Opp"
             elif N_plus > 0 and O_plus > 0:
                 # Tier 4: optical fallback — Izotov+06
                 icf_n = icf_nitrogen(O_plus, OH)
