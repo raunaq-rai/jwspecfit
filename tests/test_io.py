@@ -126,3 +126,222 @@ class TestExportLinesTxt:
         assert "SNR_peak" in lines[2]
         # Check units header
         assert "erg/s/cm2" in lines[1]
+
+
+# -----------------------------------------------------------------------
+# MCMC result save/load tests
+# -----------------------------------------------------------------------
+
+def _make_synthetic_mcmc_result():
+    """Build a synthetic MCMCResult for testing without running MCMC."""
+    from jwspecfit.constraints import ConstraintSet
+    from jwspecmcmc.result import MCMCLineResult, MCMCResult
+
+    rng = np.random.default_rng(42)
+    n_pix = 200
+    n_samples = 500
+    n_lines = 2
+    line_names = ["OIII_5007", "HBETA"]
+
+    spec = Spectrum(
+        wave_um=np.linspace(0.8, 1.2, n_pix),
+        flux_ujy=rng.normal(0.1, 0.01, n_pix),
+        err_ujy=np.full(n_pix, 0.01),
+        grating="PRISM",
+        z=6.0,
+    )
+
+    lines = {}
+    for name in line_names:
+        flux_post = rng.normal(1e-17, 1e-18, n_samples)
+        lines[name] = MCMCLineResult(
+            name=name,
+            rest_wave_A=5007.0 if "OIII" in name else 4862.68,
+            amplitude=float(np.median(flux_post)),
+            amplitude_err=(1e-18, 1.2e-18),
+            centroid_A=5007.0 * 7.0 if "OIII" in name else 4862.68 * 7.0,
+            centroid_err=(0.5, 0.6),
+            sigma_A=10.0,
+            sigma_err=(0.3, 0.4),
+            flux=float(np.median(flux_post)),
+            flux_err=(1e-18, 1.2e-18),
+            flux_posterior=flux_post,
+            ew_A=50.0,
+            snr=10.0,
+        )
+
+    flat_chains = rng.normal(0, 1, (n_samples, 3 * n_lines))
+    flat_chains_free = rng.normal(0, 1, (n_samples, 3 * n_lines))
+    flat_log_prob = rng.normal(-100, 10, n_samples)
+    chains = rng.normal(0, 1, (32, 100, 3 * n_lines))
+    params = np.median(flat_chains, axis=0)
+
+    constraints = ConstraintSet(
+        line_names=line_names,
+        tie_nii=True,
+        tie_balmer_to_oiii=True,
+        tie_uv_doublets=False,
+    )
+
+    return MCMCResult(
+        lines=lines,
+        flat_chains=flat_chains,
+        flat_chains_free=flat_chains_free,
+        flat_log_prob=flat_log_prob,
+        chains=chains,
+        params=params,
+        model_flux=rng.normal(0, 0.01, n_pix),
+        continuum=np.full(n_pix, 0.1),
+        spectrum=spec,
+        line_names=line_names,
+        constraints=constraints,
+        convergence={"rhat_max": 1.01, "ess_min": 450},
+        sampler_name="emcee",
+        sampler_meta={"n_walkers": 32, "n_steps": 100},
+    )
+
+
+class TestSaveLoadMCMCResult:
+    """Tests for jwspecmcmc save/load round-trip."""
+
+    def test_mcmc_round_trip(self, tmp_path):
+        """MCMCResult round-trips through save/load."""
+        from jwspecmcmc import save_mcmc_result, load_mcmc_result
+
+        original = _make_synthetic_mcmc_result()
+        outfile = tmp_path / "mcmc.npz"
+        save_mcmc_result(original, outfile)
+        loaded = load_mcmc_result(outfile)
+
+        assert isinstance(loaded, type(original))
+        assert loaded.sampler_name == original.sampler_name
+        np.testing.assert_allclose(
+            loaded.flat_chains, original.flat_chains, rtol=1e-10
+        )
+        np.testing.assert_allclose(
+            loaded.flat_log_prob, original.flat_log_prob, rtol=1e-10
+        )
+        np.testing.assert_allclose(loaded.params, original.params, rtol=1e-10)
+        assert set(loaded.lines.keys()) == set(original.lines.keys())
+        for name in original.lines:
+            np.testing.assert_allclose(
+                loaded.lines[name].flux, original.lines[name].flux
+            )
+            np.testing.assert_allclose(
+                loaded.lines[name].flux_err, original.lines[name].flux_err
+            )
+
+    def test_mcmc_flux_posterior_preserved(self, tmp_path):
+        """Per-line flux posteriors survive round-trip."""
+        from jwspecmcmc import save_mcmc_result, load_mcmc_result
+
+        original = _make_synthetic_mcmc_result()
+        outfile = tmp_path / "mcmc.npz"
+        save_mcmc_result(original, outfile)
+        loaded = load_mcmc_result(outfile)
+
+        for name in original.lines:
+            np.testing.assert_allclose(
+                loaded.lines[name].flux_posterior,
+                original.lines[name].flux_posterior,
+                rtol=1e-10,
+            )
+
+    def test_mcmc_spectrum_preserved(self, tmp_path):
+        """Spectrum data survives round-trip."""
+        from jwspecmcmc import save_mcmc_result, load_mcmc_result
+
+        original = _make_synthetic_mcmc_result()
+        outfile = tmp_path / "mcmc.npz"
+        save_mcmc_result(original, outfile)
+        loaded = load_mcmc_result(outfile)
+
+        np.testing.assert_allclose(
+            loaded.spectrum.wave_um, original.spectrum.wave_um
+        )
+        assert loaded.spectrum.grating == original.spectrum.grating
+        assert loaded.spectrum.z == original.spectrum.z
+
+    def test_mcmc_constraints_preserved(self, tmp_path):
+        """ConstraintSet fields survive round-trip."""
+        from jwspecmcmc import save_mcmc_result, load_mcmc_result
+
+        original = _make_synthetic_mcmc_result()
+        outfile = tmp_path / "mcmc.npz"
+        save_mcmc_result(original, outfile)
+        loaded = load_mcmc_result(outfile)
+
+        assert loaded.constraints is not None
+        assert loaded.constraints.tie_nii == original.constraints.tie_nii
+        assert loaded.constraints.tie_balmer_to_oiii == original.constraints.tie_balmer_to_oiii
+        assert loaded.constraints.line_names == original.constraints.line_names
+
+    def test_mcmc_chains_preserved(self, tmp_path):
+        """Walker chains survive round-trip."""
+        from jwspecmcmc import save_mcmc_result, load_mcmc_result
+
+        original = _make_synthetic_mcmc_result()
+        outfile = tmp_path / "mcmc.npz"
+        save_mcmc_result(original, outfile)
+        loaded = load_mcmc_result(outfile)
+
+        assert loaded.chains is not None
+        np.testing.assert_allclose(loaded.chains, original.chains, rtol=1e-10)
+
+    def test_mcmc_no_chains(self, tmp_path):
+        """MCMCResult with chains=None (nautilus) round-trips correctly."""
+        from jwspecmcmc import save_mcmc_result, load_mcmc_result
+
+        original = _make_synthetic_mcmc_result()
+        # Simulate nautilus (no walker chains).
+        original.chains = None
+        original.sampler_name = "nautilus"
+
+        outfile = tmp_path / "mcmc_nautilus.npz"
+        save_mcmc_result(original, outfile)
+        loaded = load_mcmc_result(outfile)
+
+        assert loaded.chains is None
+        assert loaded.sampler_name == "nautilus"
+
+    def test_mcmc_broad_round_trip(self, tmp_path):
+        """MCMCBroadFitResult round-trips with BIC metadata."""
+        from jwspecmcmc import save_mcmc_result, load_mcmc_result
+        from jwspecmcmc.result import MCMCBroadFitResult
+
+        mcmc = _make_synthetic_mcmc_result()
+        original = MCMCBroadFitResult(
+            mcmc_result=mcmc,
+            selected_model="broad1",
+            bic_narrow=1200.0,
+            bic_broad1=1180.0,
+            bic_broad2=1195.0,
+            bic_both=1190.0,
+        )
+
+        outfile = tmp_path / "mcmc_broad.npz"
+        save_mcmc_result(original, outfile)
+        loaded = load_mcmc_result(outfile)
+
+        assert isinstance(loaded, MCMCBroadFitResult)
+        assert loaded.selected_model == "broad1"
+        np.testing.assert_allclose(loaded.bic_narrow, 1200.0)
+        np.testing.assert_allclose(loaded.bic_broad1, 1180.0)
+        np.testing.assert_allclose(loaded.bic_broad2, 1195.0)
+        np.testing.assert_allclose(loaded.bic_both, 1190.0)
+        # Delegated properties still work.
+        assert set(loaded.lines.keys()) == set(mcmc.lines.keys())
+        np.testing.assert_allclose(loaded.flat_chains, mcmc.flat_chains, rtol=1e-10)
+
+    def test_mcmc_convergence_preserved(self, tmp_path):
+        """Convergence diagnostics survive round-trip."""
+        from jwspecmcmc import save_mcmc_result, load_mcmc_result
+
+        original = _make_synthetic_mcmc_result()
+        outfile = tmp_path / "mcmc.npz"
+        save_mcmc_result(original, outfile)
+        loaded = load_mcmc_result(outfile)
+
+        assert loaded.convergence["rhat_max"] == pytest.approx(1.01)
+        assert loaded.convergence["ess_min"] == pytest.approx(450)
+        assert loaded.sampler_meta["n_walkers"] == 32
