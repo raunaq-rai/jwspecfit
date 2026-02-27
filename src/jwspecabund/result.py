@@ -58,6 +58,8 @@ class AbundanceResult:
         log(Ne/O) if [NeIII] available.
     ArO : float or None
         log(Ar/O) if [ArIII] available.
+    excluded_lines : list of str or None
+        Line names excluded by the per-line SNR filter.
     """
 
     method: str
@@ -85,6 +87,7 @@ class AbundanceResult:
     ne_high: float | None = None
     icf_method: str | None = None
     NO_icf_name: str | None = None
+    excluded_lines: list[str] | None = None
     # Internal: full forward model result dict (samples, param_names, etc.)
     _forward_result: dict[str, Any] | None = field(default=None, repr=False)
 
@@ -129,4 +132,6 @@ class AbundanceResult:
             lines.append(f"  Ratios used = {self.ratios_used}")
         if self.chi2 is not None:
             lines.append(f"  chi2        = {self.chi2:.2f}")
+        if self.excluded_lines:
+            lines.append(f"  Excluded    = {self.excluded_lines}")
         return "\n".join(lines)

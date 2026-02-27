@@ -30,6 +30,10 @@ _LINE_WAVES: dict[str, float] = {
 # Balmer lines whose broad components should be summed with the narrow.
 _BALMER_LINES = {"Ha", "HBETA", "HGAMMA", "HDELTA"}
 
+# Lines that must never be SNR-filtered (required for Te computation
+# and flux normalisation).
+_SNR_PROTECTED = {"OIII_4363", "OIII_5007", "OIII_4959", "HBETA"}
+
 
 def _extract_fluxes(result: Any) -> tuple[dict[str, float], dict[str, float], bool]:
     """Extract line fluxes and errors from any result type.
@@ -124,6 +128,57 @@ def _extract_posteriors(result: Any) -> dict[str, np.ndarray]:
     return posteriors
 
 
+def _filter_low_snr(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    snr_thresh: float,
+) -> tuple[dict[str, float], dict[str, float], list[str]]:
+    """Remove emission lines below an SNR threshold.
+
+    Lines in ``_SNR_PROTECTED`` are never removed (they are gated
+    elsewhere by ``snr_auroral`` or are required for normalisation).
+
+    Parameters
+    ----------
+    fluxes : dict
+        ``{line_name: flux}`` (dust-corrected).
+    errors : dict
+        ``{line_name: flux_err}`` (dust-corrected).
+    snr_thresh : float
+        Minimum signal-to-noise ratio.  Lines with
+        ``flux / error < snr_thresh`` are removed.
+
+    Returns
+    -------
+    tuple
+        ``(filtered_fluxes, filtered_errors, excluded_lines)`` where
+        *excluded_lines* lists the names of removed lines.
+    """
+    filtered_fluxes: dict[str, float] = {}
+    filtered_errors: dict[str, float] = {}
+    excluded: list[str] = []
+
+    for name in fluxes:
+        if name in _SNR_PROTECTED:
+            filtered_fluxes[name] = fluxes[name]
+            filtered_errors[name] = errors.get(name, 0.0)
+            continue
+
+        err = errors.get(name, 0.0)
+        snr = fluxes[name] / err if err > 0 else np.inf
+        if snr >= snr_thresh:
+            filtered_fluxes[name] = fluxes[name]
+            filtered_errors[name] = err
+        else:
+            excluded.append(name)
+            logger.info(
+                "Excluding %s: SNR=%.1f < %.1f.",
+                name, snr, snr_thresh,
+            )
+
+    return filtered_fluxes, filtered_errors, excluded
+
+
 def _apply_dust_correction(
     fluxes: dict[str, float],
     errors: dict[str, float],
@@ -175,13 +230,20 @@ def _apply_dust_correction(
     return corr_fluxes, corr_errors
 
 
-def _compute_multi_ne(fluxes: dict[str, float]) -> tuple[float, float]:
+def _compute_multi_ne(
+    fluxes: dict[str, float],
+    ne_high_max: float = 1e5,
+) -> tuple[float, float]:
     """Compute multi-phase electron densities (Berg+2025 step 1).
 
     Parameters
     ----------
     fluxes : dict
         Dust-corrected emission-line fluxes.
+    ne_high_max : float
+        Maximum allowed high-ionisation electron density in cm^-3
+        (default 1e5).  If n_e(high) exceeds this, falls back to
+        n_e(low).
 
     Returns
     -------
@@ -222,6 +284,16 @@ def _compute_multi_ne(fluxes: dict[str, float]) -> tuple[float, float]:
 
     # Fall back to ne_low if no high-ionisation density available.
     if ne_high is None:
+        ne_high = ne_low
+
+    # Clamp ne_high if it exceeds the maximum (prevents unphysical
+    # density from noisy doublet ratios).
+    if ne_high > ne_high_max:
+        logger.warning(
+            "n_e(high) = %.0f cm^-3 exceeds ne_high_max=%.0f; "
+            "falling back to n_e(low) = %.0f cm^-3.",
+            ne_high, ne_high_max, ne_low,
+        )
         ne_high = ne_low
 
     return ne_low, ne_high
@@ -292,6 +364,7 @@ def _run_direct(
     n_mc: int,
     seed: int = 42,
     progress: bool = True,
+    ne_high_max: float = 1e5,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -313,6 +386,8 @@ def _run_direct(
         Random seed.
     progress : bool
         Show a ``tqdm`` progress bar (default ``True``).
+    ne_high_max : float
+        Maximum allowed n_e(high) in cm^-3 (default 1e5).
 
     Returns
     -------
@@ -326,10 +401,10 @@ def _run_direct(
         compute_Te_OIII,
         compute_total_abundances,
     )
-    from .martinez25_icf import LOG_OH_SOLAR
+    from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
 
     # --- Step 1: Multi-phase electron density ---
-    ne_low, ne_high = _compute_multi_ne(fluxes)
+    ne_low, ne_high = _compute_multi_ne(fluxes, ne_high_max=ne_high_max)
 
     # --- Step 2: Electron temperature with zone-appropriate ne ---
     Te_high = compute_Te_OIII(
@@ -411,12 +486,13 @@ def _run_direct(
             else:
                 z_zsun_mc = Z_Zsun  # fallback to point estimate
 
-            # Compute logU for this MC iteration.
+            # Compute logU for this MC iteration (clamped to validity
+            # range to prevent wild ICF extrapolation).
             logU_mc = logU  # default to point estimate
             if z_zsun_mc is not None and logU_diag is not None:
                 logU_mc_val, _ = _compute_logU(mc_fluxes, z_zsun_mc, ne_high)
                 if logU_mc_val is not None:
-                    logU_mc = logU_mc_val
+                    logU_mc = float(np.clip(logU_mc_val, *_LOG_U_VALID))
 
             totals_mc = compute_total_abundances(
                 ionic_mc, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
@@ -483,6 +559,7 @@ def _run_direct_mcmc(
     n_posterior: int = 1000,
     progress: bool = True,
     seed: int = 42,
+    ne_high_max: float = 1e5,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -501,6 +578,8 @@ def _run_direct_mcmc(
         Show a ``tqdm`` progress bar (default ``True``).
     seed : int
         Random seed for subsampling (default 42).
+    ne_high_max : float
+        Maximum allowed n_e(high) in cm^-3 (default 1e5).
 
     Returns
     -------
@@ -513,7 +592,7 @@ def _run_direct_mcmc(
         compute_Te_OIII,
         compute_total_abundances,
     )
-    from .martinez25_icf import LOG_OH_SOLAR
+    from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
 
     # Determine number of samples; thin if larger than n_posterior.
     n_total = min(len(v) for v in posteriors.values())
@@ -532,7 +611,7 @@ def _run_direct_mcmc(
 
     # Compute medians for the point estimate and multi-phase ne.
     med_fluxes = {name: float(np.median(post)) for name, post in posteriors.items()}
-    ne_low, ne_high = _compute_multi_ne(med_fluxes)
+    ne_low, ne_high = _compute_multi_ne(med_fluxes, ne_high_max=ne_high_max)
 
     # Point estimate: logU and Z_Zsun from medians.
     try:
@@ -581,12 +660,13 @@ def _run_direct_mcmc(
             oh_val = ionic_i.get("O+/H+", 0.0) + ionic_i.get("O++/H+", 0.0)
             z_zsun_i = 10.0 ** (12.0 + np.log10(oh_val) - LOG_OH_SOLAR) if oh_val > 0 else Z_Zsun_pt
 
-            # logU for this sample.
+            # logU for this sample (clamped to validity range to
+            # prevent wild ICF extrapolation).
             logU_i = logU_pt
             if z_zsun_i is not None and logU_diag is not None:
                 logU_val, _ = _compute_logU(sample, z_zsun_i, ne_high)
                 if logU_val is not None:
-                    logU_i = logU_val
+                    logU_i = float(np.clip(logU_val, *_LOG_U_VALID))
 
             totals_i = compute_total_abundances(
                 ionic_i, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,
@@ -655,6 +735,8 @@ def compute_abundances(
     Av: float | None = None,
     method: str = "auto",
     snr_auroral: float = 3.0,
+    snr_line: float = 2.0,
+    ne_high_max: float = 1e5,
     n_mc: int = 1000,
     Te_relation: str = "desi",
     Rv: float = 3.15,
@@ -692,6 +774,18 @@ def compute_abundances(
         forward model (Cullen+25) — see :func:`forward_model`.
     snr_auroral : float
         Minimum SNR for [OIII] 4363 to use the direct method (default 3.0).
+    snr_line : float
+        Minimum per-line SNR for inclusion in the abundance calculation
+        (default 2.0).  Lines below this threshold are removed from
+        the flux dict after dust correction.  Does not affect the
+        auroral-line SNR check (controlled by *snr_auroral*) or lines
+        essential for T_e computation (OIII 4363/5007/4959, Hbeta).
+        Set to 0 to disable filtering.
+    ne_high_max : float
+        Maximum allowed high-ionisation electron density in cm^-3
+        (default 1e5).  If n_e(high) from a UV doublet exceeds this,
+        the code falls back to n_e(low).  Prevents unphysical density
+        estimates from noisy doublet ratios.
     n_mc : int
         Monte Carlo iterations for error propagation (default 1000).
     Te_relation : str
@@ -780,6 +874,22 @@ def compute_abundances(
     else:
         Av_derived = Av  # store for the result even if not applied
 
+    # --- SNR gating on individual lines ---
+    excluded_lines: list[str] = []
+    if snr_line > 0:
+        fluxes, errors, excluded_lines = _filter_low_snr(
+            fluxes, errors, snr_line,
+        )
+        if excluded_lines:
+            logger.info(
+                "Excluded %d lines below SNR=%.1f: %s",
+                len(excluded_lines), snr_line, excluded_lines,
+            )
+        # Also filter posteriors to match.
+        if posteriors:
+            for name in excluded_lines:
+                posteriors.pop(name, None)
+
     # --- Method selection ---
     use_direct = False
     use_forward = False
@@ -836,6 +946,7 @@ def compute_abundances(
             NO_posterior=fwd_out.get("NO_posterior"),
             CO_posterior=fwd_out.get("CO_posterior"),
             NeO=fwd_out.get("NeO"),
+            excluded_lines=excluded_lines if excluded_lines else None,
             _forward_result=fwd_out,
         )
 
@@ -843,10 +954,14 @@ def compute_abundances(
     if use_direct:
         if is_mcmc and posteriors and "OIII_4363" in posteriors:
             direct_out = _run_direct_mcmc(
-                posteriors, Te_relation, n_posterior=n_posterior, progress=progress,
+                posteriors, Te_relation, n_posterior=n_posterior,
+                progress=progress, ne_high_max=ne_high_max,
             )
         else:
-            direct_out = _run_direct(fluxes, errors, Te_relation, n_mc, progress=progress)
+            direct_out = _run_direct(
+                fluxes, errors, Te_relation, n_mc,
+                progress=progress, ne_high_max=ne_high_max,
+            )
 
         return AbundanceResult(
             method="direct",
@@ -872,6 +987,7 @@ def compute_abundances(
             ne_high=direct_out.get("ne_high"),
             icf_method=direct_out.get("icf_method"),
             NO_icf_name=direct_out.get("NO_icf_name"),
+            excluded_lines=excluded_lines if excluded_lines else None,
         )
 
     # --- Strong-line method ---
@@ -945,6 +1061,7 @@ def compute_abundances(
             Av=Av_derived,
             OH_posterior=OH_post,
             ratios_used=list(ratios.keys()),
+            excluded_lines=excluded_lines if excluded_lines else None,
         )
 
     # LS result: use MC within sanders25_metallicity.
@@ -960,4 +1077,5 @@ def compute_abundances(
         chi2=chi2,
         ratios_used=ratios_used,
         OH_posterior=Z_mc,
+        excluded_lines=excluded_lines if excluded_lines else None,
     )

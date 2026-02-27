@@ -695,3 +695,134 @@ class TestForwardModel:
         assert 5.0 < abund.OH < 10.0
         assert abund.Te_high is not None
         assert abund._forward_result is not None
+
+
+# -----------------------------------------------------------------------
+# SNR gating tests
+# -----------------------------------------------------------------------
+
+class TestSNRGating:
+    """Tests for per-line SNR filtering in the direct method."""
+
+    def test_filter_low_snr_removes_noisy_lines(self):
+        """Lines with SNR < threshold are excluded."""
+        from jwspecabund._core import _filter_low_snr
+
+        fluxes = {
+            "OIII_5007": 5.0,
+            "HBETA": 1.0,
+            "NIII_1749": 0.01,   # SNR = 0.01/0.1 = 0.1
+            "NIV_1486": 0.05,    # SNR = 0.05/0.025 = 2.0
+        }
+        errors = {
+            "OIII_5007": 0.1,
+            "HBETA": 0.02,
+            "NIII_1749": 0.1,
+            "NIV_1486": 0.025,
+        }
+
+        filt_f, filt_e, excluded = _filter_low_snr(fluxes, errors, snr_thresh=2.0)
+
+        assert "NIII_1749" in excluded
+        assert "NIII_1749" not in filt_f
+        assert "NIII_1749" not in filt_e
+        assert "NIV_1486" in filt_f  # SNR = 2.0, exactly at threshold
+        assert "OIII_5007" in filt_f
+        assert "HBETA" in filt_f
+
+    def test_filter_low_snr_keeps_at_threshold(self):
+        """Lines with SNR exactly at threshold are kept (>=)."""
+        from jwspecabund._core import _filter_low_snr
+
+        fluxes = {"Ha": 2.0, "HBETA": 1.0}
+        errors = {"Ha": 1.0, "HBETA": 0.02}
+
+        filt_f, _, excluded = _filter_low_snr(fluxes, errors, snr_thresh=2.0)
+
+        assert "Ha" in filt_f  # SNR = 2.0 exactly
+        assert "Ha" not in excluded
+
+    def test_filter_low_snr_protects_auroral(self):
+        """OIII_4363 is never filtered, even at very low SNR."""
+        from jwspecabund._core import _filter_low_snr
+
+        fluxes = {"OIII_4363": 0.01, "HBETA": 1.0, "OIII_5007": 5.0}
+        errors = {"OIII_4363": 0.1, "HBETA": 0.02, "OIII_5007": 0.1}
+
+        filt_f, _, excluded = _filter_low_snr(fluxes, errors, snr_thresh=2.0)
+
+        # SNR = 0.1 but OIII_4363 is protected.
+        assert "OIII_4363" in filt_f
+        assert "OIII_4363" not in excluded
+
+    def test_filter_low_snr_protects_hbeta(self):
+        """HBETA is never filtered, even at low SNR."""
+        from jwspecabund._core import _filter_low_snr
+
+        fluxes = {"HBETA": 0.01, "OIII_5007": 5.0}
+        errors = {"HBETA": 0.1, "OIII_5007": 0.1}
+
+        filt_f, _, excluded = _filter_low_snr(fluxes, errors, snr_thresh=5.0)
+
+        assert "HBETA" in filt_f
+        assert "HBETA" not in excluded
+
+    def test_filter_low_snr_protects_all_te_lines(self):
+        """All four Te-essential lines are protected."""
+        from jwspecabund._core import _filter_low_snr
+
+        fluxes = {
+            "OIII_4363": 0.001,
+            "OIII_5007": 0.001,
+            "OIII_4959": 0.001,
+            "HBETA": 0.001,
+            "NII_6585": 0.001,  # not protected
+        }
+        errors = {k: 1.0 for k in fluxes}  # all SNR = 0.001
+
+        filt_f, _, excluded = _filter_low_snr(fluxes, errors, snr_thresh=2.0)
+
+        assert "OIII_4363" in filt_f
+        assert "OIII_5007" in filt_f
+        assert "OIII_4959" in filt_f
+        assert "HBETA" in filt_f
+        assert "NII_6585" in excluded
+
+    def test_filter_low_snr_zero_error_kept(self):
+        """Lines with zero error (SNR=inf) are always kept."""
+        from jwspecabund._core import _filter_low_snr
+
+        fluxes = {"Ha": 1.0, "HBETA": 1.0}
+        errors = {"Ha": 0.0, "HBETA": 0.0}
+
+        filt_f, _, excluded = _filter_low_snr(fluxes, errors, snr_thresh=5.0)
+
+        assert "Ha" in filt_f
+        assert len(excluded) == 0
+
+    def test_excluded_lines_in_summary(self):
+        """AbundanceResult.summary() displays excluded lines."""
+        from jwspecabund.result import AbundanceResult
+
+        result = AbundanceResult(
+            method="direct",
+            OH=8.0,
+            OH_err=0.1,
+            excluded_lines=["NIII_1749", "NIII_1752"],
+        )
+        text = result.summary()
+        assert "Excluded" in text
+        assert "NIII_1749" in text
+        assert "NIII_1752" in text
+
+    def test_excluded_lines_none_not_in_summary(self):
+        """Summary omits 'Excluded' line when no lines are excluded."""
+        from jwspecabund.result import AbundanceResult
+
+        result = AbundanceResult(
+            method="direct",
+            OH=8.0,
+            OH_err=0.1,
+        )
+        text = result.summary()
+        assert "Excluded" not in text
