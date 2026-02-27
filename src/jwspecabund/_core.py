@@ -524,6 +524,7 @@ def _run_direct(
     ne_high_max: float = 1e5,
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
+    icf_method: str = "auto",
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -600,6 +601,7 @@ def _run_direct(
     # --- Step 6: Total abundances with ICFs ---
     totals = compute_total_abundances(
         ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
+        icf_method=icf_method,
     )
 
     NO = totals.get("N/O")
@@ -669,6 +671,7 @@ def _run_direct(
 
             totals_mc = compute_total_abundances(
                 ionic_mc, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
+                icf_method=icf_method,
             )
 
             oh_mc = totals_mc.get("O/H", np.nan)
@@ -735,6 +738,7 @@ def _run_direct_mcmc(
     ne_high_max: float = 1e5,
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
+    icf_method: str = "auto",
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -759,6 +763,8 @@ def _run_direct_mcmc(
         Minimum SNR for density-sensitive doublet members (default 3.0).
         SNR is computed from the median/std of the posterior for each
         doublet member.
+    icf_method : str
+        ICF scheme: ``"auto"``, ``"izotov06"``, or ``"martinez25"``.
 
     Returns
     -------
@@ -823,6 +829,7 @@ def _run_direct_mcmc(
 
     totals_pt = compute_total_abundances(
         ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
+        icf_method=icf_method,
     ) if ionic_pt else {}
     icf_method = totals_pt.get("icf_method")
     NO_icf_name = totals_pt.get("NO_icf_name")
@@ -860,6 +867,7 @@ def _run_direct_mcmc(
 
             totals_i = compute_total_abundances(
                 ionic_i, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,
+                icf_method=icf_method,
             )
 
             oh = totals_i.get("O/H", np.nan)
@@ -934,6 +942,7 @@ def compute_abundances(
     Rv: float = 3.15,
     delta: float = -0.35,
     B_bump: float = 2.27,
+    icf_method: str = "auto",
     # Forward model kwargs (method="forward")
     forward_sampler: str = "emcee",
     forward_n_walkers: int = 32,
@@ -998,6 +1007,13 @@ def compute_abundances(
         Slope deviation for Salim law (default -0.35).
     B_bump : float
         UV bump strength for Salim law (default 2.27).
+    icf_method : str
+        ICF scheme for the direct method.
+        ``"auto"`` (default): use Martinez+25 when logU is available,
+        fall back to Izotov+06 otherwise.
+        ``"izotov06"``: always use Izotov+06 ICFs (N/O = ICF × N⁺/O⁺,
+        independent of logU).
+        ``"martinez25"``: force Martinez+25 ICFs (requires logU).
     forward_sampler : str
         Sampler for forward model: ``"emcee"`` or ``"dynesty"`` (default ``"emcee"``).
     forward_n_walkers : int
@@ -1159,12 +1175,14 @@ def compute_abundances(
                 posteriors, Te_relation, n_posterior=n_posterior,
                 progress=progress, ne_high_max=ne_high_max,
                 snr_ne=snr_ne, snr_logU=snr_logU,
+                icf_method=icf_method,
             )
         else:
             direct_out = _run_direct(
                 fluxes, errors, Te_relation, n_mc,
                 progress=progress, ne_high_max=ne_high_max,
                 snr_ne=snr_ne, snr_logU=snr_logU,
+                icf_method=icf_method,
             )
 
         return AbundanceResult(
