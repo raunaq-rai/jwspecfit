@@ -146,6 +146,7 @@ def fit_lines(
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
+    tie_uv_doublets: bool = False,
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
@@ -210,6 +211,10 @@ def fit_lines(
         If ``False`` (default), use polynomial continuum.  If ``True``,
         use a median filter with a default window of 75 pixels.  If an
         ``int``, use that as the median-filter window size.
+    tie_uv_doublets : bool
+        Tie UV doublet kinematics and fix resonance-line flux ratios.
+        Recommended for stacked spectra where doublets are poorly
+        resolved (default ``False``).
 
     Returns
     -------
@@ -276,6 +281,7 @@ def fit_lines(
                     n_jobs=n_jobs, sigma_factor=sigma_factor,
                     centroid_vmax=centroid_vmax,
                     moving_average=moving_average,
+                    tie_uv_doublets=tie_uv_doublets,
                     _label=win_label,
                 )
             else:
@@ -288,6 +294,7 @@ def fit_lines(
                     bic_delta=bic_delta, sigma_factor=sigma_factor,
                     centroid_vmax=centroid_vmax,
                     moving_average=moving_average,
+                    tie_uv_doublets=tie_uv_doublets,
                     _print_R=False,
                 )
             window_results.append(res)
@@ -310,6 +317,7 @@ def fit_lines(
             sigma_factor=sigma_factor,
             centroid_vmax=centroid_vmax,
             moving_average=moving_average,
+            tie_uv_doublets=tie_uv_doublets,
         )
 
     return fit_with_broad(
@@ -324,4 +332,5 @@ def fit_lines(
         sigma_factor=sigma_factor,
         centroid_vmax=centroid_vmax,
         moving_average=moving_average,
+        tie_uv_doublets=tie_uv_doublets,
     )

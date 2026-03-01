@@ -169,6 +169,7 @@ def fit_lines(
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
+    tie_uv_doublets: bool = False,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -212,6 +213,10 @@ def fit_lines(
         If ``False`` (default), use polynomial continuum.  If ``True``,
         use a median filter with a default window of 75 pixels.  If an
         ``int``, use that as the median-filter window size.
+    tie_uv_doublets : bool
+        Tie UV doublet kinematics and fix resonance-line flux ratios.
+        Recommended for stacked spectra where doublets are poorly
+        resolved (default ``False``).
 
     Returns
     -------
@@ -369,7 +374,7 @@ def fit_lines(
     w_pix = pixel_weight(dlam)
 
     # Setup constraints.
-    constraints = ConstraintSet(line_names)
+    constraints = ConstraintSet(line_names, tie_uv_doublets=tie_uv_doublets)
 
     # Initial parameters: [amplitudes, centroids, sigmas].
     nL = len(line_names)

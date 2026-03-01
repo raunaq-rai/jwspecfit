@@ -58,6 +58,7 @@ def _fit_lines_mcmc(
     seed: int = 42,
     sigma_factor: float = 1.0,
     moving_average: bool | int = False,
+    tie_uv_doublets: bool = False,
 ) -> MCMCResult:
     """Fit emission lines using MCMC sampling.
 
@@ -110,6 +111,10 @@ def _fit_lines_mcmc(
         If ``False`` (default), use polynomial continuum.  If ``True``,
         use a median filter with a default window of 75 pixels.  If an
         ``int``, use that as the median-filter window size.
+    tie_uv_doublets : bool
+        Tie UV doublet kinematics and fix resonance-line flux ratios.
+        Recommended for stacked spectra where doublets are poorly
+        resolved (default ``False``).
 
     Returns
     -------
@@ -232,7 +237,7 @@ def _fit_lines_mcmc(
     # ------------------------------------------------------------------
     # 4. Constraints and bounds (mirrors fitter.py lines 300-398)
     # ------------------------------------------------------------------
-    constraints = ConstraintSet(line_names)
+    constraints = ConstraintSet(line_names, tie_uv_doublets=tie_uv_doublets)
 
     p0 = np.zeros(3 * nL)
     lb = np.zeros(3 * nL)
@@ -555,6 +560,7 @@ def _fit_with_broad_mcmc(
     seed: int = 42,
     sigma_factor: float = 1.0,
     moving_average: bool | int = False,
+    tie_uv_doublets: bool = False,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
 
@@ -682,6 +688,7 @@ def _fit_with_broad_mcmc(
         seed=seed,
         sigma_factor=sigma_factor,
         moving_average=moving_average,
+        tie_uv_doublets=tie_uv_doublets,
     )
 
     return MCMCBroadFitResult(
