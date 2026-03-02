@@ -570,14 +570,21 @@ def _gate_nitrogen_ions(
         is_doublet = len(line_names) > 1
 
         if is_doublet:
-            # Both members must be present (positive flux).
-            member_fluxes = [fluxes.get(n, 0.0) for n in line_names]
-            if any(f <= 0 for f in member_fluxes):
+            # Both members must be genuinely detected: positive flux
+            # and individual SNR >= 1 (catches machine-zero fluxes
+            # like 1e-46 that are technically positive).
+            member_ok = []
+            for n in line_names:
+                f = fluxes.get(n, 0.0)
+                e = errors.get(n, 0.0)
+                snr_i = f / e if e > 0 else 0.0
+                member_ok.append(f > 0 and snr_i >= 1.0)
+            if not all(member_ok):
                 logger.info(
                     "direct_sum: %s incomplete doublet (%s); excluding.",
                     ion_key,
                     ", ".join(
-                        f"{n} {'OK' if fluxes.get(n, 0) > 0 else 'missing'}"
+                        f"{n} SNR={fluxes.get(n, 0) / errors.get(n, 1):.1f}"
                         for n in line_names
                     ),
                 )
