@@ -38,7 +38,9 @@ _BALMER_LINES = {"Ha", "HBETA", "HGAMMA", "HDELTA"}
 # guards and do not rely on the per-line SNR filter.
 _SNR_PROTECTED = {
     "OIII_4363", "OIII_5007", "OIII_4959", "HBETA",
-    # UV doublet members used for ionic abundances
+    # Nitrogen lines used for ionic abundances — gated separately
+    # by _gate_nitrogen_ions() when icf_method="direct_sum".
+    "NII_6585",
     "NIII_1749", "NIII_1752",
     "NIV_1483", "NIV_1486",
     "NV_1", "NV_2",
