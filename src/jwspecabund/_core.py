@@ -690,9 +690,8 @@ def _run_direct(
         )
 
     # --- Step 6: Total abundances with ICFs ---
-    # SNR-gate nitrogen ions for direct_sum to avoid noise-dominated N/O.
-    if icf_method == "direct_sum":
-        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=snr_NO)
+    # SNR-gate nitrogen ions to avoid noise-dominated N/O.
+    _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=snr_NO)
 
     totals = compute_total_abundances(
         ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
@@ -766,8 +765,7 @@ def _run_direct(
 
             # Gate nitrogen ions using the *original* errors so the
             # same ions are included/excluded as in the point estimate.
-            if icf_method == "direct_sum":
-                _gate_nitrogen_ions(ionic_mc, mc_fluxes, errors, snr_NO=snr_NO)
+            _gate_nitrogen_ions(ionic_mc, mc_fluxes, errors, snr_NO=snr_NO)
 
             totals_mc = compute_total_abundances(
                 ionic_mc, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
@@ -932,7 +930,7 @@ def _run_direct_mcmc(
             snr_logU=snr_logU,
         )
 
-    if icf_method == "direct_sum" and ionic_pt:
+    if ionic_pt:
         _gate_nitrogen_ions(ionic_pt, med_fluxes, med_errors, snr_NO=snr_NO)
 
     totals_pt = compute_total_abundances(
@@ -975,8 +973,7 @@ def _run_direct_mcmc(
 
             # Gate nitrogen ions using median errors (same ions as
             # point estimate to prevent tier-switching across samples).
-            if icf_method == "direct_sum":
-                _gate_nitrogen_ions(ionic_i, sample, med_errors, snr_NO=snr_NO)
+            _gate_nitrogen_ions(ionic_i, sample, med_errors, snr_NO=snr_NO)
 
             totals_i = compute_total_abundances(
                 ionic_i, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,

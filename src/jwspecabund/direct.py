@@ -648,7 +648,7 @@ def compute_total_abundances(
                 totals["icf_method"] = "izotov06"
                 totals["NO_icf_name"] = "izotov06_fallback"
 
-        # N/O — Martinez+25 or Izotov+06
+        # N/O — Martinez+25 with direct_sum fallback
         elif use_martinez:
             from .martinez25_icf import compute_NO_martinez25
             ne_icf = ne if ne is not None else NE_DEFAULT
@@ -658,12 +658,30 @@ def compute_total_abundances(
                 totals["NO_icf_name"] = NO_icf_name
                 totals["icf_method"] = "martinez25"
             else:
-                # Fall back to Izotov+06 if no suitable ionic ratios.
+                # Fall back to direct_sum tiers if Martinez+25 has no
+                # suitable ionic ratios (e.g. nitrogen ions SNR-gated).
                 N_plus = ionic.get("N+/H+", 0.0)
-                if N_plus > 0 and O_plus > 0:
+                N_pp = ionic.get("N++/H+", 0.0)
+                N_ppp = ionic.get("N+++/H+", 0.0)
+                N_pppp = ionic.get("N4+/H+", 0.0)
+                if N_plus > 0 and (N_pp + N_ppp) > 0:
+                    totals["N/O"] = (N_plus + N_pp + N_ppp + N_pppp) / OH
+                    totals["icf_method"] = "direct_sum"
+                    totals["NO_icf_name"] = "Np_Npp_Nppp"
+                elif (N_pp + N_ppp) > 0 and O_pp > 0:
+                    totals["N/O"] = (N_pp + N_ppp + N_pppp) / O_pp
+                    totals["icf_method"] = "direct_sum"
+                    if N_pp > 0 and N_ppp > 0:
+                        totals["NO_icf_name"] = "Npp_Nppp_Opp"
+                    elif N_ppp > 0:
+                        totals["NO_icf_name"] = "Nppp_Opp"
+                    else:
+                        totals["NO_icf_name"] = "Npp_Opp"
+                elif N_plus > 0 and O_plus > 0:
                     icf_n = icf_nitrogen(O_plus, OH)
                     totals["N/O"] = icf_n * N_plus / O_plus
                     totals["icf_method"] = "izotov06"
+                    totals["NO_icf_name"] = "izotov06_fallback"
         else:
             N_plus = ionic.get("N+/H+", 0.0)
             if N_plus > 0 and O_plus > 0:

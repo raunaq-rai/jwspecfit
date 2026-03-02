@@ -768,7 +768,7 @@ class TestSNRGating:
         assert "HBETA" not in excluded
 
     def test_filter_low_snr_protects_all_te_lines(self):
-        """All four Te-essential lines are protected."""
+        """Te-essential and nitrogen lines are protected."""
         from jwspecabund._core import _filter_low_snr
 
         fluxes = {
@@ -776,7 +776,8 @@ class TestSNRGating:
             "OIII_5007": 0.001,
             "OIII_4959": 0.001,
             "HBETA": 0.001,
-            "NII_6585": 0.001,  # not protected
+            "NII_6585": 0.001,  # protected (nitrogen gating handles it)
+            "Ha": 0.001,        # not protected
         }
         errors = {k: 1.0 for k in fluxes}  # all SNR = 0.001
 
@@ -786,7 +787,8 @@ class TestSNRGating:
         assert "OIII_5007" in filt_f
         assert "OIII_4959" in filt_f
         assert "HBETA" in filt_f
-        assert "NII_6585" in excluded
+        assert "NII_6585" in filt_f  # protected from general filter
+        assert "Ha" in excluded
 
     def test_filter_low_snr_zero_error_kept(self):
         """Lines with zero error (SNR=inf) are always kept."""
