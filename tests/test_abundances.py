@@ -929,8 +929,9 @@ class TestNeSNRGating:
             "SII_6732": 0.1,   # SNR = 0.1
         }
 
-        ne_low, ne_high = _compute_multi_ne(fluxes, errors=errors, snr_ne=3.0)
+        ne_low, ne_mid, ne_high = _compute_multi_ne(fluxes, errors=errors, snr_ne=3.0)
         assert ne_low == NE_DEFAULT
+        assert ne_mid is None
         assert ne_high == NE_DEFAULT
 
     @pytest.mark.skipif(
@@ -952,10 +953,11 @@ class TestNeSNRGating:
             "SII_6732": 0.05,  # SNR = 20
         }
 
-        ne_low, ne_high = _compute_multi_ne(fluxes, errors=errors, snr_ne=3.0)
+        ne_low, ne_mid, ne_high = _compute_multi_ne(fluxes, errors=errors, snr_ne=3.0)
         # Should be a real measurement, not the default.
         assert ne_low != NE_DEFAULT
         assert 10 < ne_low < 5000
+        assert ne_mid is None
 
     def test_snr_ne_zero_disables_gating(self):
         """snr_ne=0 should disable the SNR check (all doublets pass)."""
@@ -1009,8 +1011,9 @@ class TestNeSNRGating:
         # But _compute_multi_ne with errors=None should use empty dict
         # and fall back to NE_DEFAULT.
         from jwspecabund.direct import NE_DEFAULT
-        ne_low, _ = _compute_multi_ne(fluxes, errors=None, snr_ne=3.0)
+        ne_low, ne_mid, _ = _compute_multi_ne(fluxes, errors=None, snr_ne=3.0)
         assert ne_low == NE_DEFAULT
+        assert ne_mid is None
 
     def test_missing_doublet_member_fails(self):
         """Missing doublet member should fail the SNR check."""

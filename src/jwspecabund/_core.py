@@ -267,8 +267,8 @@ def _compute_multi_ne(
     errors: dict[str, float] | None = None,
     snr_ne: float = 3.0,
     ne_high_max: float = 1e5,
-) -> tuple[float, float]:
-    """Compute multi-phase electron densities (Berg+2025 step 1).
+) -> tuple[float, float | None, float]:
+    """Compute 3-zone electron densities (Berg+2025 step 1).
 
     Parameters
     ----------
@@ -284,15 +284,18 @@ def _compute_multi_ne(
     ne_high_max : float
         Maximum allowed high-ionisation electron density in cm^-3
         (default 1e5).  If n_e(high) exceeds this, falls back to
-        n_e(low).
+        n_e(mid) (or n_e(low) if no mid measurement).
 
     Returns
     -------
     tuple
-        ``(ne_low, ne_high)`` in cm^-3.  ``ne_low`` is from [SII] or
-        [OII]; ``ne_high`` is from NIV] or CIII].  Falls back to
-        ``NE_DEFAULT`` (300 cm^-3) when diagnostics are unavailable
-        or fail the SNR cut.
+        ``(ne_low, ne_mid, ne_high)`` in cm^-3.
+
+        - ``ne_low``: from [SII] 6718/6732 or [OII] 3726/3729 (~14 eV).
+        - ``ne_mid``: from CIII] 1907/1909 (~24 eV); ``None`` if
+          unavailable.  Used for C²⁺, N²⁺, S²⁺, Ar²⁺.
+        - ``ne_high``: from NIV] 1483/1486 (~47 eV); falls back to
+          ``ne_mid`` then ``ne_low``.  Used for O²⁺, Ne²⁺, N³⁺, C³⁺.
     """
     from .direct import NE_DEFAULT, compute_ne, compute_ne_CIII, compute_ne_NIV
 
@@ -324,25 +327,13 @@ def _compute_multi_ne(
                 "using %.0f cm^-3.", snr_ne, NE_DEFAULT,
             )
 
-    # High-ionisation zone: NIV] 1483/1486 (preferred) or CIII] 1907/1909.
-    ne_high = None
-    if "NIV_1483" in fluxes and "NIV_1486" in fluxes:
-        if _doublet_snr_ok("NIV_1483", "NIV_1486", fluxes, errors, snr_ne):
-            try:
-                ne_high = compute_ne_NIV(fluxes["NIV_1483"], fluxes["NIV_1486"])
-                logger.info("n_e(high) from NIV] = %.0f cm^-3.", ne_high)
-            except Exception:
-                logger.warning("n_e(NIV]) failed.")
-        else:
-            logger.warning(
-                "n_e(NIV]) doublet below SNR threshold (%.1f); skipping.",
-                snr_ne,
-            )
-    if ne_high is None and "CIII]_1907" in fluxes and "CIII]" in fluxes:
+    # Mid-ionisation zone: CIII] 1907/1909 (~24 eV).
+    ne_mid = None
+    if "CIII]_1907" in fluxes and "CIII]" in fluxes:
         if _doublet_snr_ok("CIII]_1907", "CIII]", fluxes, errors, snr_ne):
             try:
-                ne_high = compute_ne_CIII(fluxes["CIII]_1907"], fluxes["CIII]"])
-                logger.info("n_e(high) from CIII] = %.0f cm^-3.", ne_high)
+                ne_mid = compute_ne_CIII(fluxes["CIII]_1907"], fluxes["CIII]"])
+                logger.info("n_e(mid) from CIII] = %.0f cm^-3.", ne_mid)
             except Exception:
                 logger.warning("n_e(CIII]) failed.")
         else:
@@ -351,21 +342,41 @@ def _compute_multi_ne(
                 snr_ne,
             )
 
-    # Fall back to ne_low if no high-ionisation density available.
-    if ne_high is None:
+    # High-ionisation zone: NIV] 1483/1486 (~47 eV).
+    ne_high_raw = None
+    if "NIV_1483" in fluxes and "NIV_1486" in fluxes:
+        if _doublet_snr_ok("NIV_1483", "NIV_1486", fluxes, errors, snr_ne):
+            try:
+                ne_high_raw = compute_ne_NIV(fluxes["NIV_1483"], fluxes["NIV_1486"])
+                logger.info("n_e(high) from NIV] = %.0f cm^-3.", ne_high_raw)
+            except Exception:
+                logger.warning("n_e(NIV]) failed.")
+        else:
+            logger.warning(
+                "n_e(NIV]) doublet below SNR threshold (%.1f); skipping.",
+                snr_ne,
+            )
+
+    # Fallback chain: ne_high → ne_mid → ne_low.
+    if ne_high_raw is not None:
+        ne_high = ne_high_raw
+    elif ne_mid is not None:
+        ne_high = ne_mid
+    else:
         ne_high = ne_low
 
     # Clamp ne_high if it exceeds the maximum (prevents unphysical
     # density from noisy doublet ratios).
     if ne_high > ne_high_max:
+        ne_fallback = ne_mid if ne_mid is not None else ne_low
         logger.warning(
             "n_e(high) = %.0f cm^-3 exceeds ne_high_max=%.0f; "
-            "falling back to n_e(low) = %.0f cm^-3.",
-            ne_high, ne_high_max, ne_low,
+            "falling back to %.0f cm^-3.",
+            ne_high, ne_high_max, ne_fallback,
         )
-        ne_high = ne_low
+        ne_high = ne_fallback
 
-    return ne_low, ne_high
+    return ne_low, ne_mid, ne_high
 
 
 def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
@@ -632,6 +643,7 @@ def _build_diagnostics(
     Te_high: float | None,
     Te_relation: str,
     ne_low: float,
+    ne_mid: float | None,
     ne_high: float,
     logU: float | None,
     logU_diag: str | None,
@@ -649,8 +661,12 @@ def _build_diagnostics(
         High-ionisation electron temperature in K.
     Te_relation : str
         Te-Te relation used (``"desi"`` or ``"classical"``).
-    ne_low, ne_high : float
-        Low- and high-ionisation electron densities in cm^-3.
+    ne_low : float
+        Low-ionisation electron density in cm^-3.
+    ne_mid : float or None
+        Mid-ionisation electron density in cm^-3 (from CIII]).
+    ne_high : float
+        High-ionisation electron density in cm^-3.
     logU : float or None
         Ionisation parameter log(U).
     logU_diag : str or None
@@ -704,27 +720,36 @@ def _build_diagnostics(
                 f"default ({ne_default:.0f} cm^-3) — no [SII] or [OII] doublet available"
             )
 
+    # ne(mid)
+    _has_ciii = "CIII]_1907" in fluxes and "CIII]" in fluxes
+    if ne_mid is not None:
+        diag["ne(mid)"] = f"CIII] 1907/1909 doublet ratio -> {ne_mid:.0f} cm^-3"
+    elif _has_ciii:
+        diag["ne(mid)"] = (
+            f"fallback to ne(low) = {ne_low:.0f} cm^-3 — CIII] failed SNR cut or solve"
+        )
+    else:
+        diag["ne(mid)"] = (
+            f"fallback to ne(low) = {ne_low:.0f} cm^-3 — no CIII] doublet available"
+        )
+
     # ne(high)
     _has_niv = "NIV_1483" in fluxes and "NIV_1486" in fluxes
-    _has_ciii = "CIII]_1907" in fluxes and "CIII]" in fluxes
-    if ne_high != ne_low:
-        if _has_niv:
-            diag["ne(high)"] = f"NIV] 1483/1486 doublet ratio -> {ne_high:.0f} cm^-3"
-        elif _has_ciii:
-            diag["ne(high)"] = f"CIII] 1907/1909 doublet ratio -> {ne_high:.0f} cm^-3"
+    ne_mid_or_low = ne_mid if ne_mid is not None else ne_low
+    if _has_niv and ne_high != ne_mid_or_low:
+        diag["ne(high)"] = f"NIV] 1483/1486 doublet ratio -> {ne_high:.0f} cm^-3"
     else:
-        parts = []
         if _has_niv:
-            parts.append("NIV] failed SNR cut or solve")
-        if _has_ciii:
-            parts.append("CIII] failed SNR cut or solve")
-        if parts:
+            fallback_label = "ne(mid)" if ne_mid is not None else "ne(low)"
             diag["ne(high)"] = (
-                f"fallback to ne(low) = {ne_low:.0f} cm^-3 — {'; '.join(parts)}"
+                f"fallback to {fallback_label} = {ne_mid_or_low:.0f} cm^-3 "
+                f"— NIV] failed SNR cut or solve"
             )
         else:
+            fallback_label = "ne(mid)" if ne_mid is not None else "ne(low)"
             diag["ne(high)"] = (
-                f"fallback to ne(low) = {ne_low:.0f} cm^-3 — no UV density doublet available"
+                f"fallback to {fallback_label} = {ne_mid_or_low:.0f} cm^-3 "
+                f"— no NIV] doublet available"
             )
 
     # log(U)
@@ -811,7 +836,7 @@ def _run_direct(
     from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
 
     # --- Step 1: Multi-phase electron density ---
-    ne_low, ne_high = _compute_multi_ne(
+    ne_low, ne_mid, ne_high = _compute_multi_ne(
         fluxes, errors=errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
     )
 
@@ -822,7 +847,7 @@ def _run_direct(
     Te_low = Te_low_from_high(Te_high, relation=Te_relation)
 
     # --- Step 3: Ionic abundances with zone-appropriate ne ---
-    ionic = compute_ionic_abundances(fluxes, Te_high, Te_low, ne_low, ne_high=ne_high)
+    ionic = compute_ionic_abundances(fluxes, Te_high, Te_low, ne_low, ne_mid=ne_mid, ne_high=ne_high)
 
     # --- Step 4: O/H and Z/Zsun ---
     OH = (ionic.get("O+/H+", 0.0) + ionic.get("O++/H+", 0.0))
@@ -870,7 +895,7 @@ def _run_direct(
 
     # --- Build diagnostics dict ---
     diagnostics = _build_diagnostics(
-        fluxes, Te_high, Te_relation, ne_low, ne_high,
+        fluxes, Te_high, Te_relation, ne_low, ne_mid, ne_high,
         logU, logU_diag, icf_method, NO_icf_name, NE_DEFAULT,
     )
 
@@ -897,7 +922,7 @@ def _run_direct(
             )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
             ionic_mc = compute_ionic_abundances(
-                mc_fluxes, Te_h, Te_l, ne_low, ne_high=ne_high,
+                mc_fluxes, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
             )
 
             # Compute Z_Zsun for this MC iteration.
@@ -971,6 +996,7 @@ def _run_direct(
         "Te_low": Te_low,
         "ne": ne_low,
         "ne_low": ne_low,
+        "ne_mid": ne_mid,
         "ne_high": ne_high,
         "logU": logU,
         "icf_method": icf_method,
@@ -1060,7 +1086,7 @@ def _run_direct_mcmc(
     # Compute medians and errors for the point estimate and multi-phase ne.
     med_fluxes = {name: float(np.median(post)) for name, post in posteriors.items()}
     med_errors = {name: float(np.std(post)) for name, post in posteriors.items()}
-    ne_low, ne_high = _compute_multi_ne(
+    ne_low, ne_mid, ne_high = _compute_multi_ne(
         med_fluxes, errors=med_errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
     )
 
@@ -1077,7 +1103,7 @@ def _run_direct_mcmc(
     Te_low_pt = Te_low_from_high(Te_high_pt, relation=Te_relation) if np.isfinite(Te_high_pt) else np.nan
 
     ionic_pt = compute_ionic_abundances(
-        med_fluxes, Te_high_pt, Te_low_pt, ne_low, ne_high=ne_high
+        med_fluxes, Te_high_pt, Te_low_pt, ne_low, ne_mid=ne_mid, ne_high=ne_high
     ) if np.isfinite(Te_high_pt) else {}
 
     OH_pt = ionic_pt.get("O+/H+", 0.0) + ionic_pt.get("O++/H+", 0.0)
@@ -1111,7 +1137,7 @@ def _run_direct_mcmc(
             )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
             ionic_i = compute_ionic_abundances(
-                sample, Te_h, Te_l, ne_low, ne_high=ne_high,
+                sample, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
             )
 
             # Z_Zsun for this sample.
@@ -1180,6 +1206,7 @@ def _run_direct_mcmc(
         "Te_low": Te_low_pt if np.isfinite(Te_low_pt) else None,
         "ne": ne_low,
         "ne_low": ne_low,
+        "ne_mid": ne_mid,
         "ne_high": ne_high,
         "logU": logU_pt,
         "icf_method": icf_method,
@@ -1193,7 +1220,7 @@ def _run_direct_mcmc(
         "ArO": np.log10(totals_pt["Ar/O"]) if "Ar/O" in totals_pt and totals_pt["Ar/O"] > 0 else None,
         "diagnostics": _build_diagnostics(
             med_fluxes, Te_high_pt if np.isfinite(Te_high_pt) else None,
-            Te_relation, ne_low, ne_high, logU_pt, logU_diag,
+            Te_relation, ne_low, ne_mid, ne_high, logU_pt, logU_diag,
             icf_method, NO_icf_name, NE_DEFAULT,
         ),
     }
@@ -1492,6 +1519,7 @@ def compute_abundances(
             ArO=direct_out.get("ArO"),
             logU=direct_out.get("logU"),
             ne_low=direct_out.get("ne_low"),
+            ne_mid=direct_out.get("ne_mid"),
             ne_high=direct_out.get("ne_high"),
             icf_method=direct_out.get("icf_method"),
             NO_icf_name=direct_out.get("NO_icf_name"),

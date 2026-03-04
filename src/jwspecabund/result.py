@@ -84,6 +84,7 @@ class AbundanceResult:
     ArO: float | None = None
     logU: float | None = None
     ne_low: float | None = None
+    ne_mid: float | None = None
     ne_high: float | None = None
     icf_method: str | None = None
     NO_icf_name: str | None = None
@@ -126,6 +127,8 @@ class AbundanceResult:
             lines.append(f"  n_e         = {self.ne:.0f} cm^-3")
         if self.ne_low is not None and self.ne_high is not None:
             lines.append(f"  n_e(low)    = {self.ne_low:.0f} cm^-3")
+            if self.ne_mid is not None:
+                lines.append(f"  n_e(mid)    = {self.ne_mid:.0f} cm^-3")
             lines.append(f"  n_e(high)   = {self.ne_high:.0f} cm^-3")
         if self.logU is not None:
             lines.append(f"  log(U)      = {self.logU:.2f}")
