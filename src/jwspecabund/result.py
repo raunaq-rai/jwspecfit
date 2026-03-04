@@ -88,6 +88,7 @@ class AbundanceResult:
     icf_method: str | None = None
     NO_icf_name: str | None = None
     excluded_lines: list[str] | None = None
+    diagnostics: dict[str, str] | None = field(default=None, repr=False)
     # Internal: full forward model result dict (samples, param_names, etc.)
     _forward_result: dict[str, Any] | None = field(default=None, repr=False)
 
@@ -97,9 +98,13 @@ class AbundanceResult:
         Returns
         -------
         str
-            Multi-line summary of the abundance measurement.
+            Multi-line summary of the abundance measurement, including
+            a diagnostics section explaining how each physical quantity
+            was derived.
         """
         lines = [f"AbundanceResult (method={self.method})"]
+
+        # --- Abundances ---
         lines.append(f"  12+log(O/H) = {self.OH:.3f} +/- {self.OH_err}")
         if self.NO is not None:
             lines.append(f"  log(N/O)    = {self.NO:.3f} +/- {self.NO_err}")
@@ -111,6 +116,8 @@ class AbundanceResult:
             lines.append(f"  log(Ne/O)   = {self.NeO:.3f}")
         if self.ArO is not None:
             lines.append(f"  log(Ar/O)   = {self.ArO:.3f}")
+
+        # --- Physical conditions ---
         if self.Te_high is not None:
             lines.append(f"  T_e(high)   = {self.Te_high:.0f} K")
         if self.Te_low is not None:
@@ -124,14 +131,27 @@ class AbundanceResult:
             lines.append(f"  log(U)      = {self.logU:.2f}")
         if self.Av is not None:
             lines.append(f"  A_V         = {self.Av:.3f}")
+
+        # --- ICF info ---
         if self.icf_method is not None:
             lines.append(f"  ICF method  = {self.icf_method}")
         if self.NO_icf_name is not None:
             lines.append(f"  N/O ICF     = {self.NO_icf_name}")
+
+        # --- Strong-line info ---
         if self.ratios_used:
             lines.append(f"  Ratios used = {self.ratios_used}")
         if self.chi2 is not None:
             lines.append(f"  chi2        = {self.chi2:.2f}")
+
         if self.excluded_lines:
             lines.append(f"  Excluded    = {self.excluded_lines}")
+
+        # --- Diagnostics section ---
+        if self.diagnostics:
+            lines.append("")
+            lines.append("Derivation details:")
+            for key, explanation in self.diagnostics.items():
+                lines.append(f"  {key}: {explanation}")
+
         return "\n".join(lines)

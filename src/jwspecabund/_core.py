@@ -607,6 +607,150 @@ def _gate_nitrogen_ions(
     return ionic
 
 
+# Human-readable descriptions for Martinez+25 and direct-sum ICF names.
+_ICF_DESCRIPTIONS: dict[str, str] = {
+    "NppNppp_Opp": "Martinez+25 ICF 5: (N2+ + N3+)/O2+ x ICF — preferred (pure UV, both ions detected)",
+    "NpNpp_OpOpp": "Martinez+25 ICF 4: (N+ + N2+)/(O+ + O2+) x ICF — mixed UV+optical",
+    "NppOpp": "Martinez+25 ICF 2: N2+/O2+ x ICF — UV only (single N ion)",
+    "NpOp": "Martinez+25 ICF 1: N+/O+ x ICF — optical only",
+    "NpppOpp": "Martinez+25 ICF 3: N3+/O2+ x ICF — large correction, last resort",
+    "Np_Npp_Nppp": "direct sum: (N+ + N2+ + N3+) / (O+ + O2+) — all zones, no ICF needed",
+    "Npp_Nppp_Opp": "direct sum: (N2+ + N3+) / O2+ — UV only, no ICF needed",
+    "Nppp_Opp": "direct sum: N3+ / O2+ — UV only, no ICF needed",
+    "Npp_Opp": "direct sum: N2+ / O2+ — UV only, no ICF needed",
+    "izotov06_fallback": "Izotov+06: ICF(O+/O) x N+/O+ — optical fallback",
+}
+
+_TE_RELATION_LABELS: dict[str, str] = {
+    "desi": "DESI DR2",
+    "classical": "classical (Garnett 1992)",
+}
+
+
+def _build_diagnostics(
+    fluxes: dict[str, float],
+    Te_high: float | None,
+    Te_relation: str,
+    ne_low: float,
+    ne_high: float,
+    logU: float | None,
+    logU_diag: str | None,
+    icf_method: str | None,
+    NO_icf_name: str | None,
+    ne_default: float,
+) -> dict[str, str]:
+    """Build a diagnostics dict explaining how each quantity was derived.
+
+    Parameters
+    ----------
+    fluxes : dict
+        Dust-corrected emission-line fluxes.
+    Te_high : float or None
+        High-ionisation electron temperature in K.
+    Te_relation : str
+        Te-Te relation used (``"desi"`` or ``"classical"``).
+    ne_low, ne_high : float
+        Low- and high-ionisation electron densities in cm^-3.
+    logU : float or None
+        Ionisation parameter log(U).
+    logU_diag : str or None
+        Diagnostic used for logU (``"N43"`` or ``"O32"``).
+    icf_method : str or None
+        ICF scheme used.
+    NO_icf_name : str or None
+        Specific ICF name used for N/O.
+    ne_default : float
+        Default electron density in cm^-3.
+
+    Returns
+    -------
+    dict
+        Human-readable explanations keyed by quantity name.
+    """
+    diag: dict[str, str] = {}
+
+    # Te(high)
+    if Te_high is not None:
+        diag["Te(high)"] = (
+            f"[OIII] 4363/(5007+4959) ratio with n_e(high) = {ne_high:.0f} cm^-3 (PyNEB)"
+        )
+
+    # Te(low)
+    if Te_high is not None:
+        rel_label = _TE_RELATION_LABELS.get(Te_relation, Te_relation)
+        diag["Te(low)"] = (
+            f"{rel_label} Te-Te relation from Te(high) = {Te_high:.0f} K"
+        )
+
+    # ne(low)
+    _has_sii = "SII_6718" in fluxes and "SII_6732" in fluxes
+    _has_oii = "OII_3726" in fluxes and "OII_3729" in fluxes
+    if ne_low != ne_default:
+        if _has_sii:
+            diag["ne(low)"] = f"[SII] 6718/6732 doublet ratio -> {ne_low:.0f} cm^-3"
+        elif _has_oii:
+            diag["ne(low)"] = f"[OII] 3726/3729 doublet ratio -> {ne_low:.0f} cm^-3"
+    else:
+        if _has_sii:
+            diag["ne(low)"] = (
+                f"default ({ne_default:.0f} cm^-3) — [SII] doublet failed SNR cut or solve"
+            )
+        elif _has_oii:
+            diag["ne(low)"] = (
+                f"default ({ne_default:.0f} cm^-3) — [OII] doublet failed SNR cut or solve"
+            )
+        else:
+            diag["ne(low)"] = (
+                f"default ({ne_default:.0f} cm^-3) — no [SII] or [OII] doublet available"
+            )
+
+    # ne(high)
+    _has_niv = "NIV_1483" in fluxes and "NIV_1486" in fluxes
+    _has_ciii = "CIII]_1907" in fluxes and "CIII]" in fluxes
+    if ne_high != ne_low:
+        if _has_niv:
+            diag["ne(high)"] = f"NIV] 1483/1486 doublet ratio -> {ne_high:.0f} cm^-3"
+        elif _has_ciii:
+            diag["ne(high)"] = f"CIII] 1907/1909 doublet ratio -> {ne_high:.0f} cm^-3"
+    else:
+        parts = []
+        if _has_niv:
+            parts.append("NIV] failed SNR cut or solve")
+        if _has_ciii:
+            parts.append("CIII] failed SNR cut or solve")
+        if parts:
+            diag["ne(high)"] = (
+                f"fallback to ne(low) = {ne_low:.0f} cm^-3 — {'; '.join(parts)}"
+            )
+        else:
+            diag["ne(high)"] = (
+                f"fallback to ne(low) = {ne_low:.0f} cm^-3 — no UV density doublet available"
+            )
+
+    # log(U)
+    if logU is not None:
+        if logU_diag == "N43":
+            diag["log(U)"] = (
+                f"N43 diagnostic (NIV] 1486 / NIII] 1750) -> log(U) = {logU:.2f}"
+            )
+        elif logU_diag == "O32":
+            diag["log(U)"] = (
+                f"O32 diagnostic ([OIII] 5007 / [OII] 3727) -> log(U) = {logU:.2f}"
+            )
+    else:
+        diag["log(U)"] = "not available (N43 and O32 diagnostics both unavailable)"
+
+    # N/O ICF
+    if NO_icf_name is not None:
+        diag["N/O ICF"] = _ICF_DESCRIPTIONS.get(
+            NO_icf_name, f"{icf_method}: {NO_icf_name}"
+        )
+    elif icf_method is not None:
+        diag["N/O ICF"] = "N/O could not be computed (no eligible ions)"
+
+    return diag
+
+
 def _run_direct(
     fluxes: dict[str, float],
     errors: dict[str, float],
@@ -658,6 +802,7 @@ def _run_direct(
         ne_high, logU, icf_method, ionic, posteriors, etc.
     """
     from .direct import (
+        NE_DEFAULT,
         Te_low_from_high,
         compute_ionic_abundances,
         compute_Te_OIII,
@@ -722,6 +867,12 @@ def _run_direct(
 
     icf_method = totals.get("icf_method")
     NO_icf_name = totals.get("NO_icf_name")
+
+    # --- Build diagnostics dict ---
+    diagnostics = _build_diagnostics(
+        fluxes, Te_high, Te_relation, ne_low, ne_high,
+        logU, logU_diag, icf_method, NO_icf_name, NE_DEFAULT,
+    )
 
     # --- MC error propagation (all 6 steps per iteration) ---
     rng = np.random.default_rng(seed)
@@ -831,6 +982,7 @@ def _run_direct(
         "SO": SO_log,
         "NeO": NeO_log,
         "ArO": ArO_log,
+        "diagnostics": diagnostics,
     }
 
 
@@ -882,6 +1034,7 @@ def _run_direct_mcmc(
         Same keys as :func:`_run_direct`.
     """
     from .direct import (
+        NE_DEFAULT,
         Te_low_from_high,
         compute_ionic_abundances,
         compute_Te_OIII,
@@ -1038,6 +1191,11 @@ def _run_direct_mcmc(
         "SO": np.log10(totals_pt["S/O"]) if "S/O" in totals_pt and totals_pt["S/O"] > 0 else None,
         "NeO": np.log10(totals_pt["Ne/O"]) if "Ne/O" in totals_pt and totals_pt["Ne/O"] > 0 else None,
         "ArO": np.log10(totals_pt["Ar/O"]) if "Ar/O" in totals_pt and totals_pt["Ar/O"] > 0 else None,
+        "diagnostics": _build_diagnostics(
+            med_fluxes, Te_high_pt if np.isfinite(Te_high_pt) else None,
+            Te_relation, ne_low, ne_high, logU_pt, logU_diag,
+            icf_method, NO_icf_name, NE_DEFAULT,
+        ),
     }
 
 
@@ -1338,6 +1496,7 @@ def compute_abundances(
             icf_method=direct_out.get("icf_method"),
             NO_icf_name=direct_out.get("NO_icf_name"),
             excluded_lines=excluded_lines if excluded_lines else None,
+            diagnostics=direct_out.get("diagnostics"),
         )
 
     # --- Strong-line method ---
