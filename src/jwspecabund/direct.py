@@ -560,6 +560,97 @@ def compute_ionic_abundances(
     return ionic
 
 
+def _print_icf_reasoning(
+    ionic: dict[str, float],
+    logU: float | None,
+    Z_Zsun: float | None,
+    icf_method: str,
+    use_martinez: bool,
+    totals: dict[str, float],
+) -> None:
+    """Print the full N/O ICF decision breakdown (auto mode only)."""
+    print("\n" + "=" * 60)
+    print("N/O ICF REASONING (icf_method='auto')")
+    print("=" * 60)
+
+    # 1. Detected nitrogen ions
+    n_ions = {
+        "N+/H+": ionic.get("N+/H+", 0.0),
+        "N++/H+": ionic.get("N++/H+", 0.0),
+        "N+++/H+": ionic.get("N+++/H+", 0.0),
+        "N4+/H+": ionic.get("N4+/H+", 0.0),
+    }
+    print("\n--- Detected nitrogen ions ---")
+    for key, val in n_ions.items():
+        status = f"{val:.4e}" if val > 0 else "not detected"
+        print(f"  {key}: {status}")
+
+    # 2. Detected oxygen ions
+    print("\n--- Detected oxygen ions ---")
+    for key in ("O+/H+", "O++/H+"):
+        val = ionic.get(key, 0.0)
+        status = f"{val:.4e}" if val > 0 else "not detected"
+        print(f"  {key}: {status}")
+
+    # 3. Available diagnostics
+    print("\n--- Available diagnostics ---")
+    print(f"  logU:   {logU}" if logU is not None else "  logU:   not available")
+    print(f"  Z/Zsun: {Z_Zsun}" if Z_Zsun is not None else "  Z/Zsun: not available")
+
+    # 4. Requested method
+    print(f"\n--- Requested method: '{icf_method}' ---")
+
+    # 5. Eligibility check
+    print("\n--- Method eligibility ---")
+    has_logU_Z = logU is not None and Z_Zsun is not None
+    N_plus = n_ions["N+/H+"]
+    N_pp = n_ions["N++/H+"]
+    N_ppp = n_ions["N+++/H+"]
+    O_plus = ionic.get("O+/H+", 0.0)
+    O_pp = ionic.get("O++/H+", 0.0)
+
+    # martinez25
+    if has_logU_Z:
+        print("  martinez25: ELIGIBLE (logU and Z/Zsun available)")
+    else:
+        missing = []
+        if logU is None:
+            missing.append("logU")
+        if Z_Zsun is None:
+            missing.append("Z/Zsun")
+        print(f"  martinez25: NOT ELIGIBLE (missing {', '.join(missing)})")
+
+    # direct_sum tiers
+    if N_plus > 0 and (N_pp + N_ppp) > 0:
+        print("  direct_sum (Tier 1 — Np+Npp+Nppp/OH): ELIGIBLE")
+    else:
+        print("  direct_sum (Tier 1 — Np+Npp+Nppp/OH): NOT ELIGIBLE"
+              " (need N+ and N++ or N+++)")
+    if (N_pp + N_ppp) > 0 and O_pp > 0:
+        print("  direct_sum (Tier 2/3 — UV N/O++): ELIGIBLE")
+    else:
+        print("  direct_sum (Tier 2/3 — UV N/O++): NOT ELIGIBLE"
+              " (need N++ or N+++ and O++)")
+    if N_plus > 0 and O_plus > 0:
+        print("  izotov06 (Tier 4 — N+/O+ fallback): ELIGIBLE")
+    else:
+        print("  izotov06 (Tier 4 — N+/O+ fallback): NOT ELIGIBLE"
+              " (need N+ and O+)")
+
+    # 6. Final selection
+    print("\n--- Final selection ---")
+    if "N/O" in totals:
+        method = totals.get("icf_method", "unknown")
+        icf_name = totals.get("NO_icf_name", "N/A")
+        print(f"  Chosen method:  {method}")
+        print(f"  ICF name:       {icf_name}")
+        print(f"  N/O value:      {totals['N/O']:.4e}")
+    else:
+        print("  N/O: could not be computed (no eligible method with detected ions)")
+
+    print("=" * 60 + "\n")
+
+
 def compute_total_abundances(
     ionic: dict[str, float],
     logU: float | None = None,
@@ -688,6 +779,11 @@ def compute_total_abundances(
                 icf_n = icf_nitrogen(O_plus, OH)
                 totals["N/O"] = icf_n * N_plus / O_plus
                 totals["icf_method"] = "izotov06"
+
+        # Print ICF reasoning when auto mode is used.
+        if icf_method == "auto":
+            _print_icf_reasoning(ionic, logU, Z_Zsun, icf_method,
+                                 use_martinez, totals)
 
         # S/O
         S_plus = ionic.get("S+/H+", 0.0)
