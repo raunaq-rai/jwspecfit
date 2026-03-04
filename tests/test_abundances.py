@@ -286,6 +286,84 @@ class TestDirect:
 
 
 # -----------------------------------------------------------------------
+# ICF reasoning diagnostics tests
+# -----------------------------------------------------------------------
+
+class TestICFReasoning:
+    """Tests for _print_icf_reasoning() diagnostics in auto mode."""
+
+    def test_auto_prints_reasoning(self, capsys):
+        """icf_method='auto' should print ICF reasoning to stdout."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {"O+/H+": 1e-5, "O++/H+": 5e-5, "N+/H+": 3e-7, "N++/H+": 2e-6}
+        compute_total_abundances(ionic, logU=-2.5, Z_Zsun=0.1, icf_method="auto")
+        captured = capsys.readouterr()
+        assert "N/O ICF REASONING" in captured.out
+        assert "Detected nitrogen ions" in captured.out
+        assert "Detected oxygen ions" in captured.out
+        assert "Final selection" in captured.out
+
+    def test_non_auto_no_output(self, capsys):
+        """icf_method != 'auto' should NOT print ICF reasoning."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {"O+/H+": 1e-5, "O++/H+": 5e-5, "N+/H+": 3e-7, "N++/H+": 2e-6}
+        compute_total_abundances(ionic, icf_method="direct_sum")
+        captured = capsys.readouterr()
+        assert "N/O ICF REASONING" not in captured.out
+
+    def test_auto_martinez_eligible(self, capsys):
+        """When logU and Z_Zsun are provided, martinez25 should be ELIGIBLE."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {"O+/H+": 1e-5, "O++/H+": 5e-5, "N+/H+": 3e-7}
+        compute_total_abundances(ionic, logU=-2.5, Z_Zsun=0.1, icf_method="auto")
+        captured = capsys.readouterr()
+        assert "martinez25: ELIGIBLE" in captured.out
+
+    def test_auto_martinez_not_eligible_missing_logU(self, capsys):
+        """Without logU, martinez25 should be NOT ELIGIBLE."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {"O+/H+": 1e-5, "O++/H+": 5e-5, "N+/H+": 3e-7}
+        compute_total_abundances(ionic, Z_Zsun=0.1, icf_method="auto")
+        captured = capsys.readouterr()
+        assert "martinez25: NOT ELIGIBLE" in captured.out
+        assert "missing logU" in captured.out
+
+    def test_auto_shows_detected_ions(self, capsys):
+        """Should display detected ion values and 'not detected' for absent ones."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {"O+/H+": 1e-5, "O++/H+": 5e-5, "N++/H+": 2e-6}
+        compute_total_abundances(ionic, icf_method="auto")
+        captured = capsys.readouterr()
+        assert "N++/H+: 2.0000e-06" in captured.out
+        assert "N+/H+: not detected" in captured.out
+        assert "N+++/H+: not detected" in captured.out
+
+    def test_auto_shows_chosen_method(self, capsys):
+        """Final selection should show the chosen method and N/O value."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {"O+/H+": 1e-5, "O++/H+": 5e-5, "N+/H+": 3e-7, "N++/H+": 2e-6}
+        result = compute_total_abundances(ionic, logU=-2.5, Z_Zsun=0.1, icf_method="auto")
+        captured = capsys.readouterr()
+        assert f"Chosen method:  {result['icf_method']}" in captured.out
+        assert "N/O value:" in captured.out
+
+    def test_auto_no_nitrogen_shows_no_method(self, capsys):
+        """When no nitrogen ions are detected, should report N/O cannot be computed."""
+        from jwspecabund.direct import compute_total_abundances
+
+        ionic = {"O+/H+": 1e-5, "O++/H+": 5e-5}
+        compute_total_abundances(ionic, logU=-2.5, Z_Zsun=0.1, icf_method="auto")
+        captured = capsys.readouterr()
+        assert "could not be computed" in captured.out
+
+
+# -----------------------------------------------------------------------
 # Orchestrator tests
 # -----------------------------------------------------------------------
 
