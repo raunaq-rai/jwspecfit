@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -323,7 +324,8 @@ def plot_fit(
         pass
 
     if save_path is not None:
-        fig.savefig(save_path, dpi=200, bbox_inches="tight")
+        save_path = Path(save_path).with_suffix(".png")
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
 
     return fig
 
