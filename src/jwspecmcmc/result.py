@@ -171,7 +171,10 @@ class MCMCResult:
                 flux=mlr.flux,
                 flux_err=flux_err_sym,
                 ew_A=mlr.ew_A,
-                snr=mlr.snr,
+                snr_int_err=mlr.snr,
+                snr_int_cont=0.0,
+                snr_peak_err=0.0,
+                snr_peak_cont=0.0,
             )
 
         return FitResult(

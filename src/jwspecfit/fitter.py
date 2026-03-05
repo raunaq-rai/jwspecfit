@@ -52,8 +52,14 @@ class LineResult:
         Bootstrap uncertainty on flux.
     ew_A : float
         Rest-frame equivalent width (Å).
-    snr : float
-        Signal-to-noise ratio (flux / flux_err).
+    snr_int_err : float
+        Integrated SNR: flux / bootstrap flux error.
+    snr_int_cont : float
+        Integrated SNR: flux / (local continuum RMS × √N_pix).
+    snr_peak_err : float
+        Peak SNR: model peak / uncertainty array at peak pixel.
+    snr_peak_cont : float
+        Peak SNR: model peak / local continuum RMS.
     """
 
     name: str
@@ -64,7 +70,15 @@ class LineResult:
     flux: float
     flux_err: float
     ew_A: float
-    snr: float
+    snr_int_err: float
+    snr_int_cont: float
+    snr_peak_err: float
+    snr_peak_cont: float
+
+    @property
+    def snr(self) -> float:
+        """Backward-compatible alias for snr_int_err."""
+        return self.snr_int_err
 
 
 @dataclass
@@ -545,6 +559,12 @@ def fit_lines(
     line_results = {}
     cont_flam = _ujy_to_flam(continuum, spec.wave_um)
 
+    # Pre-compute the continuum-subtracted residual in f_lam space for
+    # local continuum RMS estimates.
+    resid_flam = flam - build_model(p_best, edges, nL)
+    # Also need the f_lam error array for peak SNR from the uncertainty array.
+    # (flam_err is already available from earlier.)
+
     for i, name in enumerate(line_names):
         A = p_best[i]
         mu = p_best[nL + i]
@@ -553,7 +573,37 @@ def fit_lines(
         f_err = flux_errs[i] if flux_errs is not None else _analytic_flux_err(
             A, sig, flam_err, spec.wave_A, mu, valid
         )
-        snr = flux_line / f_err if f_err > 0 else 0.0
+
+        # --- SNR 1: integrated, bootstrap error ---
+        snr_int_err = flux_line / f_err if f_err > 0 else 0.0
+
+        # --- Peak of the Gaussian model (f_lam units) ---
+        model_peak = A / (sig * _SQRT2PI) if sig > 0 else 0.0
+
+        # --- SNR 3: peak, uncertainty array ---
+        idx_peak = np.argmin(np.abs(spec.wave_A - mu))
+        err_at_peak = flam_err[idx_peak] if valid[idx_peak] else 0.0
+        snr_peak_err = model_peak / err_at_peak if err_at_peak > 0 else 0.0
+
+        # --- Local continuum RMS (±15σ window, excluding ±3σ) ---
+        outer_mask = np.abs(spec.wave_A - mu) < 15.0 * sig
+        inner_mask = np.abs(spec.wave_A - mu) < 3.0 * sig
+        cont_region = outer_mask & ~inner_mask & valid
+        if np.sum(cont_region) >= 3:
+            cont_rms = float(np.std(resid_flam[cont_region]))
+        else:
+            # Fallback: use the uncertainty array median near the line.
+            fallback = outer_mask & valid
+            cont_rms = float(np.median(flam_err[fallback])) if np.any(fallback) else 0.0
+
+        # --- SNR 4: peak, continuum RMS ---
+        snr_peak_cont = model_peak / cont_rms if cont_rms > 0 else 0.0
+
+        # --- SNR 2: integrated, continuum RMS ---
+        # Noise on integrated flux = cont_rms × √(N_pix in ±3σ window).
+        n_pix_line = int(np.sum(inner_mask & valid))
+        int_noise_cont = cont_rms * sqrt(n_pix_line) if n_pix_line > 0 else 0.0
+        snr_int_cont = flux_line / int_noise_cont if int_noise_cont > 0 else 0.0
 
         # Equivalent width (rest-frame).
         # Use continuum at the line centroid.  If the polynomial continuum
@@ -583,7 +633,10 @@ def fit_lines(
             flux=flux_line,
             flux_err=f_err,
             ew_A=ew_rest,
-            snr=snr,
+            snr_int_err=snr_int_err,
+            snr_int_cont=snr_int_cont,
+            snr_peak_err=snr_peak_err,
+            snr_peak_cont=snr_peak_cont,
         )
 
     fit_result = FitResult(

@@ -250,7 +250,10 @@ def save_result(result: "FitResult", path: str | Path) -> None:
             "flux": lr.flux,
             "flux_err": lr.flux_err,
             "ew_A": lr.ew_A,
-            "snr": lr.snr,
+            "snr_int_err": lr.snr_int_err,
+            "snr_int_cont": lr.snr_int_cont,
+            "snr_peak_err": lr.snr_peak_err,
+            "snr_peak_cont": lr.snr_peak_cont,
         }
 
     np.savez_compressed(
@@ -307,6 +310,8 @@ def load_result(path: str | Path) -> "FitResult":
     lines_data = json.loads(str(data["lines_json"][0]))
     lines = {}
     for name, ld in lines_data.items():
+        # Backward compatibility: old files have a single "snr" key.
+        old_snr = ld.get("snr", 0.0)
         lines[name] = LineResult(
             name=name,
             rest_wave_A=ld["rest_wave_A"],
@@ -316,7 +321,10 @@ def load_result(path: str | Path) -> "FitResult":
             flux=ld["flux"],
             flux_err=ld["flux_err"],
             ew_A=ld["ew_A"],
-            snr=ld["snr"],
+            snr_int_err=ld.get("snr_int_err", old_snr),
+            snr_int_cont=ld.get("snr_int_cont", 0.0),
+            snr_peak_err=ld.get("snr_peak_err", 0.0),
+            snr_peak_cont=ld.get("snr_peak_cont", 0.0),
         )
 
     line_names = list(data["line_names"])
@@ -359,33 +367,17 @@ def export_lines_txt(result: "FitResult", path: str | Path, z: float | None = No
             f"# flux units: erg/s/cm2  |  EW units: rest-frame Angstrom\n"
             f"# {'name':<18s} {'rest_A':>10s} {'centroid_A':>12s} "
             f"{'flux':>14s} {'flux_err':>14s} {'EW_A':>10s} "
-            f"{'sigma_v_kms':>12s} {'SNR_int':>10s} {'SNR_peak':>10s}\n"
+            f"{'sigma_v':>12s} {'SNR_i_err':>10s} {'SNR_i_cont':>10s} "
+            f"{'SNR_p_err':>10s} {'SNR_p_cont':>10s}\n"
         )
         for name, lr in result.lines.items():
-            # σ_v = c × σ_λ / λ_obs
             sigma_v = c_kms * lr.sigma_A / lr.centroid_A if lr.centroid_A > 0 else 0.0
-
-            # Peak SNR: peak flux density / local error.
-            nL = len(result.line_names)
-            idx_line = result.line_names.index(name) if name in result.line_names else -1
-            if idx_line >= 0:
-                from .models import build_model
-                p_single = np.zeros(3 * nL)
-                p_single[idx_line] = result.params[idx_line]
-                p_single[nL + idx_line] = result.params[nL + idx_line]
-                p_single[2 * nL + idx_line] = result.params[2 * nL + idx_line]
-                comp = build_model(p_single, result.spectrum.wave_edges_A, nL)
-                comp_ujy = _flam_to_ujy(comp, result.spectrum.wave_um)
-                peak_idx = np.argmax(comp_ujy)
-                err_at_peak = result.spectrum.err_ujy[peak_idx]
-                snr_peak = comp_ujy[peak_idx] / err_at_peak if err_at_peak > 0 else 0.0
-            else:
-                snr_peak = 0.0
 
             f.write(
                 f"  {name:<18s} {lr.rest_wave_A:10.3f} {lr.centroid_A:12.3f} "
                 f"{lr.flux:14.6e} {lr.flux_err:14.6e} {lr.ew_A:10.3f} "
-                f"{sigma_v:12.2f} {lr.snr:10.2f} {snr_peak:10.2f}\n"
+                f"{sigma_v:12.2f} {lr.snr_int_err:10.2f} {lr.snr_int_cont:10.2f} "
+                f"{lr.snr_peak_err:10.2f} {lr.snr_peak_cont:10.2f}\n"
             )
 
     logger.info("Exported %d lines to %s", len(result.lines), path)
