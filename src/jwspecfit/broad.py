@@ -208,7 +208,7 @@ def _bic_bootstrap_single(
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
-    tie_uv_doublets: bool = False,
+    tie_uv_doublets: bool = True,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
 
@@ -343,7 +343,7 @@ def _fit_model_variant(
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
-    tie_uv_doublets: bool = False,
+    tie_uv_doublets: bool = True,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -419,7 +419,7 @@ def fit_with_broad(
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
-    tie_uv_doublets: bool = False,
+    tie_uv_doublets: bool = True,
     _print_R: bool = True,
 ) -> BroadFitResult:
     """Fit emission lines with optional broad Balmer components.

@@ -169,7 +169,7 @@ def fit_lines(
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
-    tie_uv_doublets: bool = False,
+    tie_uv_doublets: bool = True,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
