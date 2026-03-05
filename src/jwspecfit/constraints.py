@@ -160,23 +160,25 @@ class ConstraintSet:
                     p[nL + i_sec] = p[nL + i_pri] * lam_ratio
                     p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
 
-            # Tie UV intercombination line widths to OIII] 1666 in
-            # velocity space.  OIII] 1666 is the anchor; CIII] 1907,
-            # NIV] 1486, and NIII] 1749 (the primary of each doublet)
-            # have their sigma set from OIII] 1666.  Their secondaries
-            # are already tied to their primaries above.
+            # Tie UV intercombination line widths together in velocity
+            # space.  The first available line becomes the anchor whose
+            # width is free; all others are derived from it.  The
+            # shared width is jointly constrained by all tied lines
+            # through the residual.
             # CIV is excluded (resonance line with different physics).
-            if "OIII_1666" in idx:
-                i_anchor = idx["OIII_1666"]
-                lam_anchor = REST_LINES_A["OIII_1666"]
+            _UV_INTERCOM = [
+                "OIII_1666", "CIII]_1907", "NIV_1486", "NIII_1749",
+            ]
+            _uv_present = [n for n in _UV_INTERCOM if n in idx]
+            if len(_uv_present) >= 2:
+                anchor = _uv_present[0]
+                i_anchor = idx[anchor]
+                lam_anchor = REST_LINES_A[anchor]
                 sigma_anchor = p[2 * nL + i_anchor]
-
-                _UV_WIDTH_TIED = ["CIII]_1907", "NIV_1486", "NIII_1749"]
-                for name in _UV_WIDTH_TIED:
-                    if name in idx:
-                        i_t = idx[name]
-                        ratio = REST_LINES_A[name] / lam_anchor
-                        p[2 * nL + i_t] = sigma_anchor * ratio
+                for name in _uv_present[1:]:
+                    i_t = idx[name]
+                    ratio = REST_LINES_A[name] / lam_anchor
+                    p[2 * nL + i_t] = sigma_anchor * ratio
 
         return p
 
@@ -260,11 +262,15 @@ class ConstraintSet:
                     free[nL + i_sec] = False
                     free[2 * nL + i_sec] = False
 
-            # UV intercombination widths tied to OIII] 1666.
-            if "OIII_1666" in idx:
-                for name in ("CIII]_1907", "NIV_1486", "NIII_1749"):
-                    if name in idx:
-                        free[2 * nL + idx[name]] = False
+            # UV intercombination widths: first available is anchor (free),
+            # all others are derived (not free).
+            _UV_INTERCOM = [
+                "OIII_1666", "CIII]_1907", "NIV_1486", "NIII_1749",
+            ]
+            _uv_present = [n for n in _UV_INTERCOM if n in idx]
+            if len(_uv_present) >= 2:
+                for name in _uv_present[1:]:
+                    free[2 * nL + idx[name]] = False
 
         return free
 
