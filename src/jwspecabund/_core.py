@@ -902,6 +902,7 @@ def _run_direct(
     NO_icf_name = totals.get("NO_icf_name")
     failures = totals.pop("_failures", {})
     failures.update(ne_failures)
+    NO_tiers = totals.pop("_NO_tiers", None)
 
     # --- Build diagnostics dict ---
     diagnostics = _build_diagnostics(
@@ -1020,6 +1021,7 @@ def _run_direct(
         "ArO": ArO_log,
         "diagnostics": diagnostics,
         "failures": failures if failures else None,
+        "NO_tiers": NO_tiers,
     }
 
 
@@ -1138,6 +1140,7 @@ def _run_direct_mcmc(
     NO_icf_name = totals_pt.get("NO_icf_name")
     failures = totals_pt.pop("_failures", {})
     failures.update(ne_failures)
+    NO_tiers = totals_pt.pop("_NO_tiers", None)
 
     for i in tqdm(range(n_samples), desc="Direct Te (posterior)", disable=not progress):
         sample = {name: max(float(post[i]), 1e-50) for name, post in posteriors.items()}
@@ -1237,6 +1240,7 @@ def _run_direct_mcmc(
             icf_method, NO_icf_name, NE_DEFAULT,
         ),
         "failures": failures if failures else None,
+        "NO_tiers": NO_tiers,
     }
 
 
@@ -1637,6 +1641,7 @@ def compute_abundances(
             icf_method=direct_out.get("icf_method"),
             NO_icf_name=direct_out.get("NO_icf_name"),
             excluded_lines=excluded_lines if excluded_lines else None,
+            NO_tiers=direct_out.get("NO_tiers"),
             failures=direct_out.get("failures"),
             diagnostics=direct_out.get("diagnostics"),
         )

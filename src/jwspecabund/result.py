@@ -92,6 +92,7 @@ class AbundanceResult:
     icf_method: str | None = None
     NO_icf_name: str | None = None
     excluded_lines: list[str] | None = None
+    NO_tiers: dict[str, float] | None = field(default=None, repr=False)
     failures: dict[str, str] | None = field(default=None, repr=False)
     diagnostics: dict[str, str] | None = field(default=None, repr=False)
     alt_results: dict[str, AbundanceResult] | None = field(default=None, repr=False)
@@ -162,6 +163,17 @@ class AbundanceResult:
         if self.NO_icf_name is not None:
             lines.append(f"  N/O ICF     = {self.NO_icf_name}")
 
+        # --- N/O tiers (all eligible methods) ---
+        if self.NO_tiers and len(self.NO_tiers) > 1:
+            lines.append("")
+            lines.append("N/O by method (all eligible tiers):")
+            for tier_name, log_no in self.NO_tiers.items():
+                selected = " ← selected" if (
+                    self.NO is not None
+                    and abs(log_no - self.NO) < 0.001
+                ) else ""
+                lines.append(f"  {tier_name}: {log_no:.3f}{selected}")
+
         # --- Strong-line info ---
         if self.ratios_used:
             lines.append(f"  Ratios used = {self.ratios_used}")
@@ -170,6 +182,13 @@ class AbundanceResult:
 
         if self.excluded_lines:
             lines.append(f"  Excluded    = {self.excluded_lines}")
+
+        # --- Diagnostics section ---
+        if self.diagnostics:
+            lines.append("")
+            lines.append("Derivation details:")
+            for key, explanation in self.diagnostics.items():
+                lines.append(f"  {key}: {explanation}")
 
         # --- Alternative method results ---
         if self.alt_results:
@@ -186,12 +205,5 @@ class AbundanceResult:
                     lines.append(f"    Ratios used = {alt.ratios_used}")
                 if alt.Te_high is not None:
                     lines.append(f"    T_e(high)   = {alt.Te_high:.0f} K")
-
-        # --- Diagnostics section ---
-        if self.diagnostics:
-            lines.append("")
-            lines.append("Derivation details:")
-            for key, explanation in self.diagnostics.items():
-                lines.append(f"  {key}: {explanation}")
 
         return "\n".join(lines)

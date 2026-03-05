@@ -810,6 +810,43 @@ def compute_total_abundances(
                     f"O ions: {_o_ions}"
                 )
 
+        # Compute ALL eligible N/O tiers for comparison.
+        NO_tiers: dict[str, float] = {}
+        N_plus = ionic.get("N+/H+", 0.0)
+        N_pp = ionic.get("N++/H+", 0.0)
+        N_ppp = ionic.get("N+++/H+", 0.0)
+        N_pppp = ionic.get("N4+/H+", 0.0)
+
+        # Martinez+25
+        if logU is not None and Z_Zsun is not None:
+            from .martinez25_icf import compute_NO_martinez25
+            ne_icf = ne if ne is not None else NE_DEFAULT
+            m25_val, m25_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)
+            if m25_val is not None and m25_val > 0:
+                NO_tiers[f"martinez25 ({m25_name})"] = np.log10(m25_val)
+
+        # Tier 1: direct sum (N+ + N++ + N+++) / OH
+        if N_plus > 0 and (N_pp + N_ppp) > 0:
+            t1 = (N_plus + N_pp + N_ppp + N_pppp) / OH
+            if t1 > 0:
+                NO_tiers["direct_sum Tier 1 (Np+Npp+Nppp/OH)"] = np.log10(t1)
+
+        # Tier 2/3: UV only (N++ + N+++) / O++
+        if (N_pp + N_ppp) > 0 and O_pp > 0:
+            t23 = (N_pp + N_ppp + N_pppp) / O_pp
+            if t23 > 0:
+                NO_tiers["direct_sum Tier 2/3 (UV N/O++)"] = np.log10(t23)
+
+        # Tier 4: Izotov+06 — ICF × N+/O+
+        if N_plus > 0 and O_plus > 0:
+            icf_n_all = icf_nitrogen(O_plus, OH)
+            t4 = icf_n_all * N_plus / O_plus
+            if t4 > 0:
+                NO_tiers["izotov06 Tier 4 (ICF × N+/O+)"] = np.log10(t4)
+
+        if NO_tiers:
+            totals["_NO_tiers"] = NO_tiers
+
         # Print ICF reasoning when auto mode is used.
         if icf_method == "auto":
             _print_icf_reasoning(ionic, logU, Z_Zsun, icf_method,
