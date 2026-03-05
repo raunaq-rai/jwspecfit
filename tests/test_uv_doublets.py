@@ -15,10 +15,8 @@ from scipy.special import erf
 from jwspecfit import Spectrum, fit_with_broad
 from jwspecfit.fitter import fit_lines, FitResult
 from jwspecfit.constraints import (
-    CIV_RATIO,
     NII_RATIO,
     NV_RATIO,
-    OIII_UV_RATIO,
     ConstraintSet,
 )
 from jwspecfit.lines import REST_LINES_A
@@ -104,8 +102,8 @@ class TestConstraintSetFreeMask:
         free = cs.free_mask()
         assert free.all(), "All 12 parameters should be free"
 
-    def test_amplitude_tied_free_mask(self):
-        """Amplitude-tied doublets: secondary has 0 free params."""
+    def test_civ_kinematic_tied_free_mask(self):
+        """CIV doublet: amplitude free, centroid/sigma derived."""
         names = ["CIV_1", "CIV_2"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
@@ -114,7 +112,8 @@ class TestConstraintSetFreeMask:
         assert free[0] is np.True_
         assert free[nL + 0] is np.True_
         assert free[2 * nL + 0] is np.True_
-        assert free[1] is np.False_
+        # CIV_2: amplitude free, centroid/sigma tied
+        assert free[1] is np.True_
         assert free[nL + 1] is np.False_
         assert free[2 * nL + 1] is np.False_
 
@@ -158,13 +157,13 @@ class TestConstraintSetFreeMask:
         assert free[2 * nL + 1] is np.False_
 
     def test_oiii_uv_free_mask(self):
-        """OIII] UV doublet: amplitude-tied (secondary fully constrained)."""
+        """OIII] UV doublet: kinematics-only (amplitude free)."""
         names = ["OIII_1666", "OIII_1661"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         free = cs.free_mask()
         nL = 2
-        assert free[1] is np.False_
+        assert free[1] is np.True_      # amplitude free
         assert free[nL + 1] is np.False_
         assert free[2 * nL + 1] is np.False_
 
@@ -212,12 +211,12 @@ class TestConstraintSetFreeMask:
         n_free_off = int(cs_off.free_mask().sum())
         n_free_on = int(cs_on.free_mask().sum())
         assert n_free_off == 18
-        # CIV_2: -3, CIII]: -2 (A free), NIV_1483: -2 (A free) = 18 - 7 = 11
-        # UV intercom width tying: CIII]_1907 and NIV_1486 widths tied
-        # to first anchor — but neither is the anchor here since OIII_1666
-        # isn't present.  CIII]_1907 is anchor, NIV_1486 width derived: -1
-        # Total: 18 - 7 - 1 = 10
-        assert n_free_on == 10
+        # CIV_2: -2 (centroid+sigma), CIII]: -2 (centroid+sigma),
+        # NIV_1483: -2 (centroid+sigma) = 18 - 6 = 12
+        # UV intercom width tying (CIV excluded — resonance line):
+        # CIII]_1907 is anchor, NIV_1486 width derived: -1
+        # Total: 18 - 6 - 1 = 11
+        assert n_free_on == 11
 
     def test_missing_secondary_is_no_op(self):
         """If only one doublet member is present, no constraint is applied."""
@@ -240,13 +239,16 @@ class TestConstraintSetApply:
             p[2 * nL + i] = 10.0 + 1.0 * i
         return p
 
-    def test_civ_amplitude_ratio(self):
+    def test_civ_amplitude_free(self):
+        """CIV_2 amplitude is free (not fixed ratio) when resolved."""
         names = ["CIV_1", "CIV_2"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         p = self._make_params(names)
+        p[0], p[1] = 3.0, 1.2  # different amplitudes
         p_out = cs.apply(p)
-        assert p_out[1] == pytest.approx(p_out[0] * CIV_RATIO)
+        # Amplitude should be unchanged (free parameter)
+        assert p_out[1] == pytest.approx(1.2)
 
     def test_civ_centroid_velocity_space(self):
         names = ["CIV_1", "CIV_2"]
@@ -276,13 +278,15 @@ class TestConstraintSetApply:
         p_out = cs.apply(p)
         assert p_out[1] == pytest.approx(p_out[0] * NV_RATIO)
 
-    def test_oiii_uv_amplitude_ratio(self):
+    def test_oiii_uv_amplitude_free(self):
+        """OIII] 1661 amplitude is free (not fixed ratio) when resolved."""
         names = ["OIII_1666", "OIII_1661"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         p = self._make_params(names)
+        p[0], p[1] = 3.0, 1.5  # different amplitudes
         p_out = cs.apply(p)
-        assert p_out[1] == pytest.approx(p_out[0] * OIII_UV_RATIO)
+        assert p_out[1] == pytest.approx(1.5)  # amplitude unchanged
 
     def test_ciii_amplitude_free(self):
         """CIII] amplitude is NOT overwritten (kinematics-only, not blended)."""
@@ -340,21 +344,23 @@ class TestConstraintSetApply:
 class TestExpandFreeToFull:
     """Test expand_free_to_full round-trip."""
 
-    def test_round_trip_amplitude_tied(self):
+    def test_round_trip_kinematic_tied_civ(self):
+        """CIV: amplitude free, centroid+sigma tied."""
         names = ["CIV_1", "CIV_2"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         free_mask = cs.free_mask()
-        assert int(free_mask.sum()) == 3
-        p_free = np.array([2.0, 6200.0, 5.0])
+        # Primary: 3 free, secondary: 1 free (amplitude only)
+        assert int(free_mask.sum()) == 4
+        p_free = np.array([2.0, 1.5, 6200.0, 5.0])
         p_full = cs.expand_free_to_full(p_free)
         nL = 2
         assert p_full[0] == pytest.approx(2.0)
+        assert p_full[1] == pytest.approx(1.5)  # amplitude free
         assert p_full[nL + 0] == pytest.approx(6200.0)
-        assert p_full[2 * nL + 0] == pytest.approx(5.0)
-        assert p_full[1] == pytest.approx(2.0 * CIV_RATIO)
         lam_ratio = REST_LINES_A["CIV_2"] / REST_LINES_A["CIV_1"]
         assert p_full[nL + 1] == pytest.approx(6200.0 * lam_ratio)
+        assert p_full[2 * nL + 0] == pytest.approx(5.0)
         assert p_full[2 * nL + 1] == pytest.approx(5.0 * lam_ratio)
 
     def test_round_trip_kinematic_tied(self):
@@ -381,11 +387,11 @@ class TestExpandFreeToFull:
                            tie_uv_doublets=True)
         free_mask = cs.free_mask()
         n_free = int(free_mask.sum())
-        # CIV_1: 3 free, CIV_2: 0
+        # CIV_1: 3 free, CIV_2: 1 (A only, centroid+sigma tied)
         # CIII]_1907: 3, CIII]: 1 (A only)
         # NIV_1486: 2 (A, mu — sigma tied to CIII]_1907 anchor), NIV_1483: 1 (A only)
-        # Total = 3 + 0 + 3 + 1 + 2 + 1 = 10
-        assert n_free == 10
+        # Total = 3 + 1 + 3 + 1 + 2 + 1 = 11
+        assert n_free == 11
 
         p_free = np.arange(1.0, n_free + 1.0)
         p_full = cs.expand_free_to_full(p_free)
@@ -431,7 +437,8 @@ class TestFitLinesUVDoublets:
         )
         assert result.success
 
-    def test_civ_flux_ratio_enforced(self, uv_spectrum_civ_ciii):
+    def test_civ_amplitude_free_in_fit(self, uv_spectrum_civ_ciii):
+        """CIV_2 amplitude should be free (fitted independently)."""
         result = fit_lines(
             uv_spectrum_civ_ciii, z=3.0, R=1000.0,
             lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]"],
@@ -439,8 +446,9 @@ class TestFitLinesUVDoublets:
         )
         civ1 = result.lines["CIV_1"]
         civ2 = result.lines["CIV_2"]
-        measured_ratio = civ2.amplitude / civ1.amplitude
-        assert measured_ratio == pytest.approx(CIV_RATIO, rel=1e-6)
+        # Amplitude is free, so just check both are positive
+        assert civ1.amplitude > 0
+        assert civ2.amplitude > 0
 
     def test_ciii_kinematics_tied(self, uv_spectrum_civ_ciii):
         result = fit_lines(

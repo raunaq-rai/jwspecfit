@@ -22,16 +22,13 @@ NII_RATIO = 1.0 / 2.96
 # Resonance doublets: secondary/primary amplitude ratio (optically thin).
 # Set by statistical weights g = 2J+1; not density-sensitive.
 NV_RATIO = 0.5       # F(NV_2) / F(NV_1)
-CIV_RATIO = 0.5      # F(CIV_2) / F(CIV_1)
-
-# OIII] UV intercombination: weakly density-dependent, not a standard
-# density diagnostic.  Fix for fitting stability.
-OIII_UV_RATIO = 1.0 / 1.20   # F(OIII_1661) / F(OIII_1666)
 
 # Low-density-limit flux ratios for intercombination doublets.
 # Used as default when doublet is unresolved.
 _INTERCOM_LOW_DENSITY_RATIOS: dict[tuple[str, str], float] = {
     # (primary, secondary): F(secondary) / F(primary)
+    ("CIV_1",     "CIV_2"):     0.50,   # optically thin limit
+    ("OIII_1666", "OIII_1661"): 0.83,   # 1/1.20, low-density limit
     ("CIII]_1907", "CIII]"):     0.65,   # Keenan+1992
     ("NIV_1486",   "NIV_1483"):  0.67,
     ("NIII_1749",  "NIII_1752"): 0.67,
@@ -62,6 +59,7 @@ class ConstraintSet:
     tie_nii: bool = True
     tie_balmer_to_oiii: bool = True
     tie_uv_doublets: bool = True
+    tie_uv_centroids: bool = True
     blended_doublets: set[str] | None = None
 
     def apply(self, params: np.ndarray) -> np.ndarray:
@@ -147,8 +145,6 @@ class ConstraintSet:
             _AMPLITUDE_TIED = [
                 # (primary, secondary, ratio = F_secondary / F_primary)
                 ("NV_1",      "NV_2",      NV_RATIO),
-                ("CIV_1",     "CIV_2",     CIV_RATIO),
-                ("OIII_1666", "OIII_1661", OIII_UV_RATIO),
             ]
             for pri, sec, ratio in _AMPLITUDE_TIED:
                 if pri in idx and sec in idx:
@@ -156,7 +152,8 @@ class ConstraintSet:
                     i_sec = idx[sec]
                     lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
                     p[i_sec] = p[i_pri] * ratio
-                    p[nL + i_sec] = p[nL + i_pri] * lam_ratio
+                    if self.tie_uv_centroids:
+                        p[nL + i_sec] = p[nL + i_pri] * lam_ratio
                     p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
 
             # Intercombination doublets: density-sensitive lines.
@@ -165,6 +162,8 @@ class ConstraintSet:
             # low-density-limit ratio for fitting stability.
             _KINEMATIC_TIED = [
                 # (primary, secondary) — amplitudes free when resolved
+                ("CIV_1",     "CIV_2"),
+                ("OIII_1666", "OIII_1661"),
                 ("CIII]_1907", "CIII]"),
                 ("NIV_1486",   "NIV_1483"),
                 ("NIII_1749",  "NIII_1752"),
@@ -176,7 +175,8 @@ class ConstraintSet:
                     i_pri = idx[pri]
                     i_sec = idx[sec]
                     lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
-                    p[nL + i_sec] = p[nL + i_pri] * lam_ratio
+                    if self.tie_uv_centroids:
+                        p[nL + i_sec] = p[nL + i_pri] * lam_ratio
                     p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
                     # Fix amplitude for unresolved doublets.
                     if sec in _blended:
@@ -265,19 +265,20 @@ class ConstraintSet:
             # Amplitude-tied: all 3 parameters of secondary are derived.
             _AMPLITUDE_TIED = [
                 ("NV_1",      "NV_2"),
-                ("CIV_1",     "CIV_2"),
-                ("OIII_1666", "OIII_1661"),
             ]
             for pri, sec in _AMPLITUDE_TIED:
                 if pri in idx and sec in idx:
                     i_sec = idx[sec]
                     free[i_sec] = False
-                    free[nL + i_sec] = False
+                    if self.tie_uv_centroids:
+                        free[nL + i_sec] = False
                     free[2 * nL + i_sec] = False
 
-            # Intercombination doublets: centroid and sigma derived.
+            # Intercombination doublets: sigma derived, centroid conditional.
             # Amplitude is free when resolved, derived when blended.
             _KINEMATIC_TIED = [
+                ("CIV_1",     "CIV_2"),
+                ("OIII_1666", "OIII_1661"),
                 ("CIII]_1907", "CIII]"),
                 ("NIV_1486",   "NIV_1483"),
                 ("NIII_1749",  "NIII_1752"),
@@ -287,7 +288,8 @@ class ConstraintSet:
             for pri, sec in _KINEMATIC_TIED:
                 if pri in idx and sec in idx:
                     i_sec = idx[sec]
-                    free[nL + i_sec] = False
+                    if self.tie_uv_centroids:
+                        free[nL + i_sec] = False
                     free[2 * nL + i_sec] = False
                     if sec in _blended:
                         free[i_sec] = False

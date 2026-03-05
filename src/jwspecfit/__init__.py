@@ -147,6 +147,7 @@ def fit_lines(
     centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
+    tie_uv_centroids: bool = True,
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
@@ -282,6 +283,7 @@ def fit_lines(
                     centroid_vmax=centroid_vmax,
                     moving_average=moving_average,
                     tie_uv_doublets=tie_uv_doublets,
+                    tie_uv_centroids=tie_uv_centroids,
                     _label=win_label,
                 )
             else:
@@ -295,6 +297,7 @@ def fit_lines(
                     centroid_vmax=centroid_vmax,
                     moving_average=moving_average,
                     tie_uv_doublets=tie_uv_doublets,
+                    tie_uv_centroids=tie_uv_centroids,
                     _print_R=False,
                 )
             window_results.append(res)
@@ -318,6 +321,7 @@ def fit_lines(
             centroid_vmax=centroid_vmax,
             moving_average=moving_average,
             tie_uv_doublets=tie_uv_doublets,
+            tie_uv_centroids=tie_uv_centroids,
         )
 
     return fit_with_broad(
@@ -333,4 +337,5 @@ def fit_lines(
         centroid_vmax=centroid_vmax,
         moving_average=moving_average,
         tie_uv_doublets=tie_uv_doublets,
+        tie_uv_centroids=tie_uv_centroids,
     )

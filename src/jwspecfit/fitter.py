@@ -184,6 +184,7 @@ def fit_lines(
     centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
+    tie_uv_centroids: bool = True,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -417,6 +418,7 @@ def fit_lines(
     constraints = ConstraintSet(
         line_names,
         tie_uv_doublets=tie_uv_doublets,
+        tie_uv_centroids=tie_uv_centroids,
         blended_doublets=_blended if _blended else None,
     )
 
