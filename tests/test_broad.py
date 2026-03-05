@@ -10,14 +10,12 @@ from .conftest import PRISM_FITS, G395M_FITS
 
 class TestBalmerPixelMask:
     def test_mask_selects_ha_hb(self):
-        """Mask should select pixels around Hα and Hβ at given redshift."""
+        """Mask should select pixels around Ha and Hb at given redshift."""
         z = 5.0
-        # Hα at 6566.4 Å → obs ~ 3.9398 µm; Hβ at 4864.0 Å → obs ~ 2.9184 µm
         wave_um = np.linspace(2.0, 5.0, 1000)
         mask = _balmer_pixel_mask(wave_um, z)
         assert mask.any(), "Mask should select some pixels"
         assert not mask.all(), "Mask should not select all pixels"
-        # Check that selected pixels are near the expected wavelengths.
         selected = wave_um[mask]
         ha_obs = 6566.4 * (1.0 + z) * 1e-4
         hb_obs = 4864.0 * (1.0 + z) * 1e-4
@@ -42,6 +40,7 @@ class TestFitWithBroad:
         assert result.best_fit.success
 
     def test_auto_mode(self, grating_spectrum):
+        """Auto mode with n_boot_bic=0 (no bootstrap, just point BIC)."""
         result = fit_with_broad(
             grating_spectrum, z=5.0, grating="G395M", mode="auto", n_boot=0,
             n_boot_bic=0,
@@ -71,17 +70,16 @@ class TestFitWithBroad:
         assert "narrow" in result.all_fits
 
     def test_bic_bootstrap_auto(self, grating_spectrum):
-        """Bootstrap BIC should populate bic_bootstrap distributions."""
+        """Bootstrap BIC with small n_boot_bic."""
         result = fit_with_broad(
             grating_spectrum, z=5.0, grating="G395M", mode="auto",
-            n_boot=0, n_boot_bic=5, n_jobs=1, snr_threshold=0.0,
+            n_boot=0, n_boot_bic=3, n_jobs=1, snr_threshold=0.0,
         )
         assert result.selected_model in ("narrow", "broad1", "broad2", "both")
         assert len(result.bic_bootstrap) > 0
         for variant, dist in result.bic_bootstrap.items():
-            assert len(dist) == 5
+            assert len(dist) == 3
             assert np.all(np.isfinite(dist))
-        # Median BIC values should be finite.
         assert np.isfinite(result.bic_narrow)
 
     def test_bic_bootstrap_empty_when_off(self, prism_spectrum):

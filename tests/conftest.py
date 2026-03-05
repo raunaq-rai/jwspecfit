@@ -28,6 +28,38 @@ def grating_spectrum():
     return read_fits(G395M_FITS, z=5.0)
 
 
+# --- Cached fit results (session-scoped for speed) --------------------------
+
+@pytest.fixture(scope="session")
+def _prism_spec_session():
+    from jwspecfit import read_fits
+    return read_fits(PRISM_FITS, z=6.0)
+
+
+@pytest.fixture(scope="session")
+def _grating_spec_session():
+    from jwspecfit import read_fits
+    return read_fits(G395M_FITS, z=5.0)
+
+
+@pytest.fixture(scope="session")
+def prism_fit_result(_prism_spec_session):
+    """Fit prism spectrum once per session (narrow-only, no bootstrap)."""
+    from jwspecfit.fitter import fit_lines
+    return fit_lines(
+        _prism_spec_session, z=6.0, grating="PRISM", n_boot=0,
+    )
+
+
+@pytest.fixture(scope="session")
+def grating_fit_result(_grating_spec_session):
+    """Fit grating spectrum once per session (narrow-only, no bootstrap)."""
+    from jwspecfit.fitter import fit_lines
+    return fit_lines(
+        _grating_spec_session, z=5.0, grating="G395M", n_boot=0,
+    )
+
+
 @pytest.fixture
 def synthetic_spectrum():
     """Create a synthetic spectrum with known emission lines.

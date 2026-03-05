@@ -4,9 +4,10 @@ import numpy as np
 import pytest
 
 from jwspecfit import (
-    Spectrum, read_dict, read_fits, read_npz, fit_lines,
+    Spectrum, read_dict, read_fits, read_npz,
     save_result, load_result, export_lines_txt,
 )
+from jwspecfit.fitter import fit_lines
 from .conftest import G395M_FITS, PRISM_FITS, STACK_NPZ
 
 
@@ -25,9 +26,7 @@ class TestReadFits:
 
     def test_wave_units(self):
         spec = read_fits(PRISM_FITS, z=6.0)
-        # Wave in µm should be < 10
         assert spec.wave_um.max() < 10.0
-        # Wave in Å should be > 1000
         assert spec.wave_A.max() > 1000.0
         np.testing.assert_allclose(spec.wave_A, spec.wave_um * 1e4)
 
@@ -82,49 +81,40 @@ class TestSpectrum:
         spec = read_fits(PRISM_FITS, z=6.0)
         flam = spec.flux_flam
         assert flam.shape == spec.flux_ujy.shape
-        # F_λ should generally be small positive numbers
         valid = spec.mask_valid()
         assert np.any(flam[valid] > 0)
 
 
 class TestSaveLoadResult:
-    @pytest.fixture
-    def fit_result(self, prism_spectrum):
-        return fit_lines(prism_spectrum, z=6.0, grating="PRISM", n_boot=0)
-
-    def test_round_trip(self, fit_result, tmp_path):
+    def test_round_trip(self, prism_fit_result, tmp_path):
         outfile = tmp_path / "result.npz"
-        save_result(fit_result, outfile)
+        save_result(prism_fit_result, outfile)
         loaded = load_result(outfile)
-        assert loaded.success == fit_result.success
-        np.testing.assert_allclose(loaded.model_flux, fit_result.model_flux, rtol=1e-10)
-        np.testing.assert_allclose(loaded.chi2, fit_result.chi2)
-        assert set(loaded.lines.keys()) == set(fit_result.lines.keys())
-        for name in fit_result.lines:
-            np.testing.assert_allclose(loaded.lines[name].flux, fit_result.lines[name].flux)
+        assert loaded.success == prism_fit_result.success
+        np.testing.assert_allclose(loaded.model_flux, prism_fit_result.model_flux, rtol=1e-10)
+        np.testing.assert_allclose(loaded.chi2, prism_fit_result.chi2)
+        assert set(loaded.lines.keys()) == set(prism_fit_result.lines.keys())
+        for name in prism_fit_result.lines:
+            np.testing.assert_allclose(loaded.lines[name].flux, prism_fit_result.lines[name].flux)
 
-    def test_spectrum_preserved(self, fit_result, tmp_path):
+    def test_spectrum_preserved(self, prism_fit_result, tmp_path):
         outfile = tmp_path / "result.npz"
-        save_result(fit_result, outfile)
+        save_result(prism_fit_result, outfile)
         loaded = load_result(outfile)
-        np.testing.assert_allclose(loaded.spectrum.wave_um, fit_result.spectrum.wave_um)
-        assert loaded.spectrum.grating == fit_result.spectrum.grating
+        np.testing.assert_allclose(loaded.spectrum.wave_um, prism_fit_result.spectrum.wave_um)
+        assert loaded.spectrum.grating == prism_fit_result.spectrum.grating
 
 
 class TestExportLinesTxt:
-    def test_writes_file(self, prism_spectrum, tmp_path):
-        result = fit_lines(prism_spectrum, z=6.0, grating="PRISM", n_boot=0)
+    def test_writes_file(self, prism_fit_result, tmp_path):
         outfile = tmp_path / "lines.txt"
-        export_lines_txt(result, outfile)
+        export_lines_txt(prism_fit_result, outfile)
         assert outfile.exists()
         lines = outfile.read_text().strip().split("\n")
-        # Header + data lines
         assert len(lines) >= 4  # 3 header + at least 1 line
-        # Check header contains expected columns
         assert "flux" in lines[2]
         assert "EW_A" in lines[2]
         assert "SNR_p_err" in lines[2]
-        # Check units header
         assert "erg/s/cm2" in lines[1]
 
 
@@ -205,7 +195,6 @@ class TestSaveLoadMCMCResult:
     """Tests for jwspecmcmc save/load round-trip."""
 
     def test_mcmc_round_trip(self, tmp_path):
-        """MCMCResult round-trips through save/load."""
         from jwspecmcmc import save_mcmc_result, load_mcmc_result
 
         original = _make_synthetic_mcmc_result()
@@ -232,7 +221,6 @@ class TestSaveLoadMCMCResult:
             )
 
     def test_mcmc_flux_posterior_preserved(self, tmp_path):
-        """Per-line flux posteriors survive round-trip."""
         from jwspecmcmc import save_mcmc_result, load_mcmc_result
 
         original = _make_synthetic_mcmc_result()
@@ -248,7 +236,6 @@ class TestSaveLoadMCMCResult:
             )
 
     def test_mcmc_spectrum_preserved(self, tmp_path):
-        """Spectrum data survives round-trip."""
         from jwspecmcmc import save_mcmc_result, load_mcmc_result
 
         original = _make_synthetic_mcmc_result()
@@ -263,7 +250,6 @@ class TestSaveLoadMCMCResult:
         assert loaded.spectrum.z == original.spectrum.z
 
     def test_mcmc_constraints_preserved(self, tmp_path):
-        """ConstraintSet fields survive round-trip."""
         from jwspecmcmc import save_mcmc_result, load_mcmc_result
 
         original = _make_synthetic_mcmc_result()
@@ -277,7 +263,6 @@ class TestSaveLoadMCMCResult:
         assert loaded.constraints.line_names == original.constraints.line_names
 
     def test_mcmc_chains_preserved(self, tmp_path):
-        """Walker chains survive round-trip."""
         from jwspecmcmc import save_mcmc_result, load_mcmc_result
 
         original = _make_synthetic_mcmc_result()
@@ -289,11 +274,9 @@ class TestSaveLoadMCMCResult:
         np.testing.assert_allclose(loaded.chains, original.chains, rtol=1e-10)
 
     def test_mcmc_no_chains(self, tmp_path):
-        """MCMCResult with chains=None (nautilus) round-trips correctly."""
         from jwspecmcmc import save_mcmc_result, load_mcmc_result
 
         original = _make_synthetic_mcmc_result()
-        # Simulate nautilus (no walker chains).
         original.chains = None
         original.sampler_name = "nautilus"
 
@@ -305,7 +288,6 @@ class TestSaveLoadMCMCResult:
         assert loaded.sampler_name == "nautilus"
 
     def test_mcmc_broad_round_trip(self, tmp_path):
-        """MCMCBroadFitResult round-trips with BIC metadata."""
         from jwspecmcmc import save_mcmc_result, load_mcmc_result
         from jwspecmcmc.result import MCMCBroadFitResult
 
@@ -329,12 +311,10 @@ class TestSaveLoadMCMCResult:
         np.testing.assert_allclose(loaded.bic_broad1, 1180.0)
         np.testing.assert_allclose(loaded.bic_broad2, 1195.0)
         np.testing.assert_allclose(loaded.bic_both, 1190.0)
-        # Delegated properties still work.
         assert set(loaded.lines.keys()) == set(mcmc.lines.keys())
         np.testing.assert_allclose(loaded.flat_chains, mcmc.flat_chains, rtol=1e-10)
 
     def test_mcmc_convergence_preserved(self, tmp_path):
-        """Convergence diagnostics survive round-trip."""
         from jwspecmcmc import save_mcmc_result, load_mcmc_result
 
         original = _make_synthetic_mcmc_result()

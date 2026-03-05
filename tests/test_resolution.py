@@ -85,8 +85,8 @@ class TestRFromPixels:
         assert R_arr.shape == lam.shape
 
     def test_auto_detect_in_fit(self, prism_spectrum):
-        """Full integration: fit_lines with no grating or R should auto-detect."""
-        from jwspecfit import fit_lines
+        """fit_lines (narrow-only) with no grating or R should auto-detect."""
+        from jwspecfit.fitter import fit_lines
         spec = prism_spectrum.copy()
         spec.grating = None
         spec.R = None
