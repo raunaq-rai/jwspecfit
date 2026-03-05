@@ -160,6 +160,24 @@ class ConstraintSet:
                     p[nL + i_sec] = p[nL + i_pri] * lam_ratio
                     p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
 
+            # Tie UV intercombination line widths to OIII] 1666 in
+            # velocity space.  OIII] 1666 is the anchor; CIII] 1907,
+            # NIV] 1486, and NIII] 1749 (the primary of each doublet)
+            # have their sigma set from OIII] 1666.  Their secondaries
+            # are already tied to their primaries above.
+            # CIV is excluded (resonance line with different physics).
+            if "OIII_1666" in idx:
+                i_anchor = idx["OIII_1666"]
+                lam_anchor = REST_LINES_A["OIII_1666"]
+                sigma_anchor = p[2 * nL + i_anchor]
+
+                _UV_WIDTH_TIED = ["CIII]_1907", "NIV_1486", "NIII_1749"]
+                for name in _UV_WIDTH_TIED:
+                    if name in idx:
+                        i_t = idx[name]
+                        ratio = REST_LINES_A[name] / lam_anchor
+                        p[2 * nL + i_t] = sigma_anchor * ratio
+
         return p
 
     def free_mask(self) -> np.ndarray:
@@ -241,6 +259,12 @@ class ConstraintSet:
                     i_sec = idx[sec]
                     free[nL + i_sec] = False
                     free[2 * nL + i_sec] = False
+
+            # UV intercombination widths tied to OIII] 1666.
+            if "OIII_1666" in idx:
+                for name in ("CIII]_1907", "NIV_1486", "NIII_1749"):
+                    if name in idx:
+                        free[2 * nL + idx[name]] = False
 
         return free
 
