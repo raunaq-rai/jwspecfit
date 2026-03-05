@@ -490,11 +490,32 @@ def fit_lines(
         lb[2 * nL + i] = sig_lo
         ub[2 * nL + i] = sig_hi
 
+    # Cap amplitude bounds for kinematic-tied doublet secondaries.
+    # Without this, the secondary can blow up to absorb noise because
+    # its amplitude is free but its width is tied (narrow), giving a
+    # huge peak.  Cap at 5× the primary's seed amplitude.
+    idx = {name: i for i, name in enumerate(line_names)}
+    _KINEMATIC_PAIRS = [
+        ("CIII]_1907", "CIII]"),
+        ("NIV_1486",   "NIV_1483"),
+        ("NIII_1749",  "NIII_1752"),
+        ("SiIII_1",   "SiIII_2"),
+    ]
+    for pri, sec in _KINEMATIC_PAIRS:
+        if pri in idx and sec in idx:
+            i_pri = idx[pri]
+            i_sec = idx[sec]
+            cap = 5.0 * max(abs(p0[i_pri]), 1e-30)
+            if not sec.startswith("abs_"):
+                ub[i_sec] = min(ub[i_sec], cap)
+            else:
+                lb[i_sec] = max(lb[i_sec], -cap)
+            p0[i_sec] = np.clip(p0[i_sec], lb[i_sec] + 1e-30, ub[i_sec] - 1e-30)
+
     # Override seeds from a previous fit (e.g. narrow-only results).
     # For non-broad lines, also set an amplitude floor at 30% of the
     # narrow-only value to prevent the optimizer from zeroing out narrow
     # lines when a broad component can absorb their flux.
-    idx = {name: i for i, name in enumerate(line_names)}
     if _p0_hint is not None:
         for hint_name, (hint_A, hint_mu, hint_sig) in _p0_hint.items():
             if hint_name in idx:
