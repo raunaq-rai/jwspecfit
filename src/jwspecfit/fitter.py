@@ -387,8 +387,35 @@ def fit_lines(
     # Pixel weights.
     w_pix = pixel_weight(dlam)
 
+    # Detect unresolved intercombination doublets: if the doublet
+    # separation is < 2.5 × sigma_inst, the components are blended
+    # and their amplitude ratio cannot be measured.  Fix to the
+    # low-density-limit ratio for fitting stability.
+    from .constraints import _INTERCOM_LOW_DENSITY_RATIOS
+
+    _blended: set[str] = set()
+    if tie_uv_doublets:
+        for (pri, sec) in _INTERCOM_LOW_DENSITY_RATIOS:
+            if pri in line_names and sec in line_names:
+                lam_pri = REST_LINES_A[pri] * (1.0 + z)
+                lam_sec = REST_LINES_A[sec] * (1.0 + z)
+                sep = abs(lam_pri - lam_sec)
+                idx_near_pri = np.argmin(np.abs(spec.wave_A - lam_pri))
+                sig_at_line = sig_inst[idx_near_pri]
+                if sep < 2.5 * sig_at_line:
+                    _blended.add(sec)
+                    logger.info(
+                        "Blended doublet: %s–%s (sep=%.1f A, "
+                        "sigma_inst=%.1f A) → fixing amplitude ratio.",
+                        pri, sec, sep, sig_at_line,
+                    )
+
     # Setup constraints.
-    constraints = ConstraintSet(line_names, tie_uv_doublets=tie_uv_doublets)
+    constraints = ConstraintSet(
+        line_names,
+        tie_uv_doublets=tie_uv_doublets,
+        blended_doublets=_blended if _blended else None,
+    )
 
     # Initial parameters: [amplitudes, centroids, sigmas].
     nL = len(line_names)
@@ -490,32 +517,11 @@ def fit_lines(
         lb[2 * nL + i] = sig_lo
         ub[2 * nL + i] = sig_hi
 
-    # Cap amplitude bounds for kinematic-tied doublet secondaries.
-    # Without this, the secondary can blow up to absorb noise because
-    # its amplitude is free but its width is tied (narrow), giving a
-    # huge peak.  Cap at 5× the primary's seed amplitude.
-    idx = {name: i for i, name in enumerate(line_names)}
-    _KINEMATIC_PAIRS = [
-        ("CIII]_1907", "CIII]"),
-        ("NIV_1486",   "NIV_1483"),
-        ("NIII_1749",  "NIII_1752"),
-        ("SiIII_1",   "SiIII_2"),
-    ]
-    for pri, sec in _KINEMATIC_PAIRS:
-        if pri in idx and sec in idx:
-            i_pri = idx[pri]
-            i_sec = idx[sec]
-            cap = 5.0 * max(abs(p0[i_pri]), 1e-30)
-            if not sec.startswith("abs_"):
-                ub[i_sec] = min(ub[i_sec], cap)
-            else:
-                lb[i_sec] = max(lb[i_sec], -cap)
-            p0[i_sec] = np.clip(p0[i_sec], lb[i_sec] + 1e-30, ub[i_sec] - 1e-30)
-
     # Override seeds from a previous fit (e.g. narrow-only results).
     # For non-broad lines, also set an amplitude floor at 30% of the
     # narrow-only value to prevent the optimizer from zeroing out narrow
     # lines when a broad component can absorb their flux.
+    idx = {name: i for i, name in enumerate(line_names)}
     if _p0_hint is not None:
         for hint_name, (hint_A, hint_mu, hint_sig) in _p0_hint.items():
             if hint_name in idx:

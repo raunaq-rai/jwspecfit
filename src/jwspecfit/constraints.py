@@ -28,6 +28,16 @@ CIV_RATIO = 0.5      # F(CIV_2) / F(CIV_1)
 # density diagnostic.  Fix for fitting stability.
 OIII_UV_RATIO = 1.0 / 1.20   # F(OIII_1661) / F(OIII_1666)
 
+# Low-density-limit flux ratios for intercombination doublets.
+# Used as default when doublet is unresolved.
+_INTERCOM_LOW_DENSITY_RATIOS: dict[tuple[str, str], float] = {
+    # (primary, secondary): F(secondary) / F(primary)
+    ("CIII]_1907", "CIII]"):     0.65,   # Keenan+1992
+    ("NIV_1486",   "NIV_1483"):  0.67,
+    ("NIII_1749",  "NIII_1752"): 0.67,
+    ("SiIII_1",   "SiIII_2"):   0.67,
+}
+
 
 @dataclass
 class ConstraintSet:
@@ -41,12 +51,18 @@ class ConstraintSet:
         Tie [NII] 6549 amplitude and kinematics to [NII] 6585.
     tie_balmer_to_oiii : bool
         Tie narrow Balmer (and [NII]) widths to [OIII] 5007 in velocity space.
+    blended_doublets : set of str
+        Secondary line names of kinematic-tied doublets that are
+        unresolved and should have their amplitude fixed to the
+        low-density-limit ratio.  Populated by the fitter based on
+        spectral resolution.
     """
 
     line_names: list[str]
     tie_nii: bool = True
     tie_balmer_to_oiii: bool = True
     tie_uv_doublets: bool = True
+    blended_doublets: set[str] | None = None
 
     def apply(self, params: np.ndarray) -> np.ndarray:
         """Apply constraints to a parameter vector (in-place copy).
@@ -143,15 +159,18 @@ class ConstraintSet:
                     p[nL + i_sec] = p[nL + i_pri] * lam_ratio
                     p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
 
-            # Kinematics-only doublets: density-sensitive intercombination
-            # lines whose flux ratio must remain free.
+            # Intercombination doublets: density-sensitive lines.
+            # If resolved, only kinematics are tied (amplitude free).
+            # If blended (unresolved), amplitude is also fixed to the
+            # low-density-limit ratio for fitting stability.
             _KINEMATIC_TIED = [
-                # (primary, secondary) — amplitudes stay free
+                # (primary, secondary) — amplitudes free when resolved
                 ("CIII]_1907", "CIII]"),
                 ("NIV_1486",   "NIV_1483"),
                 ("NIII_1749",  "NIII_1752"),
                 ("SiIII_1",   "SiIII_2"),
             ]
+            _blended = self.blended_doublets or set()
             for pri, sec in _KINEMATIC_TIED:
                 if pri in idx and sec in idx:
                     i_pri = idx[pri]
@@ -159,6 +178,12 @@ class ConstraintSet:
                     lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
                     p[nL + i_sec] = p[nL + i_pri] * lam_ratio
                     p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
+                    # Fix amplitude for unresolved doublets.
+                    if sec in _blended:
+                        ratio = _INTERCOM_LOW_DENSITY_RATIOS.get(
+                            (pri, sec), 0.67,
+                        )
+                        p[i_sec] = p[i_pri] * ratio
 
             # Tie UV intercombination line widths together in velocity
             # space.  The first available line becomes the anchor whose
@@ -249,18 +274,22 @@ class ConstraintSet:
                     free[nL + i_sec] = False
                     free[2 * nL + i_sec] = False
 
-            # Kinematics-only: centroid and sigma derived, amplitude free.
+            # Intercombination doublets: centroid and sigma derived.
+            # Amplitude is free when resolved, derived when blended.
             _KINEMATIC_TIED = [
                 ("CIII]_1907", "CIII]"),
                 ("NIV_1486",   "NIV_1483"),
                 ("NIII_1749",  "NIII_1752"),
                 ("SiIII_1",   "SiIII_2"),
             ]
+            _blended = self.blended_doublets or set()
             for pri, sec in _KINEMATIC_TIED:
                 if pri in idx and sec in idx:
                     i_sec = idx[sec]
                     free[nL + i_sec] = False
                     free[2 * nL + i_sec] = False
+                    if sec in _blended:
+                        free[i_sec] = False
 
             # UV intercombination widths: first available is anchor (free),
             # all others are derived (not free).

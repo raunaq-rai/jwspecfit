@@ -123,7 +123,7 @@ class TestExportLinesTxt:
         # Check header contains expected columns
         assert "flux" in lines[2]
         assert "EW_A" in lines[2]
-        assert "SNR_peak" in lines[2]
+        assert "SNR_p_err" in lines[2]
         # Check units header
         assert "erg/s/cm2" in lines[1]
 
