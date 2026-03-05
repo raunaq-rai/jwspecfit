@@ -388,10 +388,12 @@ def fit_lines(
     w_pix = pixel_weight(dlam)
 
     # Detect unresolved intercombination doublets: if the doublet
-    # separation is < 2.5 × sigma_inst, the components are blended
-    # and their amplitude ratio cannot be measured.  Fix to the
-    # low-density-limit ratio for fitting stability.
+    # separation is < 2×FWHM (≈ 4.71 × sigma_inst), the components
+    # cannot be reliably decomposed.  Fix the amplitude ratio to the
+    # low-density limit for fitting stability.
     from .constraints import _INTERCOM_LOW_DENSITY_RATIOS
+
+    _BLEND_THRESHOLD = 4.71  # 2 × FWHM in sigma units
 
     _blended: set[str] = set()
     if tie_uv_doublets:
@@ -402,12 +404,13 @@ def fit_lines(
                 sep = abs(lam_pri - lam_sec)
                 idx_near_pri = np.argmin(np.abs(spec.wave_A - lam_pri))
                 sig_at_line = sig_inst[idx_near_pri]
-                if sep < 2.5 * sig_at_line:
+                if sep < _BLEND_THRESHOLD * sig_at_line:
                     _blended.add(sec)
-                    logger.info(
-                        "Blended doublet: %s–%s (sep=%.1f A, "
-                        "sigma_inst=%.1f A) → fixing amplitude ratio.",
-                        pri, sec, sep, sig_at_line,
+                    print(
+                        f"  Blended: {pri}–{sec} "
+                        f"(sep={sep:.1f} Å < {_BLEND_THRESHOLD:.1f}×σ_inst="
+                        f"{_BLEND_THRESHOLD * sig_at_line:.1f} Å) "
+                        f"→ fixing ratio"
                     )
 
     # Setup constraints.
