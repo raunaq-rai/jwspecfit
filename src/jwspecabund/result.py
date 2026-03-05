@@ -60,6 +60,9 @@ class AbundanceResult:
         log(Ar/O) if [ArIII] available.
     excluded_lines : list of str or None
         Line names excluded by the per-line SNR filter.
+    failures : dict or None
+        Reasons why specific abundance ratios could not be computed,
+        e.g. ``{"N/O": "no nitrogen ions detected"}``.
     """
 
     method: str
@@ -89,6 +92,7 @@ class AbundanceResult:
     icf_method: str | None = None
     NO_icf_name: str | None = None
     excluded_lines: list[str] | None = None
+    failures: dict[str, str] | None = field(default=None, repr=False)
     diagnostics: dict[str, str] | None = field(default=None, repr=False)
     # Internal: full forward model result dict (samples, param_names, etc.)
     _forward_result: dict[str, Any] | None = field(default=None, repr=False)
@@ -106,17 +110,28 @@ class AbundanceResult:
         lines = [f"AbundanceResult (method={self.method})"]
 
         # --- Abundances ---
+        _f = self.failures or {}
         lines.append(f"  12+log(O/H) = {self.OH:.3f} +/- {self.OH_err}")
         if self.NO is not None:
             lines.append(f"  log(N/O)    = {self.NO:.3f} +/- {self.NO_err}")
+        elif "N/O" in _f:
+            lines.append(f"  log(N/O)    = FAILED — {_f['N/O']}")
         if self.CO is not None:
             lines.append(f"  log(C/O)    = {self.CO:.3f} +/- {self.CO_err}")
+        elif "C/O" in _f:
+            lines.append(f"  log(C/O)    = FAILED — {_f['C/O']}")
         if self.SO is not None:
             lines.append(f"  log(S/O)    = {self.SO:.3f}")
+        elif "S/O" in _f:
+            lines.append(f"  log(S/O)    = FAILED — {_f['S/O']}")
         if self.NeO is not None:
             lines.append(f"  log(Ne/O)   = {self.NeO:.3f}")
+        elif "Ne/O" in _f:
+            lines.append(f"  log(Ne/O)   = FAILED — {_f['Ne/O']}")
         if self.ArO is not None:
             lines.append(f"  log(Ar/O)   = {self.ArO:.3f}")
+        elif "Ar/O" in _f:
+            lines.append(f"  log(Ar/O)   = FAILED — {_f['Ar/O']}")
 
         # --- Physical conditions ---
         if self.Te_high is not None:
@@ -134,6 +149,11 @@ class AbundanceResult:
             lines.append(f"  log(U)      = {self.logU:.2f}")
         if self.Av is not None:
             lines.append(f"  A_V         = {self.Av:.3f}")
+
+        # --- Density solve failures ---
+        _ne_keys = [k for k in _f if k.startswith("n_e(")]
+        for k in _ne_keys:
+            lines.append(f"  {k:14s}= FAILED — {_f[k]}")
 
         # --- ICF info ---
         if self.icf_method is not None:

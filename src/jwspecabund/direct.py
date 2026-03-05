@@ -67,8 +67,9 @@ def compute_ne(
     pn = _get_pyneb()
 
     if flux_line2 <= 0:
-        logger.warning("Denominator flux <= 0 for n_e; returning %.0f cm^-3.", NE_DEFAULT)
-        return NE_DEFAULT
+        raise ValueError(
+            f"Denominator flux <= 0 for {doublet} density solve"
+        )
 
     ratio = flux_line1 / flux_line2
 
@@ -85,10 +86,12 @@ def compute_ne(
     else:
         raise ValueError(f"Unknown doublet: {doublet!r}. Use 'SII' or 'OII'.")
 
-    # PyNEB can return nan for extreme ratios; fall back to default.
+    # PyNEB can return nan for extreme ratios.
     if np.isnan(ne) or ne <= 0:
-        logger.warning("PyNEB returned invalid n_e=%.1f; using %.0f cm^-3.", ne, NE_DEFAULT)
-        return NE_DEFAULT
+        raise ValueError(
+            f"PyNEB returned invalid n_e={ne:.1f} for {doublet} "
+            f"ratio={ratio:.3f} (ratio out of valid range)"
+        )
 
     return float(ne)
 
@@ -119,16 +122,17 @@ def compute_ne_CIII(
     pn = _get_pyneb()
 
     if flux_1909 <= 0:
-        logger.warning("CIII] 1909 flux <= 0; returning %.0f cm^-3.", NE_DEFAULT)
-        return NE_DEFAULT
+        raise ValueError("CIII] 1909 flux <= 0 for density solve")
 
     ratio = flux_1907 / flux_1909
     atom = pn.Atom("C", 3)
     ne = atom.getTemDen(ratio, tem=Te_guess, wave1=1907, wave2=1909)
 
     if np.isnan(ne) or ne <= 0:
-        logger.warning("PyNEB returned invalid n_e=%.1f from CIII]; using %.0f cm^-3.", ne, NE_DEFAULT)
-        return NE_DEFAULT
+        raise ValueError(
+            f"PyNEB returned invalid n_e={ne:.1f} from CIII] "
+            f"ratio={ratio:.3f} (ratio out of valid range)"
+        )
 
     return float(ne)
 
@@ -159,16 +163,17 @@ def compute_ne_NIV(
     pn = _get_pyneb()
 
     if flux_1486 <= 0:
-        logger.warning("NIV] 1486 flux <= 0; returning %.0f cm^-3.", NE_DEFAULT)
-        return NE_DEFAULT
+        raise ValueError("NIV] 1486 flux <= 0 for density solve")
 
     ratio = flux_1483 / flux_1486
     atom = pn.Atom("N", 4)
     ne = atom.getTemDen(ratio, tem=Te_guess, wave1=1483, wave2=1487)
 
     if np.isnan(ne) or ne <= 0:
-        logger.warning("PyNEB returned invalid n_e=%.1f from NIV]; using %.0f cm^-3.", ne, NE_DEFAULT)
-        return NE_DEFAULT
+        raise ValueError(
+            f"PyNEB returned invalid n_e={ne:.1f} from NIV] "
+            f"ratio={ratio:.3f} (ratio out of valid range)"
+        )
 
     return float(ne)
 
@@ -697,6 +702,7 @@ def compute_total_abundances(
     from .icf import icf_argon, icf_neon, icf_nitrogen, icf_sulfur
 
     totals: dict[str, float] = {}
+    failures: dict[str, str] = {}
 
     O_plus = ionic.get("O+/H+", 0.0)
     O_pp = ionic.get("O++/H+", 0.0)
@@ -786,6 +792,24 @@ def compute_total_abundances(
                 totals["N/O"] = icf_n * N_plus / O_plus
                 totals["icf_method"] = "izotov06"
 
+        # Record N/O failure reason if not computed.
+        if "N/O" not in totals:
+            _n_ions = [k for k in ("N+/H+", "N++/H+", "N+++/H+", "N4+/H+")
+                       if ionic.get(k, 0.0) > 0]
+            _o_ions = [k for k in ("O+/H+", "O++/H+")
+                       if ionic.get(k, 0.0) > 0]
+            if not _n_ions:
+                failures["N/O"] = "no nitrogen ions detected"
+            elif icf_method in ("izotov06", "auto") and not use_martinez:
+                failures["N/O"] = (
+                    f"Izotov+06 requires N+ and O+; have {_n_ions} and {_o_ions}"
+                )
+            else:
+                failures["N/O"] = (
+                    f"no eligible ICF tier; detected N ions: {_n_ions}, "
+                    f"O ions: {_o_ions}"
+                )
+
         # Print ICF reasoning when auto mode is used.
         if icf_method == "auto":
             _print_icf_reasoning(ionic, logU, Z_Zsun, icf_method,
@@ -798,24 +822,38 @@ def compute_total_abundances(
             S_total_ion = S_plus + S_pp
             icf_s = icf_sulfur(O_plus, OH)
             totals["S/O"] = icf_s * S_total_ion / OH
+        else:
+            failures["S/O"] = "no S+ or S++ ions detected ([SII]/[SIII] missing)"
 
         # Ne/O
         Ne_pp = ionic.get("Ne++/H+", 0.0)
         if Ne_pp > 0 and O_pp > 0:
             icf_ne = icf_neon(O_plus, OH)
             totals["Ne/O"] = icf_ne * Ne_pp / O_pp
+        elif Ne_pp <= 0:
+            failures["Ne/O"] = "no Ne++ ion detected ([NeIII] 3869 missing)"
+        else:
+            failures["Ne/O"] = "no O++ ion for Ne/O normalisation"
 
         # Ar/O
         Ar_pp = ionic.get("Ar++/H+", 0.0)
         if Ar_pp > 0 and O_pp > 0:
             icf_ar = icf_argon(O_plus, OH)
             totals["Ar/O"] = icf_ar * Ar_pp / O_pp
+        elif Ar_pp <= 0:
+            failures["Ar/O"] = "no Ar++ ion detected ([ArIII] 7136 missing)"
+        else:
+            failures["Ar/O"] = "no O++ ion for Ar/O normalisation"
 
         # C/O — direct sum (C2+ + C3+) / O2+  (Jones+2023)
         C_pp = ionic.get("C++/H+", 0.0)
         C_ppp = ionic.get("C+++/H+", 0.0)
         if (C_pp + C_ppp) > 0 and O_pp > 0:
             totals["C/O"] = (C_pp + C_ppp) / O_pp
+        elif (C_pp + C_ppp) <= 0:
+            failures["C/O"] = "no C++ or C+++ ions detected (CIII]/CIV missing)"
+        else:
+            failures["C/O"] = "no O++ ion for C/O normalisation"
 
         # UV N/O — raw ionic sum without ICF (for comparison).
         N_pp = ionic.get("N++/H+", 0.0)
@@ -825,4 +863,5 @@ def compute_total_abundances(
         if N_uv > 0 and O_pp > 0:
             totals["N/O_UV_raw"] = N_uv / O_pp
 
+    totals["_failures"] = failures
     return totals

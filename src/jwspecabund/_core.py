@@ -267,7 +267,7 @@ def _compute_multi_ne(
     errors: dict[str, float] | None = None,
     snr_ne: float = 3.0,
     ne_high_max: float = 1e5,
-) -> tuple[float, float | None, float]:
+) -> tuple[float, float | None, float, dict[str, str]]:
     """Compute 3-zone electron densities (Berg+2025 step 1).
 
     Parameters
@@ -289,18 +289,22 @@ def _compute_multi_ne(
     Returns
     -------
     tuple
-        ``(ne_low, ne_mid, ne_high)`` in cm^-3.
+        ``(ne_low, ne_mid, ne_high, ne_failures)`` in cm^-3.
 
         - ``ne_low``: from [SII] 6718/6732 or [OII] 3726/3729 (~14 eV).
         - ``ne_mid``: from CIII] 1907/1909 (~24 eV); ``None`` if
           unavailable.  Used for C²⁺, N²⁺, S²⁺, Ar²⁺.
         - ``ne_high``: from NIV] 1483/1486 (~47 eV); falls back to
           ``ne_mid`` then ``ne_low``.  Used for O²⁺, Ne²⁺, N³⁺, C³⁺.
+        - ``ne_failures``: dict of density solve failure reasons,
+          e.g. ``{"n_e(SII)": "PyNEB solve failed (ratio out of range)"}``.
     """
     from .direct import NE_DEFAULT, compute_ne, compute_ne_CIII, compute_ne_NIV
 
     if errors is None:
         errors = {}
+
+    ne_failures: dict[str, str] = {}
 
     # Low-ionisation zone: [SII] 6718/6732 or [OII] 3726/3729.
     ne_low = NE_DEFAULT
@@ -308,8 +312,9 @@ def _compute_multi_ne(
         if _doublet_snr_ok("SII_6718", "SII_6732", fluxes, errors, snr_ne):
             try:
                 ne_low = compute_ne(fluxes["SII_6718"], fluxes["SII_6732"], doublet="SII")
-            except Exception:
+            except Exception as exc:
                 logger.warning("n_e(SII) failed; using %.0f cm^-3.", NE_DEFAULT)
+                ne_failures["n_e(SII)"] = f"PyNEB solve failed: {exc}"
         else:
             logger.warning(
                 "n_e(SII) doublet below SNR threshold (%.1f); "
@@ -319,8 +324,9 @@ def _compute_multi_ne(
         if _doublet_snr_ok("OII_3726", "OII_3729", fluxes, errors, snr_ne):
             try:
                 ne_low = compute_ne(fluxes["OII_3726"], fluxes["OII_3729"], doublet="OII")
-            except Exception:
+            except Exception as exc:
                 logger.warning("n_e(OII) failed; using %.0f cm^-3.", NE_DEFAULT)
+                ne_failures["n_e(OII)"] = f"PyNEB solve failed: {exc}"
         else:
             logger.warning(
                 "n_e(OII) doublet below SNR threshold (%.1f); "
@@ -334,8 +340,9 @@ def _compute_multi_ne(
             try:
                 ne_mid = compute_ne_CIII(fluxes["CIII]_1907"], fluxes["CIII]"])
                 logger.info("n_e(mid) from CIII] = %.0f cm^-3.", ne_mid)
-            except Exception:
+            except Exception as exc:
                 logger.warning("n_e(CIII]) failed.")
+                ne_failures["n_e(CIII])"] = f"PyNEB solve failed: {exc}"
         else:
             logger.warning(
                 "n_e(CIII]) doublet below SNR threshold (%.1f); skipping.",
@@ -349,8 +356,9 @@ def _compute_multi_ne(
             try:
                 ne_high_raw = compute_ne_NIV(fluxes["NIV_1483"], fluxes["NIV_1486"])
                 logger.info("n_e(high) from NIV] = %.0f cm^-3.", ne_high_raw)
-            except Exception:
+            except Exception as exc:
                 logger.warning("n_e(NIV]) failed.")
+                ne_failures["n_e(NIV])"] = f"PyNEB solve failed: {exc}"
         else:
             logger.warning(
                 "n_e(NIV]) doublet below SNR threshold (%.1f); skipping.",
@@ -376,7 +384,7 @@ def _compute_multi_ne(
         )
         ne_high = ne_fallback
 
-    return ne_low, ne_mid, ne_high
+    return ne_low, ne_mid, ne_high, ne_failures
 
 
 def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
@@ -836,7 +844,7 @@ def _run_direct(
     from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
 
     # --- Step 1: Multi-phase electron density ---
-    ne_low, ne_mid, ne_high = _compute_multi_ne(
+    ne_low, ne_mid, ne_high, ne_failures = _compute_multi_ne(
         fluxes, errors=errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
     )
 
@@ -892,6 +900,8 @@ def _run_direct(
 
     icf_method = totals.get("icf_method")
     NO_icf_name = totals.get("NO_icf_name")
+    failures = totals.pop("_failures", {})
+    failures.update(ne_failures)
 
     # --- Build diagnostics dict ---
     diagnostics = _build_diagnostics(
@@ -1009,6 +1019,7 @@ def _run_direct(
         "NeO": NeO_log,
         "ArO": ArO_log,
         "diagnostics": diagnostics,
+        "failures": failures if failures else None,
     }
 
 
@@ -1086,7 +1097,7 @@ def _run_direct_mcmc(
     # Compute medians and errors for the point estimate and multi-phase ne.
     med_fluxes = {name: float(np.median(post)) for name, post in posteriors.items()}
     med_errors = {name: float(np.std(post)) for name, post in posteriors.items()}
-    ne_low, ne_mid, ne_high = _compute_multi_ne(
+    ne_low, ne_mid, ne_high, ne_failures = _compute_multi_ne(
         med_fluxes, errors=med_errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
     )
 
@@ -1125,6 +1136,8 @@ def _run_direct_mcmc(
     ) if ionic_pt else {}
     icf_method = totals_pt.get("icf_method")
     NO_icf_name = totals_pt.get("NO_icf_name")
+    failures = totals_pt.pop("_failures", {})
+    failures.update(ne_failures)
 
     for i in tqdm(range(n_samples), desc="Direct Te (posterior)", disable=not progress):
         sample = {name: max(float(post[i]), 1e-50) for name, post in posteriors.items()}
@@ -1223,6 +1236,7 @@ def _run_direct_mcmc(
             Te_relation, ne_low, ne_mid, ne_high, logU_pt, logU_diag,
             icf_method, NO_icf_name, NE_DEFAULT,
         ),
+        "failures": failures if failures else None,
     }
 
 
@@ -1524,6 +1538,7 @@ def compute_abundances(
             icf_method=direct_out.get("icf_method"),
             NO_icf_name=direct_out.get("NO_icf_name"),
             excluded_lines=excluded_lines if excluded_lines else None,
+            failures=direct_out.get("failures"),
             diagnostics=direct_out.get("diagnostics"),
         )
 
