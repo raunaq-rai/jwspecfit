@@ -94,6 +94,7 @@ class AbundanceResult:
     excluded_lines: list[str] | None = None
     failures: dict[str, str] | None = field(default=None, repr=False)
     diagnostics: dict[str, str] | None = field(default=None, repr=False)
+    alt_results: dict[str, AbundanceResult] | None = field(default=None, repr=False)
     # Internal: full forward model result dict (samples, param_names, etc.)
     _forward_result: dict[str, Any] | None = field(default=None, repr=False)
 
@@ -169,6 +170,22 @@ class AbundanceResult:
 
         if self.excluded_lines:
             lines.append(f"  Excluded    = {self.excluded_lines}")
+
+        # --- Alternative method results ---
+        if self.alt_results:
+            lines.append("")
+            lines.append("Alternative methods (not selected):")
+            for alt_name, alt in self.alt_results.items():
+                lines.append(f"  [{alt_name}]")
+                lines.append(f"    12+log(O/H) = {alt.OH:.3f} +/- {alt.OH_err}")
+                if alt.NO is not None:
+                    lines.append(f"    log(N/O)    = {alt.NO:.3f} +/- {alt.NO_err}")
+                if alt.CO is not None:
+                    lines.append(f"    log(C/O)    = {alt.CO:.3f} +/- {alt.CO_err}")
+                if alt.ratios_used:
+                    lines.append(f"    Ratios used = {alt.ratios_used}")
+                if alt.Te_high is not None:
+                    lines.append(f"    T_e(high)   = {alt.Te_high:.0f} K")
 
         # --- Diagnostics section ---
         if self.diagnostics:

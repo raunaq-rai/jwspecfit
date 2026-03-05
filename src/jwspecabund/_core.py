@@ -1240,6 +1240,103 @@ def _run_direct_mcmc(
     }
 
 
+def _run_strong_line(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    is_mcmc: bool,
+    posteriors: dict[str, np.ndarray],
+    n_mc: int,
+    n_posterior: int,
+    progress: bool,
+    Av_derived: float | None,
+    excluded_lines: list[str],
+) -> AbundanceResult:
+    """Run the strong-line method and return an AbundanceResult."""
+    from .strong_line import sanders25_metallicity
+
+    if is_mcmc and posteriors:
+        from .strong_line import (
+            CALIBRATIONS,
+            _chi2_simultaneous,
+            Z_MAX,
+            Z_MIN,
+            compute_line_ratios,
+        )
+        from scipy.optimize import minimize_scalar
+
+        n_total = min(len(v) for v in posteriors.values())
+        if n_posterior > 0 and n_total > n_posterior:
+            rng = np.random.default_rng(42)
+            idx = rng.choice(n_total, size=n_posterior, replace=False)
+            idx.sort()
+            thinned = {name: posteriors[name][idx] for name in posteriors}
+            n_samples = n_posterior
+        else:
+            thinned = posteriors
+            n_samples = n_total
+            rng = np.random.default_rng(42)
+
+        OH_post = np.full(n_samples, np.nan)
+        sample_fluxes = {name: thinned[name] for name in thinned}
+        dummy_errors = {name: 0.0 for name in posteriors}
+
+        for i in tqdm(range(n_samples), desc="Strong-line (posterior)", disable=not progress):
+            samp = {name: max(float(arr[i]), 1e-50) for name, arr in sample_fluxes.items()}
+            try:
+                ratios_i = compute_line_ratios(samp, dummy_errors, snr_thresh=-np.inf)
+                if not ratios_i:
+                    continue
+                perturbed = {}
+                for m, dat in ratios_i.items():
+                    sig_cal = CALIBRATIONS[m]["sigma_cal"]
+                    perturbed[m] = {
+                        "val": rng.normal(dat["val"], sig_cal),
+                        "err": dat["err"],
+                    }
+                res_i = minimize_scalar(
+                    _chi2_simultaneous,
+                    bounds=(Z_MIN, Z_MAX),
+                    args=(perturbed,),
+                    method="bounded",
+                )
+                OH_post[i] = res_i.x
+            except (ValueError, RuntimeError):
+                continue
+
+        OH_med = float(np.nanmedian(OH_post))
+        OH_lo = float(OH_med - np.nanpercentile(OH_post, 16))
+        OH_hi = float(np.nanpercentile(OH_post, 84) - OH_med)
+
+        med_fluxes = {name: float(np.median(arr)) for name, arr in posteriors.items()}
+        med_errors = {name: float(np.std(arr)) for name, arr in posteriors.items()}
+        ratios = compute_line_ratios(med_fluxes, med_errors)
+
+        return AbundanceResult(
+            method="strong_line",
+            OH=OH_med,
+            OH_err=(OH_lo, OH_hi),
+            Av=Av_derived,
+            OH_posterior=OH_post,
+            ratios_used=list(ratios.keys()),
+            excluded_lines=excluded_lines if excluded_lines else None,
+        )
+
+    Z_best, Z_lo, Z_hi, chi2, ratios_used, Z_mc = sanders25_metallicity(
+        fluxes, errors, n_mc=n_mc, progress=progress,
+    )
+
+    return AbundanceResult(
+        method="strong_line",
+        OH=Z_best,
+        OH_err=(Z_best - Z_lo, Z_hi - Z_best),
+        Av=Av_derived,
+        chi2=chi2,
+        ratios_used=ratios_used,
+        OH_posterior=Z_mc,
+        excluded_lines=excluded_lines if excluded_lines else None,
+    )
+
+
 def compute_abundances(
     result: Any,
     z: float,
@@ -1496,6 +1593,8 @@ def compute_abundances(
         )
 
     # --- Direct method ---
+    primary_result = None
+
     if use_direct:
         if is_mcmc and posteriors and "OIII_4363" in posteriors:
             direct_out = _run_direct_mcmc(
@@ -1512,7 +1611,7 @@ def compute_abundances(
                 icf_method=icf_method, snr_NO=snr_NO,
             )
 
-        return AbundanceResult(
+        primary_result = AbundanceResult(
             method="direct",
             OH=direct_out["OH"],
             OH_err=direct_out["OH_err"],
@@ -1542,92 +1641,62 @@ def compute_abundances(
             diagnostics=direct_out.get("diagnostics"),
         )
 
-    # --- Strong-line method ---
-    from .strong_line import sanders25_metallicity
-
-    if is_mcmc and posteriors:
-        from .strong_line import (
-            CALIBRATIONS,
-            _chi2_simultaneous,
-            Z_MAX,
-            Z_MIN,
-            compute_line_ratios,
+    if primary_result is None:
+        # --- Strong-line method ---
+        primary_result = _run_strong_line(
+            fluxes, errors, is_mcmc, posteriors, n_mc, n_posterior,
+            progress, Av_derived, excluded_lines,
         )
-        from scipy.optimize import minimize_scalar
 
-        # Thin posterior if needed.
-        n_total = min(len(v) for v in posteriors.values())
-        if n_posterior > 0 and n_total > n_posterior:
-            rng = np.random.default_rng(42)
-            idx = rng.choice(n_total, size=n_posterior, replace=False)
-            idx.sort()
-            thinned = {name: posteriors[name][idx] for name in posteriors}
-            n_samples = n_posterior
-        else:
-            thinned = posteriors
-            n_samples = n_total
-            rng = np.random.default_rng(42)
-
-        OH_post = np.full(n_samples, np.nan)
-        sample_fluxes = {name: thinned[name] for name in thinned}
-        dummy_errors = {name: 0.0 for name in posteriors}
-
-        for i in tqdm(range(n_samples), desc="Strong-line (posterior)", disable=not progress):
-            samp = {name: max(float(arr[i]), 1e-50) for name, arr in sample_fluxes.items()}
+    # --- Auto mode: run the alternative method for comparison ---
+    if method == "auto" and primary_result.alt_results is None:
+        alt = {}
+        if primary_result.method == "direct":
+            # Also run strong-line for comparison.
             try:
-                ratios_i = compute_line_ratios(samp, dummy_errors, snr_thresh=-np.inf)
-                if not ratios_i:
-                    continue
-                # Perturb each ratio by the calibration scatter.
-                perturbed = {}
-                for m, dat in ratios_i.items():
-                    sig_cal = CALIBRATIONS[m]["sigma_cal"]
-                    perturbed[m] = {
-                        "val": rng.normal(dat["val"], sig_cal),
-                        "err": dat["err"],
-                    }
-                res_i = minimize_scalar(
-                    _chi2_simultaneous,
-                    bounds=(Z_MIN, Z_MAX),
-                    args=(perturbed,),
-                    method="bounded",
+                alt["strong_line"] = _run_strong_line(
+                    fluxes, errors, is_mcmc, posteriors, n_mc, n_posterior,
+                    progress, Av_derived, excluded_lines,
                 )
-                OH_post[i] = res_i.x
-            except (ValueError, RuntimeError):
-                continue
+            except Exception:
+                logger.info("Alternative strong-line method failed; skipping.")
+        elif primary_result.method == "strong_line":
+            # Also try direct if 4363 is present (even if SNR was below threshold).
+            has_4363 = "OIII_4363" in fluxes and fluxes.get("OIII_4363", 0) > 0
+            if has_4363:
+                try:
+                    if is_mcmc and posteriors and "OIII_4363" in posteriors:
+                        d_out = _run_direct_mcmc(
+                            posteriors, Te_relation, n_posterior=n_posterior,
+                            progress=progress, ne_high_max=ne_high_max,
+                            snr_ne=snr_ne, snr_logU=snr_logU,
+                            icf_method=icf_method, snr_NO=snr_NO,
+                        )
+                    else:
+                        d_out = _run_direct(
+                            fluxes, errors, Te_relation, n_mc,
+                            progress=progress, ne_high_max=ne_high_max,
+                            snr_ne=snr_ne, snr_logU=snr_logU,
+                            icf_method=icf_method, snr_NO=snr_NO,
+                        )
+                    alt["direct"] = AbundanceResult(
+                        method="direct",
+                        OH=d_out["OH"],
+                        OH_err=d_out["OH_err"],
+                        NO=d_out.get("NO"),
+                        NO_err=d_out.get("NO_err"),
+                        CO=d_out.get("CO"),
+                        CO_err=d_out.get("CO_err"),
+                        Te_high=d_out.get("Te_high"),
+                        Te_low=d_out.get("Te_low"),
+                        ne=d_out.get("ne"),
+                        Av=Av_derived,
+                        ionic=d_out.get("ionic"),
+                        failures=d_out.get("failures"),
+                    )
+                except Exception:
+                    logger.info("Alternative direct method failed; skipping.")
+        if alt:
+            primary_result.alt_results = alt
 
-        OH_med = float(np.nanmedian(OH_post))
-        OH_lo = float(OH_med - np.nanpercentile(OH_post, 16))
-        OH_hi = float(np.nanpercentile(OH_post, 84) - OH_med)
-
-        # Determine ratios used from median fluxes.
-        from .strong_line import compute_line_ratios
-        med_fluxes = {name: float(np.median(arr)) for name, arr in posteriors.items()}
-        med_errors = {name: float(np.std(arr)) for name, arr in posteriors.items()}
-        ratios = compute_line_ratios(med_fluxes, med_errors)
-
-        return AbundanceResult(
-            method="strong_line",
-            OH=OH_med,
-            OH_err=(OH_lo, OH_hi),
-            Av=Av_derived,
-            OH_posterior=OH_post,
-            ratios_used=list(ratios.keys()),
-            excluded_lines=excluded_lines if excluded_lines else None,
-        )
-
-    # LS result: use MC within sanders25_metallicity.
-    Z_best, Z_lo, Z_hi, chi2, ratios_used, Z_mc = sanders25_metallicity(
-        fluxes, errors, n_mc=n_mc, progress=progress,
-    )
-
-    return AbundanceResult(
-        method="strong_line",
-        OH=Z_best,
-        OH_err=(Z_best - Z_lo, Z_hi - Z_best),
-        Av=Av_derived,
-        chi2=chi2,
-        ratios_used=ratios_used,
-        OH_posterior=Z_mc,
-        excluded_lines=excluded_lines if excluded_lines else None,
-    )
+    return primary_result
