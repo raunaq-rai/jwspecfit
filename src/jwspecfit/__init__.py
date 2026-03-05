@@ -146,7 +146,7 @@ def fit_lines(
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
-    tie_uv_doublets: bool = False,
+    tie_uv_doublets: bool = True,
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
@@ -214,7 +214,7 @@ def fit_lines(
     tie_uv_doublets : bool
         Tie UV doublet kinematics and fix resonance-line flux ratios.
         Recommended for stacked spectra where doublets are poorly
-        resolved (default ``False``).
+        resolved (default ``True``).
 
     Returns
     -------
