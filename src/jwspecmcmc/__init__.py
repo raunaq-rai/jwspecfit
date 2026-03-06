@@ -76,6 +76,8 @@ def fit_lines(
     sigma_factor: float = 1.0,
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
+    tie_uv_centroids: bool = True,
+    tie_uv_widths: bool = True,
 ) -> MCMCResult | MCMCBroadFitResult:
     """Fit emission lines using MCMC sampling.
 
@@ -180,6 +182,8 @@ def fit_lines(
             sigma_factor=sigma_factor,
             moving_average=moving_average,
             tie_uv_doublets=tie_uv_doublets,
+            tie_uv_centroids=tie_uv_centroids,
+            tie_uv_widths=tie_uv_widths,
         )
 
     return _fit_with_broad_mcmc(
@@ -207,6 +211,8 @@ def fit_lines(
         sigma_factor=sigma_factor,
         moving_average=moving_average,
         tie_uv_doublets=tie_uv_doublets,
+        tie_uv_centroids=tie_uv_centroids,
+        tie_uv_widths=tie_uv_widths,
     )
 
 
@@ -237,6 +243,8 @@ def fit_with_broad(
     sigma_factor: float = 1.0,
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
+    tie_uv_centroids: bool = True,
+    tie_uv_widths: bool = True,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
 
@@ -332,6 +340,8 @@ def fit_with_broad(
         sigma_factor=sigma_factor,
         moving_average=moving_average,
         tie_uv_doublets=tie_uv_doublets,
+        tie_uv_centroids=tie_uv_centroids,
+        tie_uv_widths=tie_uv_widths,
     )
 
 

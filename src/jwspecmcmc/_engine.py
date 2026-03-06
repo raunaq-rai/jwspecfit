@@ -59,6 +59,8 @@ def _fit_lines_mcmc(
     sigma_factor: float = 1.0,
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
+    tie_uv_centroids: bool = True,
+    tie_uv_widths: bool = True,
 ) -> MCMCResult:
     """Fit emission lines using MCMC sampling.
 
@@ -115,6 +117,14 @@ def _fit_lines_mcmc(
         Tie UV doublet kinematics and fix resonance-line flux ratios.
         Recommended for stacked spectra where doublets are poorly
         resolved (default ``False``).
+    tie_uv_centroids : bool
+        Tie UV doublet secondary centroids to their primaries in
+        velocity space (default ``True``).  Set ``False`` for
+        well-resolved spectra.
+    tie_uv_widths : bool
+        Tie UV intercombination line widths to a shared velocity
+        dispersion (default ``True``).  Set ``False`` for
+        well-resolved spectra.
 
     Returns
     -------
@@ -237,7 +247,10 @@ def _fit_lines_mcmc(
     # ------------------------------------------------------------------
     # 4. Constraints and bounds (mirrors fitter.py lines 300-398)
     # ------------------------------------------------------------------
-    constraints = ConstraintSet(line_names, tie_uv_doublets=tie_uv_doublets)
+    constraints = ConstraintSet(
+        line_names, tie_uv_doublets=tie_uv_doublets,
+        tie_uv_centroids=tie_uv_centroids, tie_uv_widths=tie_uv_widths,
+    )
 
     p0 = np.zeros(3 * nL)
     lb = np.zeros(3 * nL)
@@ -324,6 +337,8 @@ def _fit_lines_mcmc(
             spec, z,
             grating=grating, R=R, lines=line_names,
             deg=deg, n_boot=0, clip_sigma=clip_sigma,
+            tie_uv_centroids=tie_uv_centroids,
+            tie_uv_widths=tie_uv_widths,
         )
         if mle_result.success:
             # Map MLE params back by line name — the MLE fit may have
@@ -561,6 +576,8 @@ def _fit_with_broad_mcmc(
     sigma_factor: float = 1.0,
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
+    tie_uv_centroids: bool = True,
+    tie_uv_widths: bool = True,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
 
@@ -643,6 +660,8 @@ def _fit_with_broad_mcmc(
         bic_delta=bic_delta,
         sigma_factor=sigma_factor,
         moving_average=moving_average,
+        tie_uv_centroids=tie_uv_centroids,
+        tie_uv_widths=tie_uv_widths,
     )
 
     selected_model = bic_result.selected_model
@@ -689,6 +708,8 @@ def _fit_with_broad_mcmc(
         sigma_factor=sigma_factor,
         moving_average=moving_average,
         tie_uv_doublets=tie_uv_doublets,
+        tie_uv_centroids=tie_uv_centroids,
+        tie_uv_widths=tie_uv_widths,
     )
 
     return MCMCBroadFitResult(
