@@ -218,10 +218,14 @@ class AbundanceResult:
                 n_sig = info.get("n_sigma", 3.0)
                 lines.append(f"  {ion_key}:")
                 lines.append(f"    Lines not detected: {src_lines}")
+                ul_method = info.get("method", "fit_error")
                 if flux_ul is not None:
+                    if ul_method == "continuum_rms":
+                        method_desc = f"{n_sig:.0f}σ × RMS_cont × σ_inst × √(2π)"
+                    else:
+                        method_desc = f"{n_sig:.0f}σ × sqrt(Σ err²)"
                     lines.append(
-                        f"    Flux upper limit:   {flux_ul:.2e} "
-                        f"({n_sig:.0f}σ × sqrt(Σ err²))"
+                        f"    Flux upper limit:   {flux_ul:.2e} ({method_desc})"
                     )
                 lines.append(f"    Ionic abundance:    < {abund_ul:.4e}")
 

@@ -193,6 +193,96 @@ def _filter_low_snr(
     return filtered_fluxes, filtered_errors, excluded
 
 
+def _compute_continuum_rms_limits(
+    result: Any,
+    z: float,
+    Av: float | None,
+    dust_law: str,
+    n_sigma: float = 3.0,
+    **dust_kwargs,
+) -> dict[str, float]:
+    """Compute flux upper limits from continuum RMS for all fitted lines.
+
+    For each line, measures the RMS of the fit residuals in a window
+    around the expected line position, then converts to an integrated
+    flux upper limit assuming a Gaussian profile with width set by the
+    instrumental resolution.
+
+    The limits are returned in dust-corrected units if ``Av`` is given,
+    matching the dust-corrected fluxes used downstream.
+
+    Parameters
+    ----------
+    result : FitResult or MCMCResult
+        Fitting result with ``spectrum``, ``residuals``, and ``continuum``.
+    z : float
+        Source redshift.
+    Av : float or None
+        V-band attenuation for dust correction.
+    dust_law : str
+        Dust law name (``"salim"`` or ``"cardelli"``).
+    n_sigma : float
+        Number of sigma for the upper limit (default 3).
+
+    Returns
+    -------
+    dict[str, float]
+        ``{line_name: flux_upper_limit}`` in dust-corrected f_lam units.
+    """
+    from jwspecfit.io import _ujy_to_flam
+    from jwspecfit.lines import REST_LINES_A
+    from jwspecfit.resolution import sigma_inst_A
+
+    if not hasattr(result, "spectrum") or result.spectrum is None:
+        return {}
+    spec = result.spectrum
+    if not hasattr(result, "residuals") or result.residuals is None:
+        return {}
+
+    wave_A = spec.wave_A
+    # Residuals are in µJy; convert to f_lam.
+    resid_flam = _ujy_to_flam(result.residuals, spec.wave_um)
+    valid = np.isfinite(resid_flam)
+
+    # Instrumental sigma at each wavelength.
+    grating = getattr(spec, "grating", None)
+    R = getattr(spec, "R", None)
+    sig_inst = sigma_inst_A(spec.wave_um, grating=grating, R=R)
+
+    limits: dict[str, float] = {}
+    for name in result.line_names:
+        if "_BROAD" in name:
+            continue
+        lam_rest = REST_LINES_A.get(name)
+        if lam_rest is None:
+            continue
+
+        # Use instrumental sigma at the observed wavelength.
+        lam_obs = lam_rest * (1.0 + z)
+        idx = np.argmin(np.abs(wave_A - lam_obs))
+        sig_A = float(sig_inst[idx])
+
+        flux_ul = _continuum_flux_upper_limit(
+            wave_A, resid_flam, valid, lam_rest, z, sig_A,
+            n_sigma=n_sigma,
+        )
+        if flux_ul is not None and flux_ul > 0:
+            # Apply dust correction to match the corrected flux scale.
+            if Av is not None and Av > 0:
+                from .dust import cardelli_extinction, salim_attenuation
+
+                wave_arr = np.array([lam_rest])
+                if dust_law == "salim":
+                    A_lam = salim_attenuation(wave_arr, Av, **dust_kwargs)[0]
+                else:
+                    A_lam = cardelli_extinction(wave_arr, Av)[0]
+                flux_ul *= 10.0 ** (0.4 * A_lam)
+
+            limits[name] = flux_ul
+
+    return limits
+
+
 def _apply_dust_correction(
     fluxes: dict[str, float],
     errors: dict[str, float],
@@ -628,6 +718,60 @@ def _gate_nitrogen_ions(
     return ionic
 
 
+def _continuum_flux_upper_limit(
+    wave_A: np.ndarray,
+    residuals_flam: np.ndarray,
+    valid: np.ndarray,
+    line_wave_rest_A: float,
+    z: float,
+    sigma_line_A: float,
+    n_sigma: float = 3.0,
+) -> float | None:
+    """Compute a flux upper limit from the local continuum RMS.
+
+    Parameters
+    ----------
+    wave_A : np.ndarray
+        Observed wavelength array (Angstrom).
+    residuals_flam : np.ndarray
+        Continuum-and-model-subtracted residuals in f_lam units.
+    valid : np.ndarray
+        Boolean mask of valid pixels.
+    line_wave_rest_A : float
+        Rest-frame wavelength of the line (Angstrom).
+    z : float
+        Source redshift.
+    sigma_line_A : float
+        Expected Gaussian sigma of the line in Angstrom (from
+        instrumental resolution or a detected line).
+    n_sigma : float
+        Number of sigma for the upper limit (default 3).
+
+    Returns
+    -------
+    float or None
+        Integrated flux upper limit (f_lam × Angstrom), or None if
+        there are insufficient pixels.
+    """
+    lam_obs = line_wave_rest_A * (1.0 + z)
+    # Window of ±5σ around the expected line position, excluding the
+    # central ±2σ where the line itself would sit.
+    near = np.abs(wave_A - lam_obs)
+    window = valid & (near < 5.0 * sigma_line_A) & (near > 2.0 * sigma_line_A)
+    n_pix = int(np.sum(window))
+    if n_pix < 3:
+        # Fall back to wider window without central exclusion.
+        window = valid & (near < 10.0 * sigma_line_A)
+        n_pix = int(np.sum(window))
+    if n_pix < 3:
+        return None
+
+    rms = float(np.sqrt(np.nanmean(residuals_flam[window] ** 2)))
+    # Flux upper limit: n_sigma × RMS × line width (Gaussian integral).
+    _SQRT2PI = np.sqrt(2.0 * np.pi)
+    return n_sigma * rms * sigma_line_A * _SQRT2PI
+
+
 def _compute_ionic_upper_limits(
     ionic: dict[str, float],
     fluxes: dict[str, float],
@@ -638,21 +782,31 @@ def _compute_ionic_upper_limits(
     ne_mid: float,
     ne_high: float,
     n_sigma: float = 3.0,
+    continuum_rms_limits: dict[str, float] | None = None,
 ) -> tuple[dict[str, float], dict[str, dict]]:
     """Compute n-sigma upper limits for non-detected ionic abundances.
+
+    Parameters
+    ----------
+    continuum_rms_limits : dict, optional
+        Pre-computed continuum-RMS flux upper limits keyed by line name.
+        If provided, these are used instead of the fit errors.
 
     Returns
     -------
     upper_limits : dict[str, float]
         Ion key -> ionic abundance upper limit.
     details : dict[str, dict]
-        Ion key -> metadata dict with keys ``lines``, ``flux_ul``, ``n_sigma``.
+        Ion key -> metadata dict with keys ``lines``, ``flux_ul``,
+        ``n_sigma``, ``method``.
     """
     from .direct import _ionic_abundance
 
     Hb = fluxes.get("HBETA", 0.0)
     if Hb <= 0:
         return {}, {}
+
+    _ul = continuum_rms_limits or {}
 
     # Mapping: ion_key -> (element, ion_stage, line_names, wave_labels, Te, ne)
     _ION_MAP = [
@@ -674,12 +828,23 @@ def _compute_ionic_upper_limits(
         if ionic.get(ion_key, 0.0) > 0:
             continue
 
-        # Check if any of the source lines have errors available.
-        total_err2 = sum(errors.get(n, 0.0) ** 2 for n in line_names)
-        if total_err2 <= 0:
-            continue
+        # Prefer continuum-RMS flux limits; fall back to fit errors.
+        flux_ul = None
+        ul_method = "continuum_rms"
+        if _ul:
+            # Sum continuum-RMS limits for all doublet members.
+            member_uls = [_ul[n] for n in line_names if n in _ul]
+            if member_uls:
+                flux_ul = sum(member_uls)
 
-        flux_ul = n_sigma * np.sqrt(total_err2)
+        if flux_ul is None or flux_ul <= 0:
+            # Fall back to fit errors (quadrature sum × n_sigma).
+            total_err2 = sum(errors.get(n, 0.0) ** 2 for n in line_names)
+            if total_err2 <= 0:
+                continue
+            flux_ul = n_sigma * np.sqrt(total_err2)
+            ul_method = "fit_error"
+
         wave_arg = waves if len(waves) > 1 else waves[0]
         try:
             abund_ul = _ionic_abundance(elem, stage, flux_ul, Hb, Te, ne, wave_arg)
@@ -689,6 +854,7 @@ def _compute_ionic_upper_limits(
                     "lines": line_names,
                     "flux_ul": flux_ul,
                     "n_sigma": n_sigma,
+                    "method": ul_method,
                 }
         except Exception:
             pass
@@ -866,6 +1032,7 @@ def _run_direct(
     snr_logU: float = 1.5,
     icf_method: str = "auto",
     snr_NO: float = 1.5,
+    continuum_rms_limits: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -953,6 +1120,7 @@ def _run_direct(
         ionic, fluxes, errors, Te_high, Te_low, ne_low,
         ne_mid if ne_mid is not None else ne_low,
         ne_high if ne_high is not None else ne_low,
+        continuum_rms_limits=continuum_rms_limits,
     )
 
     totals = compute_total_abundances(
@@ -1116,6 +1284,7 @@ def _run_direct_mcmc(
     snr_logU: float = 1.5,
     icf_method: str = "auto",
     snr_NO: float = 1.5,
+    continuum_rms_limits: dict[str, float] | None = None,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -1219,6 +1388,7 @@ def _run_direct_mcmc(
             ionic_pt, med_fluxes, med_errors, Te_high_pt, Te_low_pt, ne_low,
             ne_mid if ne_mid is not None else ne_low,
             ne_high if ne_high is not None else ne_low,
+            continuum_rms_limits=continuum_rms_limits,
         )
 
     totals_pt = compute_total_abundances(
@@ -1628,6 +1798,11 @@ def compute_abundances(
             for name in excluded_lines:
                 posteriors.pop(name, None)
 
+    # --- Continuum-RMS flux limits for upper limits ---
+    continuum_rms_limits = _compute_continuum_rms_limits(
+        result, z, Av_derived, dust_law, **dust_kwargs,
+    )
+
     # --- Method selection ---
     use_direct = False
     use_forward = False
@@ -1698,6 +1873,7 @@ def compute_abundances(
                 progress=progress, ne_high_max=ne_high_max,
                 snr_ne=snr_ne, snr_logU=snr_logU,
                 icf_method=icf_method, snr_NO=snr_NO,
+                continuum_rms_limits=continuum_rms_limits,
             )
         else:
             direct_out = _run_direct(
@@ -1705,6 +1881,7 @@ def compute_abundances(
                 progress=progress, ne_high_max=ne_high_max,
                 snr_ne=snr_ne, snr_logU=snr_logU,
                 icf_method=icf_method, snr_NO=snr_NO,
+                continuum_rms_limits=continuum_rms_limits,
             )
 
         primary_result = AbundanceResult(
