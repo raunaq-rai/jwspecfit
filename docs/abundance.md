@@ -263,6 +263,54 @@ Simple: `N/O = ICF_N(Izotov+06) * N+/O+`. Requires N+ and O+ only.
 - **C/O:** `(C2+ + C3+) / O2+` (direct sum, no ICF)
 - **N/O_UV_raw:** `(N2+ + N3+ + N4+) / O2+` (for comparison, no ICF)
 
+### Upper Limits for Non-Detected Ions
+
+**Functions:** `_compute_continuum_rms_limits()`, `_compute_ionic_upper_limits()`
+
+When an ion is not detected (ionic abundance = 0 after SNR gating), a 3σ
+upper limit is computed from the local continuum noise:
+
+1. **Flux upper limit (continuum RMS method):**
+   For each non-detected line, the RMS of the fit residuals is measured in
+   a window around the expected line position (±5σ, excluding the central
+   ±2σ).  The flux upper limit is:
+
+   ```
+   flux_ul = 3 × RMS_continuum × σ_inst × √(2π)
+   ```
+
+   where σ_inst = λ / (R × 2.3548) is the instrumental Gaussian width.
+   This is independent of the bootstrap/MCMC error estimation and asks
+   "given the noise here, what is the brightest line I could have missed?"
+
+   For doublets, the individual member limits are added in quadrature
+   (independent noise): `flux_ul_total = √(Σ flux_ul_i²)`.
+
+   The flux limits are dust-corrected to match the corrected flux scale
+   used for detected lines.
+
+2. **Ionic abundance upper limit:**
+   The flux upper limit is converted to an ionic abundance via PyNEB
+   emissivities at the measured T_e and n_e, using the same formula as
+   for detections:
+
+   ```
+   (X^i+/H+)_ul = (flux_ul / F_Hβ) × (ε_Hβ / ε_line)
+   ```
+
+3. **Abundance ratio upper limits:**
+   For N/O, the detected nitrogen ions are summed with the upper limits
+   for non-detected ions, then divided by total oxygen.  This gives a
+   conservative upper limit: `log(N/O) < log10[(ΣN_detected + ΣN_ul) / O_total]`.
+   The same approach is used for C/O.
+
+**Fallback:** When the spectrum is not available (e.g. mock results),
+the code falls back to using fit errors: `flux_ul = 3σ × √(Σ err²)`.
+
+Results are stored in `AbundanceResult.ionic_upper_limits` (values) and
+`AbundanceResult.ionic_ul_details` (metadata: source lines, flux limit,
+method used).
+
 ### MC Error Propagation
 
 **`_run_direct()` (least-squares input):**
@@ -348,6 +396,7 @@ compute_abundances(result, z, ...)
   │           └── cardelli_extinction()  [if dust_law="cardelli"]
   │
   ├── _filter_low_snr()
+  ├── _compute_continuum_rms_limits()   [flux upper limits from residual RMS]
   │
   ├── [Direct method]
   │     ├── _run_direct_mcmc()           [if MCMC posteriors available]
@@ -373,6 +422,7 @@ compute_abundances(result, z, ...)
   │           │     └── log_U_from_O32()     [fallback]
   │           │
   │           ├── Step 6: _gate_nitrogen_ions()
+  │           │           _compute_ionic_upper_limits()
   │           │           compute_total_abundances()
   │           │             ├── [direct_sum tiers]
   │           │             ├── compute_NO_martinez25()

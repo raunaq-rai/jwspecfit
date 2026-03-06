@@ -21,7 +21,8 @@ Bayesian forward model following Cullen et al. (2025).
 9. [Strong-Line Calibrations](#9-strong-line-calibrations)
 10. [Bayesian Forward Model](#10-bayesian-forward-model)
 11. [Uncertainty Propagation](#11-uncertainty-propagation)
-12. [References](#12-references)
+12. [Upper Limits for Non-Detected Ions](#12-upper-limits-for-non-detected-ions)
+13. [References](#13-references)
 
 ---
 
@@ -594,7 +595,111 @@ parametric dependence on T_e.
 
 ---
 
-## 12. References
+## 12. Upper Limits for Non-Detected Ions
+
+**Source:** `jwspecabund._core._compute_continuum_rms_limits`,
+`_compute_ionic_upper_limits`
+
+When an emission line is not detected (flux consistent with zero or
+below the SNR threshold), we compute a 3σ upper limit on its flux
+and convert this to an ionic abundance upper limit.  This is essential
+for constraining N/O and C/O when UV lines (e.g. N III], N IV], C IV)
+fall below the detection threshold.
+
+### 12.1 Continuum-RMS flux upper limits
+
+The flux upper limit is derived from the noise in the continuum around
+the expected line position, independent of the emission-line fit:
+
+```
+F_ul = n_sigma × RMS_cont × sigma_inst × sqrt(2π)
+```
+
+where:
+
+- **RMS_cont:** root-mean-square of the fit residuals (data minus
+  model) in a window of ±5σ around the expected line centre, excluding
+  the central ±2σ where the line would sit.  If fewer than 3 pixels
+  fall in this annulus, the window is expanded to ±10σ with ±3σ
+  exclusion.
+- **sigma_inst:** the instrumental line width (in Angstrom), computed
+  from the grating resolving power R as σ = λ_obs / (2.355 × R).
+  When grating metadata is unavailable (e.g. spectra loaded from npz
+  files), R is estimated from the pixel sampling via
+  `R_from_pixels(wave_um)`.
+- **n_sigma:** detection threshold, default 3.
+
+This method is preferred over using the fit error because it measures
+actual noise at the line position rather than relying on bootstrap or
+MCMC error estimates, which can be inflated by unconstrained parameters
+(particularly for faint UV secondary doublet members).
+
+### 12.2 Dust correction of upper limits
+
+Flux upper limits are corrected for dust attenuation using the same
+A_V and attenuation law applied to detected lines:
+
+```
+F_ul,corr = F_ul × 10^(0.4 × A_lambda)
+```
+
+This ensures upper limits are on the same (intrinsic) flux scale as
+the detected line fluxes used for ionic abundances.
+
+### 12.3 Doublet upper limits
+
+For doublets where both members are undetected (e.g. N III] 1749+1752),
+the individual member upper limits are combined in quadrature:
+
+```
+F_ul,doublet = sqrt(F_ul,1^2 + F_ul,2^2)
+```
+
+This is the correct treatment for independent noise in each member,
+rather than linear summation which would overestimate the upper limit.
+
+### 12.4 Ionic abundance upper limits
+
+The flux upper limit is converted to an ionic abundance upper limit
+using the same emissivity-ratio formula as for detected lines
+([Section 5.1](#51-ionic-abundance-formula)):
+
+```
+(X^i+/H+)_ul = (F_ul / F_Hbeta) × (epsilon_Hbeta / epsilon_line)
+```
+
+### 12.5 Abundance ratio upper limits
+
+Upper limits on N/O and C/O are computed by summing detected ionic
+abundances with upper limits for non-detected ions, divided by total
+oxygen:
+
+```
+(N/O)_ul = (N_detected + N_upper_limits) / (O+ + O2+)
+log(N/O)_ul = log10((N/O)_ul)
+```
+
+These are reported in the `AbundanceResult.summary()` output alongside
+the ionic upper limit details.
+
+### 12.6 Fallback to fit errors
+
+If the continuum-RMS method cannot be applied (e.g. the spectrum
+object is unavailable, or the residuals do not cover the line
+position), the pipeline falls back to the fit-error method:
+
+```
+F_ul = n_sigma × sqrt(sum(sigma_i^2))
+```
+
+where sigma_i are the per-member flux errors from bootstrap or MCMC.
+The `ionic_ul_details` dictionary records which method was used for
+each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
+
+
+---
+
+## 13. References
 
 | Reference | Context |
 |-----------|---------|
