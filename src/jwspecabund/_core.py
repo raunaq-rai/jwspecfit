@@ -638,13 +638,21 @@ def _compute_ionic_upper_limits(
     ne_mid: float,
     ne_high: float,
     n_sigma: float = 3.0,
-) -> dict[str, float]:
-    """Compute n-sigma upper limits for non-detected ionic abundances."""
+) -> tuple[dict[str, float], dict[str, dict]]:
+    """Compute n-sigma upper limits for non-detected ionic abundances.
+
+    Returns
+    -------
+    upper_limits : dict[str, float]
+        Ion key -> ionic abundance upper limit.
+    details : dict[str, dict]
+        Ion key -> metadata dict with keys ``lines``, ``flux_ul``, ``n_sigma``.
+    """
     from .direct import _ionic_abundance
 
     Hb = fluxes.get("HBETA", 0.0)
     if Hb <= 0:
-        return {}
+        return {}, {}
 
     # Mapping: ion_key -> (element, ion_stage, line_names, wave_labels, Te, ne)
     _ION_MAP = [
@@ -660,6 +668,7 @@ def _compute_ionic_upper_limits(
     ]
 
     upper_limits: dict[str, float] = {}
+    details: dict[str, dict] = {}
     for ion_key, elem, stage, line_names, waves, Te, ne in _ION_MAP:
         # Only compute upper limit if the ion is not detected.
         if ionic.get(ion_key, 0.0) > 0:
@@ -676,10 +685,15 @@ def _compute_ionic_upper_limits(
             abund_ul = _ionic_abundance(elem, stage, flux_ul, Hb, Te, ne, wave_arg)
             if abund_ul > 0 and np.isfinite(abund_ul):
                 upper_limits[ion_key] = abund_ul
+                details[ion_key] = {
+                    "lines": line_names,
+                    "flux_ul": flux_ul,
+                    "n_sigma": n_sigma,
+                }
         except Exception:
             pass
 
-    return upper_limits
+    return upper_limits, details
 
 
 # Human-readable descriptions for Martinez+25 and direct-sum ICF names.
@@ -935,7 +949,7 @@ def _run_direct(
     _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=snr_NO)
 
     # Compute 3σ upper limits for non-detected ions.
-    ionic_upper_limits = _compute_ionic_upper_limits(
+    ionic_upper_limits, ionic_ul_details = _compute_ionic_upper_limits(
         ionic, fluxes, errors, Te_high, Te_low, ne_low,
         ne_mid if ne_mid is not None else ne_low,
         ne_high if ne_high is not None else ne_low,
@@ -1078,6 +1092,7 @@ def _run_direct(
         "NO_icf_name": NO_icf_name,
         "ionic": ionic,
         "ionic_upper_limits": ionic_upper_limits if ionic_upper_limits else None,
+        "ionic_ul_details": ionic_ul_details if ionic_ul_details else None,
         "OH_posterior": OH_mc,
         "NO_posterior": NO_mc,
         "CO_posterior": CO_mc,
@@ -1197,9 +1212,19 @@ def _run_direct_mcmc(
     if ionic_pt:
         _gate_nitrogen_ions(ionic_pt, med_fluxes, med_errors, snr_NO=snr_NO)
 
+    # Compute 3σ upper limits for non-detected ions.
+    ionic_upper_limits, ionic_ul_details = {}, {}
+    if ionic_pt and np.isfinite(Te_high_pt) and np.isfinite(Te_low_pt):
+        ionic_upper_limits, ionic_ul_details = _compute_ionic_upper_limits(
+            ionic_pt, med_fluxes, med_errors, Te_high_pt, Te_low_pt, ne_low,
+            ne_mid if ne_mid is not None else ne_low,
+            ne_high if ne_high is not None else ne_low,
+        )
+
     totals_pt = compute_total_abundances(
         ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
         icf_method=icf_method,
+        ionic_upper_limits=ionic_upper_limits,
     ) if ionic_pt else {}
     icf_method = totals_pt.get("icf_method")
     NO_icf_name = totals_pt.get("NO_icf_name")
@@ -1293,6 +1318,8 @@ def _run_direct_mcmc(
         "icf_method": icf_method,
         "NO_icf_name": NO_icf_name,
         "ionic": ionic_pt if ionic_pt else None,
+        "ionic_upper_limits": ionic_upper_limits if ionic_upper_limits else None,
+        "ionic_ul_details": ionic_ul_details if ionic_ul_details else None,
         "OH_posterior": OH_post,
         "NO_posterior": NO_post if np.any(np.isfinite(NO_post)) else None,
         "CO_posterior": CO_post if np.any(np.isfinite(CO_post)) else None,
@@ -1694,6 +1721,7 @@ def compute_abundances(
             Av=Av_derived,
             ionic=direct_out.get("ionic"),
             ionic_upper_limits=direct_out.get("ionic_upper_limits"),
+            ionic_ul_details=direct_out.get("ionic_ul_details"),
             OH_posterior=direct_out.get("OH_posterior"),
             NO_posterior=direct_out.get("NO_posterior"),
             CO_posterior=direct_out.get("CO_posterior"),

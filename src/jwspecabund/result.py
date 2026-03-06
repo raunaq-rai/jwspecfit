@@ -93,6 +93,7 @@ class AbundanceResult:
     NO_icf_name: str | None = None
     excluded_lines: list[str] | None = None
     ionic_upper_limits: dict[str, float] | None = field(default=None, repr=False)
+    ionic_ul_details: dict[str, dict] | None = field(default=None, repr=False)
     NO_tiers: dict[str, float] | None = field(default=None, repr=False)
     failures: dict[str, str] | None = field(default=None, repr=False)
     diagnostics: dict[str, str] | None = field(default=None, repr=False)
@@ -203,6 +204,67 @@ class AbundanceResult:
             lines.append("Derivation details:")
             for key, explanation in self.diagnostics.items():
                 lines.append(f"  {key}: {explanation}")
+
+        # --- Upper limit details ---
+        if self.ionic_upper_limits and self.ionic_ul_details:
+            lines.append("")
+            lines.append("Upper limits (3σ):")
+            _det = self.ionic_ul_details
+            _ul = self.ionic_upper_limits
+            for ion_key, abund_ul in _ul.items():
+                info = _det.get(ion_key, {})
+                src_lines = ", ".join(info.get("lines", []))
+                flux_ul = info.get("flux_ul")
+                n_sig = info.get("n_sigma", 3.0)
+                lines.append(f"  {ion_key}:")
+                lines.append(f"    Lines not detected: {src_lines}")
+                if flux_ul is not None:
+                    lines.append(
+                        f"    Flux upper limit:   {flux_ul:.2e} "
+                        f"({n_sig:.0f}σ × sqrt(Σ err²))"
+                    )
+                lines.append(f"    Ionic abundance:    < {abund_ul:.4e}")
+
+            # Upper limits on abundance ratios.
+            O_total = 0.0
+            if self.ionic:
+                O_total = (
+                    self.ionic.get("O+/H+", 0.0)
+                    + self.ionic.get("O++/H+", 0.0)
+                )
+            if O_total > 0:
+                # N/O upper limit: sum detected N ions + upper limits for
+                # non-detected N ions, divided by total O.
+                _n_ions = ["N+/H+", "N++/H+", "N+++/H+"]
+                N_total = 0.0
+                has_ul = False
+                for nk in _n_ions:
+                    detected = self.ionic.get(nk, 0.0) if self.ionic else 0.0
+                    if detected > 0:
+                        N_total += detected
+                    elif nk in _ul:
+                        N_total += _ul[nk]
+                        has_ul = True
+                if N_total > 0 and has_ul:
+                    log_no_ul = np.log10(N_total / O_total)
+                    lines.append(f"  → log(N/O) < {log_no_ul:.3f} (using upper"
+                                 f" limits for non-detected N ions)")
+
+                # C/O upper limit.
+                _c_ions = ["C++/H+", "C+++/H+"]
+                C_total = 0.0
+                has_ul_c = False
+                for ck in _c_ions:
+                    detected = self.ionic.get(ck, 0.0) if self.ionic else 0.0
+                    if detected > 0:
+                        C_total += detected
+                    elif ck in _ul:
+                        C_total += _ul[ck]
+                        has_ul_c = True
+                if C_total > 0 and has_ul_c:
+                    log_co_ul = np.log10(C_total / O_total)
+                    lines.append(f"  → log(C/O) < {log_co_ul:.3f} (using upper"
+                                 f" limits for non-detected C ions)")
 
         # --- Alternative method results ---
         if self.alt_results:
