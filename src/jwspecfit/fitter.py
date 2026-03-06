@@ -856,4 +856,18 @@ def _bootstrap_uncertainties(
                 noise_all[b], **shared_kwargs
             )
 
-    return np.nanstd(flux_samples, axis=0)
+    # Use sigma-clipped std to reject pathological bootstrap iterations
+    # where unconstrained parameters (e.g. UV secondaries) blow up.
+    from astropy.stats import sigma_clipped_stats
+
+    errs = np.zeros(flux_samples.shape[1])
+    for i in range(flux_samples.shape[1]):
+        col = flux_samples[:, i]
+        finite = col[np.isfinite(col)]
+        if len(finite) < 3:
+            errs[i] = np.nanstd(col)
+        else:
+            _, _, std = sigma_clipped_stats(finite, sigma=3.0)
+            # Fall back to nanstd if clipping removes all variance.
+            errs[i] = std if std > 0 else np.nanstd(finite)
+    return errs
