@@ -92,6 +92,7 @@ class AbundanceResult:
     icf_method: str | None = None
     NO_icf_name: str | None = None
     excluded_lines: list[str] | None = None
+    ionic_upper_limits: dict[str, float] | None = field(default=None, repr=False)
     NO_tiers: dict[str, float] | None = field(default=None, repr=False)
     failures: dict[str, str] | None = field(default=None, repr=False)
     diagnostics: dict[str, str] | None = field(default=None, repr=False)
@@ -162,6 +163,19 @@ class AbundanceResult:
             lines.append(f"  ICF method  = {self.icf_method}")
         if self.NO_icf_name is not None:
             lines.append(f"  N/O ICF     = {self.NO_icf_name}")
+
+        # --- Ionic abundances ---
+        if self.ionic:
+            lines.append("")
+            lines.append("Ionic abundances:")
+            _ul = self.ionic_upper_limits or {}
+            for key, val in self.ionic.items():
+                if val > 0:
+                    lines.append(f"  {key:14s}= {val:.4e}")
+                elif key in _ul:
+                    lines.append(f"  {key:14s}< {_ul[key]:.4e}  (3σ upper limit)")
+                else:
+                    lines.append(f"  {key:14s}  not detected")
 
         # --- N/O tiers (all eligible methods) ---
         if self.NO_tiers and len(self.NO_tiers) > 1:

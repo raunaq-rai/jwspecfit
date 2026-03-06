@@ -75,6 +75,10 @@ class LineResult:
     snr_peak_err: float
     snr_peak_cont: float
 
+    def upper_limit(self, n_sigma: float = 3.0) -> float:
+        """Return n-sigma flux upper limit."""
+        return n_sigma * self.flux_err
+
     @property
     def snr(self) -> float:
         """Backward-compatible alias for snr_int_err."""

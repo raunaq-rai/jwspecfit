@@ -578,8 +578,10 @@ def _print_icf_reasoning(
     icf_method: str,
     use_martinez: bool,
     totals: dict[str, float],
+    ionic_upper_limits: dict[str, float] | None = None,
 ) -> None:
     """Print the full N/O ICF decision breakdown (auto mode only)."""
+    _ul = ionic_upper_limits or {}
     print("\n" + "=" * 60)
     print("N/O ICF REASONING (icf_method='auto')")
     print("=" * 60)
@@ -593,7 +595,12 @@ def _print_icf_reasoning(
     }
     print("\n--- Detected nitrogen ions ---")
     for key, val in n_ions.items():
-        status = f"{val:.4e}" if val > 0 else "not detected"
+        if val > 0:
+            status = f"{val:.4e}"
+        elif key in _ul:
+            status = f"< {_ul[key]:.4e}  (3σ upper limit)"
+        else:
+            status = "not detected"
         print(f"  {key}: {status}")
 
     # 2. Detected oxygen ions
@@ -668,6 +675,7 @@ def compute_total_abundances(
     Z_Zsun: float | None = None,
     ne: float | None = None,
     icf_method: str = "auto",
+    ionic_upper_limits: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """Derive total element abundances from ionic abundances + ICFs.
 
@@ -850,7 +858,8 @@ def compute_total_abundances(
         # Print ICF reasoning when auto mode is used.
         if icf_method == "auto":
             _print_icf_reasoning(ionic, logU, Z_Zsun, icf_method,
-                                 use_martinez, totals)
+                                 use_martinez, totals,
+                                 ionic_upper_limits=ionic_upper_limits)
 
         # S/O
         S_plus = ionic.get("S+/H+", 0.0)

@@ -628,6 +628,60 @@ def _gate_nitrogen_ions(
     return ionic
 
 
+def _compute_ionic_upper_limits(
+    ionic: dict[str, float],
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    Te_high: float,
+    Te_low: float,
+    ne_low: float,
+    ne_mid: float,
+    ne_high: float,
+    n_sigma: float = 3.0,
+) -> dict[str, float]:
+    """Compute n-sigma upper limits for non-detected ionic abundances."""
+    from .direct import _ionic_abundance
+
+    Hb = fluxes.get("HBETA", 0.0)
+    if Hb <= 0:
+        return {}
+
+    # Mapping: ion_key -> (element, ion_stage, line_names, wave_labels, Te, ne)
+    _ION_MAP = [
+        ("O+/H+",   "O", 2, ["OII_doublet"], [3727],       Te_low,  ne_low),
+        ("O++/H+",  "O", 3, ["OIII_5007"],   [5007],       Te_high, ne_high),
+        ("N+/H+",   "N", 2, ["NII_6585"],    [6584],       Te_low,  ne_low),
+        ("N++/H+",  "N", 3, ["NIII_1749", "NIII_1752"], [1749, 1752], Te_high, ne_mid),
+        ("N+++/H+", "N", 4, ["NIV_1483", "NIV_1486"],   [1483, 1486], Te_high, ne_high),
+        ("C++/H+",  "C", 3, ["CIII]_1907", "CIII]"],    [1907, 1909], Te_high, ne_mid),
+        ("C+++/H+", "C", 4, ["CIV_1", "CIV_2"],         [1548, 1551], Te_high, ne_high),
+        ("Ne++/H+", "Ne", 3, ["NeIII_3869"], [3869],     Te_high, ne_high),
+        ("S+/H+",   "S", 2, ["SII_6718", "SII_6732"], [6718, 6732], Te_low, ne_low),
+    ]
+
+    upper_limits: dict[str, float] = {}
+    for ion_key, elem, stage, line_names, waves, Te, ne in _ION_MAP:
+        # Only compute upper limit if the ion is not detected.
+        if ionic.get(ion_key, 0.0) > 0:
+            continue
+
+        # Check if any of the source lines have errors available.
+        total_err2 = sum(errors.get(n, 0.0) ** 2 for n in line_names)
+        if total_err2 <= 0:
+            continue
+
+        flux_ul = n_sigma * np.sqrt(total_err2)
+        wave_arg = waves if len(waves) > 1 else waves[0]
+        try:
+            abund_ul = _ionic_abundance(elem, stage, flux_ul, Hb, Te, ne, wave_arg)
+            if abund_ul > 0 and np.isfinite(abund_ul):
+                upper_limits[ion_key] = abund_ul
+        except Exception:
+            pass
+
+    return upper_limits
+
+
 # Human-readable descriptions for Martinez+25 and direct-sum ICF names.
 _ICF_DESCRIPTIONS: dict[str, str] = {
     "NppNppp_Opp": "Martinez+25 ICF 5: (N2+ + N3+)/O2+ x ICF — preferred (pure UV, both ions detected)",
@@ -880,9 +934,17 @@ def _run_direct(
     # SNR-gate nitrogen ions to avoid noise-dominated N/O.
     _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=snr_NO)
 
+    # Compute 3σ upper limits for non-detected ions.
+    ionic_upper_limits = _compute_ionic_upper_limits(
+        ionic, fluxes, errors, Te_high, Te_low, ne_low,
+        ne_mid if ne_mid is not None else ne_low,
+        ne_high if ne_high is not None else ne_low,
+    )
+
     totals = compute_total_abundances(
         ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
         icf_method=icf_method,
+        ionic_upper_limits=ionic_upper_limits,
     )
 
     NO = totals.get("N/O")
@@ -1015,6 +1077,7 @@ def _run_direct(
         "icf_method": icf_method,
         "NO_icf_name": NO_icf_name,
         "ionic": ionic,
+        "ionic_upper_limits": ionic_upper_limits if ionic_upper_limits else None,
         "OH_posterior": OH_mc,
         "NO_posterior": NO_mc,
         "CO_posterior": CO_mc,
@@ -1630,6 +1693,7 @@ def compute_abundances(
             ne=direct_out.get("ne"),
             Av=Av_derived,
             ionic=direct_out.get("ionic"),
+            ionic_upper_limits=direct_out.get("ionic_upper_limits"),
             OH_posterior=direct_out.get("OH_posterior"),
             NO_posterior=direct_out.get("NO_posterior"),
             CO_posterior=direct_out.get("CO_posterior"),

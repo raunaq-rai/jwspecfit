@@ -1302,8 +1302,8 @@ class TestDirectSum:
         assert ionic["N+/H+"] == 3e-7
         assert ionic["N++/H+"] == 1e-5
 
-    def test_gate_incomplete_doublet_excluded(self):
-        """Doublet with only one member detected should be excluded."""
+    def test_gate_single_member_kept(self):
+        """Doublet with one well-detected member should be kept."""
         from jwspecabund._core import _gate_nitrogen_ions
 
         ionic = {
@@ -1311,16 +1311,34 @@ class TestDirectSum:
             "N++/H+": 1e-5,
         }
         fluxes = {
-            "NIII_1749": 5.0e-18,  # only one member
-            # NIII_1752 missing (flux=0)
+            "NIII_1749": 5.0e-18,  # only one member, SNR=10
         }
         errors = {
-            "NIII_1749": 0.5e-18,  # high SNR on the one member
+            "NIII_1749": 0.5e-18,
         }
 
         _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=1.5)
 
-        # Excluded because only one doublet member present.
+        # Kept: one member has SNR >= 1 and total SNR > snr_NO.
+        assert ionic["N++/H+"] == 1e-5
+
+    def test_gate_no_member_above_snr1(self):
+        """Doublet where no member has SNR >= 1 should be excluded."""
+        from jwspecabund._core import _gate_nitrogen_ions
+
+        ionic = {
+            "O++/H+": 5e-5,
+            "N++/H+": 1e-5,
+        }
+        fluxes = {
+            "NIII_1749": 1e-20,
+        }
+        errors = {
+            "NIII_1749": 1e-18,
+        }
+
+        _gate_nitrogen_ions(ionic, fluxes, errors, snr_NO=1.5)
+
         assert ionic["N++/H+"] == 0.0
 
     def test_gate_disabled_when_snr_zero(self):
