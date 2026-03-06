@@ -834,10 +834,11 @@ def _compute_ionic_upper_limits(
         flux_ul = None
         ul_method = "continuum_rms"
         if _ul:
-            # Sum continuum-RMS limits for all doublet members.
+            # Add continuum-RMS limits in quadrature (independent noise
+            # in each doublet member: combined 3σ = √(Σ (3σ_i)²)).
             member_uls = [_ul[n] for n in line_names if n in _ul]
             if member_uls:
-                flux_ul = sum(member_uls)
+                flux_ul = np.sqrt(sum(u**2 for u in member_uls))
 
         if flux_ul is None or flux_ul <= 0:
             # Fall back to fit errors (quadrature sum × n_sigma).
