@@ -210,6 +210,7 @@ def _bic_bootstrap_single(
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
+    tie_uv_widths: bool = True,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
 
@@ -260,6 +261,7 @@ def _bic_bootstrap_single(
                 moving_average=moving_average,
                 tie_uv_doublets=tie_uv_doublets,
                 tie_uv_centroids=tie_uv_centroids,
+                tie_uv_widths=tie_uv_widths,
             )
         except (ValueError, RuntimeError):
             results[variant] = np.nan
@@ -347,6 +349,7 @@ def _fit_model_variant(
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
+    tie_uv_widths: bool = True,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -386,6 +389,7 @@ def _fit_model_variant(
         n_jobs=n_jobs, sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
         moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
+        tie_uv_widths=tie_uv_widths,
         _label=variant_label, _p0_hint=p0_hint,
     )
 
@@ -425,6 +429,7 @@ def fit_with_broad(
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
+    tie_uv_widths: bool = True,
     _print_R: bool = True,
 ) -> BroadFitResult:
     """Fit emission lines with optional broad Balmer components.
@@ -506,6 +511,7 @@ def fit_with_broad(
         sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
         moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
+        tie_uv_widths=tie_uv_widths,
     )
 
     bic_b1 = np.nan
@@ -524,6 +530,7 @@ def fit_with_broad(
                 sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
                 moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
                 tie_uv_centroids=tie_uv_centroids,
+                tie_uv_widths=tie_uv_widths,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -553,6 +560,7 @@ def fit_with_broad(
                 sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
                 moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
                 tie_uv_centroids=tie_uv_centroids,
+                tie_uv_widths=tie_uv_widths,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -592,7 +600,7 @@ def fit_with_broad(
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
                 fit_narrow, balmer_mask, variants_to_fit, sigma_factor,
                 centroid_vmax, moving_average, tie_uv_doublets,
-                tie_uv_centroids,
+                tie_uv_centroids, tie_uv_widths,
             )
             for i in range(n_boot_bic)
         )
@@ -625,7 +633,7 @@ def fit_with_broad(
                     _fit_model_variant,
                     spectrum, z, narrow_lines, grating, R, continuum, deg,
                     broad_type, 0, fit_narrow, 1, sigma_factor, centroid_vmax,
-                    moving_average, tie_uv_doublets, tie_uv_centroids,
+                    moving_average, tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
                 )
             for variant, fut in futures.items():
                 fit_v, _ = fut.result()
@@ -643,7 +651,7 @@ def fit_with_broad(
                     _fit_model_variant,
                     spectrum, z, narrow_lines, grating, R, continuum, deg,
                     variant, 0, fit_narrow, n_jobs, sigma_factor, centroid_vmax,
-                    moving_average, tie_uv_doublets, tie_uv_centroids,
+                    moving_average, tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
                 )
                 bic_futures[variant] = fut
 
@@ -699,6 +707,7 @@ def fit_with_broad(
             centroid_vmax=centroid_vmax,
             moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
             tie_uv_centroids=tie_uv_centroids,
+            tie_uv_widths=tie_uv_widths,
         )
         all_fits[best_name] = best_fit
 

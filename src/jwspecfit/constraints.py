@@ -60,6 +60,7 @@ class ConstraintSet:
     tie_balmer_to_oiii: bool = True
     tie_uv_doublets: bool = True
     tie_uv_centroids: bool = True
+    tie_uv_widths: bool = True
     blended_doublets: set[str] | None = None
 
     def apply(self, params: np.ndarray) -> np.ndarray:
@@ -192,19 +193,20 @@ class ConstraintSet:
             # through the residual.
             # CIV excluded (resonance line), OIII] excluded (its own
             # doublet constraint already ties 1661 to 1666).
-            _UV_INTERCOM = [
-                "CIII]_1907", "NIV_1486", "NIII_1749",
-            ]
-            _uv_present = [n for n in _UV_INTERCOM if n in idx]
-            if len(_uv_present) >= 2:
-                anchor = _uv_present[0]
-                i_anchor = idx[anchor]
-                lam_anchor = REST_LINES_A[anchor]
-                sigma_anchor = p[2 * nL + i_anchor]
-                for name in _uv_present[1:]:
-                    i_t = idx[name]
-                    ratio = REST_LINES_A[name] / lam_anchor
-                    p[2 * nL + i_t] = sigma_anchor * ratio
+            if self.tie_uv_widths:
+                _UV_INTERCOM = [
+                    "CIII]_1907", "NIV_1486", "NIII_1749",
+                ]
+                _uv_present = [n for n in _UV_INTERCOM if n in idx]
+                if len(_uv_present) >= 2:
+                    anchor = _uv_present[0]
+                    i_anchor = idx[anchor]
+                    lam_anchor = REST_LINES_A[anchor]
+                    sigma_anchor = p[2 * nL + i_anchor]
+                    for name in _uv_present[1:]:
+                        i_t = idx[name]
+                        ratio = REST_LINES_A[name] / lam_anchor
+                        p[2 * nL + i_t] = sigma_anchor * ratio
 
         return p
 
@@ -297,13 +299,14 @@ class ConstraintSet:
             # UV intercombination widths: first available is anchor (free),
             # all others are derived (not free).
             # OIII] excluded — its width is independent.
-            _UV_INTERCOM = [
-                "CIII]_1907", "NIV_1486", "NIII_1749",
-            ]
-            _uv_present = [n for n in _UV_INTERCOM if n in idx]
-            if len(_uv_present) >= 2:
-                for name in _uv_present[1:]:
-                    free[2 * nL + idx[name]] = False
+            if self.tie_uv_widths:
+                _UV_INTERCOM = [
+                    "CIII]_1907", "NIV_1486", "NIII_1749",
+                ]
+                _uv_present = [n for n in _UV_INTERCOM if n in idx]
+                if len(_uv_present) >= 2:
+                    for name in _uv_present[1:]:
+                        free[2 * nL + idx[name]] = False
 
         return free
 
