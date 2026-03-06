@@ -544,11 +544,11 @@ def compute_ionic_abundances(
     _n1483 = fluxes.get("NIV_1483", 0.0)
     _n1486 = fluxes.get("NIV_1486", 0.0)
     if _n1483 > 0 and _n1486 > 0:
-        ionic["N+++/H+"] = _ionic_abundance("N", 4, _n1483 + _n1486, Hb, Te_high, ne_hi, [1483, 1487])
+        ionic["N+++/H+"] = _ionic_abundance("N", 4, _n1483 + _n1486, Hb, Te_high, ne_hi, [1483, 1486])
     elif _n1483 > 0:
         ionic["N+++/H+"] = _ionic_abundance("N", 4, _n1483, Hb, Te_high, ne_hi, 1483)
     elif _n1486 > 0:
-        ionic["N+++/H+"] = _ionic_abundance("N", 4, _n1486, Hb, Te_high, ne_hi, 1487)
+        ionic["N+++/H+"] = _ionic_abundance("N", 4, _n1486, Hb, Te_high, ne_hi, 1486)
 
     # N4+/H+ from NV 1239 + 1243 — T_high zone (manual emissivity)
     _nv1 = fluxes.get("NV_1", 0.0)
