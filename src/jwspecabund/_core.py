@@ -231,7 +231,7 @@ def _compute_continuum_rms_limits(
     """
     from jwspecfit.io import _ujy_to_flam
     from jwspecfit.lines import REST_LINES_A
-    from jwspecfit.resolution import sigma_inst_A
+    from jwspecfit.resolution import R_from_pixels, sigma_inst_A
 
     if not hasattr(result, "spectrum") or result.spectrum is None:
         return {}
@@ -247,6 +247,8 @@ def _compute_continuum_rms_limits(
     # Instrumental sigma at each wavelength.
     grating = getattr(spec, "grating", None)
     R = getattr(spec, "R", None)
+    if grating is None and R is None:
+        R = R_from_pixels(spec.wave_um)
     sig_inst = sigma_inst_A(spec.wave_um, grating=grating, R=R)
 
     limits: dict[str, float] = {}
