@@ -545,6 +545,13 @@ def fit_lines(
             i_pri = idx[pri]
             i_sec = idx[sec]
             p0[i_sec] = np.clip(p0[i_pri] * ratio, lb[i_sec], ub[i_sec])
+            # Cap the secondary's upper bound: physically the secondary
+            # can never exceed ~2× the primary (even at extreme densities
+            # the ratio stays < 1.5).  Without this cap, the optimizer
+            # can push the secondary to 150× peak and fit noise.
+            # Use 3× the primary seed as a generous ceiling.
+            ub_cap = max(3.0 * p0[i_pri], p0[i_sec] * 5.0)
+            ub[i_sec] = min(ub[i_sec], ub_cap)
 
     # Override seeds from a previous fit (e.g. narrow-only results).
     # For non-broad lines, also set an amplitude floor at 30% of the
