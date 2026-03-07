@@ -190,7 +190,6 @@ def fit_lines(
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
-    tie_uv_amplitudes: bool = False,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -426,7 +425,6 @@ def fit_lines(
         tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
-        tie_uv_amplitudes=tie_uv_amplitudes,
         blended_doublets=_blended if _blended else None,
     )
 
@@ -530,11 +528,28 @@ def fit_lines(
         lb[2 * nL + i] = sig_lo
         ub[2 * nL + i] = sig_hi
 
+    # Seed UV doublet secondaries at the expected flux ratio of the
+    # primary.  Without this, both members pick up the same peak flux
+    # as their seed, and the optimiser often dumps all flux into one
+    # member.  The amplitude remains free — this just gives a
+    # physically motivated starting point.
+    from .constraints import _INTERCOM_LOW_DENSITY_RATIOS, NV_RATIO
+
+    idx = {name: i for i, name in enumerate(line_names)}
+    _ALL_DOUBLETS = [
+        *[(*pair, ratio) for pair, ratio in _INTERCOM_LOW_DENSITY_RATIOS.items()],
+        ("NV_1", "NV_2", NV_RATIO),
+    ]
+    for pri, sec, ratio in _ALL_DOUBLETS:
+        if pri in idx and sec in idx:
+            i_pri = idx[pri]
+            i_sec = idx[sec]
+            p0[i_sec] = np.clip(p0[i_pri] * ratio, lb[i_sec], ub[i_sec])
+
     # Override seeds from a previous fit (e.g. narrow-only results).
     # For non-broad lines, also set an amplitude floor at 30% of the
     # narrow-only value to prevent the optimizer from zeroing out narrow
     # lines when a broad component can absorb their flux.
-    idx = {name: i for i, name in enumerate(line_names)}
     if _p0_hint is not None:
         for hint_name, (hint_A, hint_mu, hint_sig) in _p0_hint.items():
             if hint_name in idx:

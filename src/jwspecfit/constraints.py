@@ -61,7 +61,6 @@ class ConstraintSet:
     tie_uv_doublets: bool = True
     tie_uv_centroids: bool = True
     tie_uv_widths: bool = True
-    tie_uv_amplitudes: bool = False
     blended_doublets: set[str] | None = None
 
     def apply(self, params: np.ndarray) -> np.ndarray:
@@ -172,8 +171,6 @@ class ConstraintSet:
                 ("SiIII_1",   "SiIII_2"),
             ]
             _blended = self.blended_doublets or set()
-            # Secondaries affected by tie_uv_amplitudes (noisy UV lines).
-            _FORCE_AMP_SECS = {"CIV_2", "NIV_1483", "NIII_1752"}
             for pri, sec in _KINEMATIC_TIED:
                 if pri in idx and sec in idx:
                     i_pri = idx[pri]
@@ -182,11 +179,8 @@ class ConstraintSet:
                     if self.tie_uv_centroids:
                         p[nL + i_sec] = p[nL + i_pri] * lam_ratio
                     p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
-                    # Fix amplitude for unresolved doublets or when
-                    # tie_uv_amplitudes is explicitly requested
-                    # (only for CIV, NIV, NIII).
-                    force_amp = self.tie_uv_amplitudes and sec in _FORCE_AMP_SECS
-                    if sec in _blended or force_amp:
+                    # Fix amplitude for unresolved doublets.
+                    if sec in _blended:
                         ratio = _INTERCOM_LOW_DENSITY_RATIOS.get(
                             (pri, sec), 0.67,
                         )
@@ -293,15 +287,13 @@ class ConstraintSet:
                 ("SiIII_1",   "SiIII_2"),
             ]
             _blended = self.blended_doublets or set()
-            _FORCE_AMP_SECS = {"CIV_2", "NIV_1483", "NIII_1752"}
             for pri, sec in _KINEMATIC_TIED:
                 if pri in idx and sec in idx:
                     i_sec = idx[sec]
                     if self.tie_uv_centroids:
                         free[nL + i_sec] = False
                     free[2 * nL + i_sec] = False
-                    force_amp = self.tie_uv_amplitudes and sec in _FORCE_AMP_SECS
-                    if sec in _blended or force_amp:
+                    if sec in _blended:
                         free[i_sec] = False
 
             # UV intercombination widths: first available is anchor (free),

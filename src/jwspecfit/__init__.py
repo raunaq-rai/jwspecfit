@@ -149,7 +149,6 @@ def fit_lines(
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
-    tie_uv_amplitudes: bool = False,
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
@@ -287,7 +286,7 @@ def fit_lines(
                     tie_uv_doublets=tie_uv_doublets,
                     tie_uv_centroids=tie_uv_centroids,
                     tie_uv_widths=tie_uv_widths,
-                    tie_uv_amplitudes=tie_uv_amplitudes,
+
                     _label=win_label,
                 )
             else:
@@ -303,7 +302,7 @@ def fit_lines(
                     tie_uv_doublets=tie_uv_doublets,
                     tie_uv_centroids=tie_uv_centroids,
                     tie_uv_widths=tie_uv_widths,
-                    tie_uv_amplitudes=tie_uv_amplitudes,
+
                     _print_R=False,
                 )
             window_results.append(res)
@@ -329,7 +328,7 @@ def fit_lines(
             tie_uv_doublets=tie_uv_doublets,
             tie_uv_centroids=tie_uv_centroids,
             tie_uv_widths=tie_uv_widths,
-            tie_uv_amplitudes=tie_uv_amplitudes,
+
         )
 
     return fit_with_broad(
@@ -347,5 +346,5 @@ def fit_lines(
         tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
-        tie_uv_amplitudes=tie_uv_amplitudes,
+
     )
