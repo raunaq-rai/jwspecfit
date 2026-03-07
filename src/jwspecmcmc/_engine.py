@@ -61,6 +61,7 @@ def _fit_lines_mcmc(
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
+    tie_uv_amplitudes: bool = False,
 ) -> MCMCResult:
     """Fit emission lines using MCMC sampling.
 
@@ -250,6 +251,7 @@ def _fit_lines_mcmc(
     constraints = ConstraintSet(
         line_names, tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids, tie_uv_widths=tie_uv_widths,
+        tie_uv_amplitudes=tie_uv_amplitudes,
     )
 
     p0 = np.zeros(3 * nL)
@@ -339,6 +341,7 @@ def _fit_lines_mcmc(
             deg=deg, n_boot=0, clip_sigma=clip_sigma,
             tie_uv_centroids=tie_uv_centroids,
             tie_uv_widths=tie_uv_widths,
+            tie_uv_amplitudes=tie_uv_amplitudes,
         )
         if mle_result.success:
             # Map MLE params back by line name — the MLE fit may have
@@ -578,6 +581,7 @@ def _fit_with_broad_mcmc(
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
+    tie_uv_amplitudes: bool = False,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
 
@@ -662,6 +666,7 @@ def _fit_with_broad_mcmc(
         moving_average=moving_average,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
+        tie_uv_amplitudes=tie_uv_amplitudes,
     )
 
     selected_model = bic_result.selected_model
@@ -710,6 +715,7 @@ def _fit_with_broad_mcmc(
         tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
+        tie_uv_amplitudes=tie_uv_amplitudes,
     )
 
     return MCMCBroadFitResult(

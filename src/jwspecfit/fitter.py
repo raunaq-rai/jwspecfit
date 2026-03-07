@@ -190,6 +190,7 @@ def fit_lines(
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
+    tie_uv_amplitudes: bool = False,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -425,6 +426,7 @@ def fit_lines(
         tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
+        tie_uv_amplitudes=tie_uv_amplitudes,
         blended_doublets=_blended if _blended else None,
     )
 

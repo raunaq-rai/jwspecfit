@@ -61,6 +61,7 @@ class ConstraintSet:
     tie_uv_doublets: bool = True
     tie_uv_centroids: bool = True
     tie_uv_widths: bool = True
+    tie_uv_amplitudes: bool = False
     blended_doublets: set[str] | None = None
 
     def apply(self, params: np.ndarray) -> np.ndarray:
@@ -179,8 +180,9 @@ class ConstraintSet:
                     if self.tie_uv_centroids:
                         p[nL + i_sec] = p[nL + i_pri] * lam_ratio
                     p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
-                    # Fix amplitude for unresolved doublets.
-                    if sec in _blended:
+                    # Fix amplitude for unresolved doublets or when
+                    # tie_uv_amplitudes is explicitly requested.
+                    if sec in _blended or self.tie_uv_amplitudes:
                         ratio = _INTERCOM_LOW_DENSITY_RATIOS.get(
                             (pri, sec), 0.67,
                         )
@@ -293,7 +295,7 @@ class ConstraintSet:
                     if self.tie_uv_centroids:
                         free[nL + i_sec] = False
                     free[2 * nL + i_sec] = False
-                    if sec in _blended:
+                    if sec in _blended or self.tie_uv_amplitudes:
                         free[i_sec] = False
 
             # UV intercombination widths: first available is anchor (free),
