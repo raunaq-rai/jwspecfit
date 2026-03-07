@@ -76,13 +76,18 @@ class TestDustCorrection:
         assert Av == 0.0
 
     def test_compute_Av_from_balmer_positive_dust(self):
-        """Observed ratio > intrinsic should give positive A_V."""
+        """Observed Hgamma/Hbeta below intrinsic should give positive A_V.
+
+        For Hgamma/Hbeta the blue line (Hgamma) is preferentially
+        attenuated, so dust *reduces* the ratio below the Case B value
+        of 0.468.
+        """
         from jwspecabund.dust import compute_Av_from_balmer
 
-        # Ratio of 4.0 > 2.86 → positive dust.
+        # Ratio of 0.3 < 0.468 → positive dust (blue suppressed).
         Av, Av_err = compute_Av_from_balmer(
-            flux_num=4.0, flux_den=1.0,
-            flux_num_err=0.1, flux_den_err=0.05,
+            flux_num=0.3, flux_den=1.0,
+            flux_num_err=0.01, flux_den_err=0.01,
             law="salim",
         )
         assert Av > 0.0
