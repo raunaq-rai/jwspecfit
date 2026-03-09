@@ -189,11 +189,17 @@ def make_jax_log_likelihood(
     free_idx_jax = jnp.array(free_idx, dtype=jnp.int32)
 
     # Pre-compute static data as JAX arrays.
+    # Sanitize non-finite values to 0 — invalid pixels are masked by
+    # inv_err_w=0, but JAX evaluates all arithmetic (NaN * 0 = NaN in
+    # IEEE 754), so we must ensure no NaN enters the computation.
+    _flam_safe = np.where(spec.valid, spec.flam, 0.0)
+    _err_safe = np.where(spec.valid, spec.flam_err, 1.0)
+
     left = jnp.array(spec.edges[:-1], dtype=jnp.float64)
     right = jnp.array(spec.edges[1:], dtype=jnp.float64)
     widths = right - left
-    flam = jnp.array(spec.flam, dtype=jnp.float64)
-    flam_err = jnp.array(spec.flam_err, dtype=jnp.float64)
+    flam = jnp.array(_flam_safe, dtype=jnp.float64)
+    flam_err = jnp.array(_err_safe, dtype=jnp.float64)
     w_pix = jnp.array(spec.w_pix, dtype=jnp.float64)
     valid = jnp.array(spec.valid, dtype=jnp.bool_)
 

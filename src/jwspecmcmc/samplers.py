@@ -414,14 +414,52 @@ def run_nuts(
 
     ll_init = float(log_likelihood_jax(p0_jax))
     if not np.isfinite(ll_init):
-        logger.error(
-            "Initial log-likelihood is %s — NUTS cannot start. "
-            "Check that bounds and overrides produce a valid model.",
-            ll_init,
-        )
+        # Dump diagnostics to help identify the problem.
+        print(f"\n=== NUTS INIT FAILURE: log-likelihood = {ll_init} ===")
+        print(f"n_free = {n_dim}, n_lines = {spec.n_lines}")
+        for idx in range(n_dim):
+            flag = ""
+            if p0_free[idx] <= lb[idx]:
+                flag = " *** AT LOWER BOUND"
+            elif p0_free[idx] >= ub[idx]:
+                flag = " *** AT UPPER BOUND"
+            if lb[idx] == ub[idx]:
+                flag = " *** ZERO-WIDTH BOUND"
+            print(f"  [{idx:3d}] p0={p0_free[idx]:+.6e}  "
+                  f"lb={lb[idx]:+.6e}  ub={ub[idx]:+.6e}{flag}")
+        # Also check for zero sigmas in the full param vector.
+        free_mask = spec.constraints.free_mask()
+        full = np.zeros(3 * spec.n_lines)
+        full[free_mask] = p0_free
+        from .jax_likelihood import _compile_tying_ops
+        ops = _compile_tying_ops(spec.constraints)
+        for d, s, r in ops:
+            full[d] = full[s] * r
+        nL = spec.n_lines
+        sigs = full[2 * nL:]
+        for i, sig in enumerate(sigs):
+            if sig <= 0:
+                print(f"  *** sigma[{i}] = {sig:.6e} (line index {i}) — ZERO/NEGATIVE")
+        # Compare with NumPy likelihood.
+        from .likelihood import log_likelihood as _ll_np
+        ll_np = _ll_np(p0_free, spec)
+        print(f"NumPy log-likelihood at p0: {ll_np}")
+        # Test at midpoint of bounds.
+        p_mid = 0.5 * (lb + ub)
+        ll_mid_jax = float(log_likelihood_jax(jnp.array(p_mid, dtype=jnp.float64)))
+        ll_mid_np = _ll_np(p_mid, spec)
+        print(f"Midpoint JAX ll: {ll_mid_jax}, NumPy ll: {ll_mid_np}")
+        # Check for non-finite data inputs.
+        n_bad_flam = int(np.sum(~np.isfinite(spec.flam)))
+        n_bad_err = int(np.sum(~np.isfinite(spec.flam_err)))
+        n_zero_err = int(np.sum((spec.flam_err <= 0) & spec.valid))
+        print(f"Data: {n_bad_flam} non-finite flam, {n_bad_err} non-finite err, "
+              f"{n_zero_err} zero/neg err in valid pixels")
+        print("=== END DIAGNOSTICS ===\n")
         raise RuntimeError(
             f"NUTS initialisation failed: log-likelihood = {ll_init} at p0. "
-            f"This usually means parameter bounds are too tight or inconsistent."
+            f"This usually means parameter bounds are too tight or inconsistent. "
+            f"See diagnostics above."
         )
     logger.info("Initial log-likelihood at p0: %.2f", ll_init)
 
