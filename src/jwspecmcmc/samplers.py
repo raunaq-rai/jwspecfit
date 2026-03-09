@@ -396,12 +396,41 @@ def run_nuts(
         ll = log_likelihood_jax(p_free)
         numpyro.factor("log_likelihood", ll)
 
+    # Validate initial parameters before passing to NumPyro.
+    p0_jax = jnp.array(p0_free, dtype=jnp.float64)
+    oob_lo = p0_free <= lb
+    oob_hi = p0_free >= ub
+    if np.any(oob_lo) or np.any(oob_hi):
+        bad = np.where(oob_lo | oob_hi)[0]
+        for idx in bad:
+            logger.warning(
+                "  p0_free[%d] = %.6e  bounds = [%.6e, %.6e] %s",
+                idx, p0_free[idx], lb[idx], ub[idx],
+                "BELOW" if oob_lo[idx] else "ABOVE",
+            )
+        # Clip to strictly inside bounds.
+        p0_free = np.clip(p0_free, lb + 1e-10 * np.abs(lb + 1), ub - 1e-10 * np.abs(ub + 1))
+        p0_jax = jnp.array(p0_free, dtype=jnp.float64)
+
+    ll_init = float(log_likelihood_jax(p0_jax))
+    if not np.isfinite(ll_init):
+        logger.error(
+            "Initial log-likelihood is %s — NUTS cannot start. "
+            "Check that bounds and overrides produce a valid model.",
+            ll_init,
+        )
+        raise RuntimeError(
+            f"NUTS initialisation failed: log-likelihood = {ll_init} at p0. "
+            f"This usually means parameter bounds are too tight or inconsistent."
+        )
+    logger.info("Initial log-likelihood at p0: %.2f", ll_init)
+
     kernel = NUTS(
         numpyro_model,
         target_accept_prob=target_accept_prob,
         max_tree_depth=max_tree_depth,
         init_strategy=numpyro.infer.init_to_value(
-            values={"params": jnp.array(p0_free, dtype=jnp.float64)},
+            values={"params": p0_jax},
         ),
     )
 
