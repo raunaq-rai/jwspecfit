@@ -191,6 +191,7 @@ def fit_lines(
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
+    centroid_overrides: dict[str, tuple[float, float]] | None = None,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -243,6 +244,11 @@ def fit_lines(
         Each value is ``(sigma_lo, sigma_hi)``.  Overrides the automatic
         grating-based bounds for the specified lines.  Convert from
         velocity: ``sigma_A = sigma_kms / 299792.458 * lambda_obs_A``.
+    centroid_overrides : dict, optional
+        Per-line centroid bounds in observed-frame Angstroms, keyed by
+        line name.  Each value is ``(mu_lo, mu_hi)``.  Overrides the
+        automatic centroid bounds for the specified lines.  Useful for
+        anchoring closely-spaced doublet members in noisy spectra.
 
     Returns
     -------
@@ -501,9 +507,16 @@ def fit_lines(
             min_sep = min(abs(lam_obs_A - o) for o in other_obs)
             cent_margin = min(cent_margin, 0.5 * min_sep)
 
-        p0[nL + i] = lam_obs_A
-        lb[nL + i] = lam_obs_A - cent_margin
-        ub[nL + i] = lam_obs_A + cent_margin
+        # Apply per-line centroid overrides if provided.
+        if centroid_overrides and name in centroid_overrides:
+            cent_lo, cent_hi = centroid_overrides[name]
+            p0[nL + i] = 0.5 * (cent_lo + cent_hi)
+            lb[nL + i] = cent_lo
+            ub[nL + i] = cent_hi
+        else:
+            p0[nL + i] = lam_obs_A
+            lb[nL + i] = lam_obs_A - cent_margin
+            ub[nL + i] = lam_obs_A + cent_margin
 
         # Sigma bounds — broad components use physically motivated velocity
         # widths (km/s) converted to σ_λ at the observed wavelength.

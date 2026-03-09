@@ -68,6 +68,7 @@ def _fit_lines_mcmc(
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
+    centroid_overrides: dict[str, tuple[float, float]] | None = None,
 
 ) -> MCMCResult:
     """Fit emission lines using MCMC sampling.
@@ -324,9 +325,16 @@ def _fit_lines_mcmc(
             min_sep = min(abs(lam_obs_A - o) for o in other_obs)
             cent_margin = min(cent_margin, 0.5 * min_sep)
 
-        p0[nL + i] = lam_obs_A
-        lb[nL + i] = lam_obs_A - cent_margin
-        ub[nL + i] = lam_obs_A + cent_margin
+        # Apply per-line centroid overrides if provided.
+        if centroid_overrides and name in centroid_overrides:
+            cent_lo, cent_hi = centroid_overrides[name]
+            p0[nL + i] = 0.5 * (cent_lo + cent_hi)
+            lb[nL + i] = cent_lo
+            ub[nL + i] = cent_hi
+        else:
+            p0[nL + i] = lam_obs_A
+            lb[nL + i] = lam_obs_A - cent_margin
+            ub[nL + i] = lam_obs_A + cent_margin
 
         # Sigma bounds.
         _C_KMS = 299792.458
@@ -380,6 +388,7 @@ def _fit_lines_mcmc(
             tie_uv_centroids=tie_uv_centroids,
             tie_uv_widths=tie_uv_widths,
             sigma_overrides=sigma_overrides,
+            centroid_overrides=centroid_overrides,
 
         )
         if mle_result.success:
@@ -636,6 +645,7 @@ def _fit_with_broad_mcmc(
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
+    centroid_overrides: dict[str, tuple[float, float]] | None = None,
 
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
@@ -723,6 +733,7 @@ def _fit_with_broad_mcmc(
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
         sigma_overrides=sigma_overrides,
+        centroid_overrides=centroid_overrides,
 
     )
 
@@ -778,6 +789,7 @@ def _fit_with_broad_mcmc(
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
         sigma_overrides=sigma_overrides,
+        centroid_overrides=centroid_overrides,
 
     )
 
