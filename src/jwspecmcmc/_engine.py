@@ -297,18 +297,31 @@ def _fit_lines_mcmc(
         # Peak flux near the line for amplitude seeding.
         near = np.abs(spec.wave_A - lam_obs_A)
         idx_near = np.where(near < 5 * sig_seed)[0]
-        if len(idx_near) > 0:
-            peak_flam = np.nanmax(flam[idx_near])
+        is_abs = name.startswith("abs_")
+
+        if is_abs:
+            if len(idx_near) > 0:
+                peak_flam = abs(np.nanmin(flam[idx_near]))
+            else:
+                peak_flam = 1.0
         else:
-            peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
+            if len(idx_near) > 0:
+                peak_flam = np.nanmax(flam[idx_near])
+            else:
+                peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
         if not np.isfinite(peak_flam) or peak_flam <= 0:
             peak_flam = 1.0
 
         A_seed = max(peak_flam * _SQRT2PI * sig_seed, 1e-30)
 
-        p0[i] = A_seed
-        lb[i] = 0.0
-        ub[i] = 150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
+        if is_abs:
+            p0[i] = -A_seed
+            lb[i] = -150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
+            ub[i] = 0.0
+        else:
+            p0[i] = A_seed
+            lb[i] = 0.0
+            ub[i] = 150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
 
         # Centroid bounds.
         _C_KMS_CENT = 299792.458
