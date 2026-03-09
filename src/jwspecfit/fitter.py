@@ -190,6 +190,7 @@ def fit_lines(
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
+    sigma_overrides: dict[str, tuple[float, float]] | None = None,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -237,6 +238,11 @@ def fit_lines(
         Tie UV doublet kinematics and fix resonance-line flux ratios.
         Recommended for stacked spectra where doublets are poorly
         resolved (default ``False``).
+    sigma_overrides : dict, optional
+        Per-line sigma (width) bounds in Angstroms, keyed by line name.
+        Each value is ``(sigma_lo, sigma_hi)``.  Overrides the automatic
+        grating-based bounds for the specified lines.  Convert from
+        velocity: ``sigma_A = sigma_kms / 299792.458 * lambda_obs_A``.
 
     Returns
     -------
@@ -523,6 +529,12 @@ def fit_lines(
         _MAX_SIGMA_A = 500.0
         sig_hi = min(sig_hi, _MAX_SIGMA_A)
         sig_seed = min(sig_seed, 0.9 * sig_hi)
+
+        # Apply per-line sigma overrides if provided.
+        if sigma_overrides and name in sigma_overrides:
+            sig_lo, sig_hi = sigma_overrides[name]
+            sig_hi = min(sig_hi, _MAX_SIGMA_A)
+            sig_seed = 0.5 * (sig_lo + sig_hi)
 
         p0[2 * nL + i] = sig_seed
         lb[2 * nL + i] = sig_lo

@@ -67,6 +67,7 @@ def _fit_lines_mcmc(
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
+    sigma_overrides: dict[str, tuple[float, float]] | None = None,
 
 ) -> MCMCResult:
     """Fit emission lines using MCMC sampling.
@@ -132,6 +133,10 @@ def _fit_lines_mcmc(
         Tie UV intercombination line widths to a shared velocity
         dispersion (default ``True``).  Set ``False`` for
         well-resolved spectra.
+    sigma_overrides : dict, optional
+        Per-line sigma (width) bounds in Angstroms, keyed by line name.
+        Each value is ``(sigma_lo, sigma_hi)``.  Overrides the automatic
+        grating-based bounds for the specified lines.
 
     Returns
     -------
@@ -344,6 +349,12 @@ def _fit_lines_mcmc(
         sig_hi = min(sig_hi, _MAX_SIGMA_A)
         sig_seed = min(sig_seed, 0.9 * sig_hi)
 
+        # Apply per-line sigma overrides if provided.
+        if sigma_overrides and name in sigma_overrides:
+            sig_lo, sig_hi = sigma_overrides[name]
+            sig_hi = min(sig_hi, _MAX_SIGMA_A)
+            sig_seed = 0.5 * (sig_lo + sig_hi)
+
         p0[2 * nL + i] = sig_seed
         lb[2 * nL + i] = sig_lo
         ub[2 * nL + i] = sig_hi
@@ -368,6 +379,7 @@ def _fit_lines_mcmc(
             tie_uv_doublets=tie_uv_doublets,
             tie_uv_centroids=tie_uv_centroids,
             tie_uv_widths=tie_uv_widths,
+            sigma_overrides=sigma_overrides,
 
         )
         if mle_result.success:
@@ -623,6 +635,7 @@ def _fit_with_broad_mcmc(
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
+    sigma_overrides: dict[str, tuple[float, float]] | None = None,
 
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
@@ -709,6 +722,7 @@ def _fit_with_broad_mcmc(
         tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
+        sigma_overrides=sigma_overrides,
 
     )
 
@@ -763,6 +777,7 @@ def _fit_with_broad_mcmc(
         tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
+        sigma_overrides=sigma_overrides,
 
     )
 
