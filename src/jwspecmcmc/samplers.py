@@ -314,7 +314,7 @@ def run_nuts(
     *,
     n_warmup: int = 500,
     n_samples: int = 2000,
-    n_chains: int = 1,
+    n_chains: int = 6,
     progress: bool = True,
     seed: int = 42,
     target_accept_prob: float = 0.8,

@@ -56,7 +56,7 @@ def _fit_lines_mcmc(
     # nuts options
     n_warmup: int = 500,
     n_samples_nuts: int = 2000,
-    n_chains: int = 1,
+    n_chains: int = 6,
     target_accept_prob: float = 0.8,
     max_tree_depth: int = 10,
     # common options
@@ -254,10 +254,30 @@ def _fit_lines_mcmc(
     # ------------------------------------------------------------------
     # 4. Constraints and bounds (mirrors fitter.py lines 300-398)
     # ------------------------------------------------------------------
+    # Detect unresolved intercombination doublets (same logic as fitter.py).
+    from jwspecfit.constraints import _INTERCOM_LOW_DENSITY_RATIOS
+
+    _BLEND_THRESHOLD = 4.71  # 2 × FWHM in sigma units
+    _blended: set[str] = set()
+    if tie_uv_doublets:
+        for (pri, sec) in _INTERCOM_LOW_DENSITY_RATIOS:
+            if pri in line_names and sec in line_names:
+                lam_pri = REST_LINES_A[pri] * (1.0 + z)
+                lam_sec = REST_LINES_A[sec] * (1.0 + z)
+                sep = abs(lam_pri - lam_sec)
+                idx_near_pri = np.argmin(np.abs(spec.wave_A - lam_pri))
+                sig_at_line = sig_inst[idx_near_pri]
+                if sep < _BLEND_THRESHOLD * sig_at_line:
+                    _blended.add(sec)
+                    logger.info(
+                        "Blended: %s–%s (sep=%.1f Å < %.1f×σ_inst=%.1f Å) → fixing ratio",
+                        pri, sec, sep, _BLEND_THRESHOLD, _BLEND_THRESHOLD * sig_at_line,
+                    )
+
     constraints = ConstraintSet(
         line_names, tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids, tie_uv_widths=tie_uv_widths,
-
+        blended_doublets=_blended if _blended else None,
     )
 
     p0 = np.zeros(3 * nL)
@@ -345,9 +365,10 @@ def _fit_lines_mcmc(
             spec, z,
             grating=grating, R=R, lines=line_names,
             deg=deg, n_boot=0, clip_sigma=clip_sigma,
+            tie_uv_doublets=tie_uv_doublets,
             tie_uv_centroids=tie_uv_centroids,
             tie_uv_widths=tie_uv_widths,
-    
+
         )
         if mle_result.success:
             # Map MLE params back by line name — the MLE fit may have
@@ -591,7 +612,7 @@ def _fit_with_broad_mcmc(
     # nuts options
     n_warmup: int = 500,
     n_samples_nuts: int = 2000,
-    n_chains: int = 1,
+    n_chains: int = 6,
     target_accept_prob: float = 0.8,
     max_tree_depth: int = 10,
     # common options
@@ -685,6 +706,7 @@ def _fit_with_broad_mcmc(
         bic_delta=bic_delta,
         sigma_factor=sigma_factor,
         moving_average=moving_average,
+        tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
 
