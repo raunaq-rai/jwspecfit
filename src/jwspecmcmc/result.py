@@ -190,6 +190,64 @@ class MCMCResult:
             success=True,
         )
 
+    def doublet_flux_posterior(
+        self,
+        line_a: str,
+        line_b: str,
+    ) -> np.ndarray:
+        """Compute the combined flux posterior for a doublet.
+
+        Sums the flux posteriors sample-by-sample, giving the correct
+        combined distribution even when individual members are degenerate
+        (e.g. blended CIII] 1907+1909).
+
+        Parameters
+        ----------
+        line_a : str
+            First doublet member.
+        line_b : str
+            Second doublet member.
+
+        Returns
+        -------
+        np.ndarray
+            Posterior samples of ``flux(line_a) + flux(line_b)``.
+        """
+        if line_a not in self.lines:
+            raise KeyError(f"Line '{line_a}' not found in result.")
+        if line_b not in self.lines:
+            raise KeyError(f"Line '{line_b}' not found in result.")
+        return self.lines[line_a].flux_posterior + self.lines[line_b].flux_posterior
+
+    def doublet_snr(
+        self,
+        line_a: str,
+        line_b: str,
+    ) -> float:
+        """Compute the SNR of a combined doublet flux.
+
+        Uses the summed flux posterior to get a single SNR that is not
+        degraded by the amplitude degeneracy between blended members.
+
+        Parameters
+        ----------
+        line_a : str
+            First doublet member.
+        line_b : str
+            Second doublet member.
+
+        Returns
+        -------
+        float
+            SNR of the combined doublet.
+        """
+        combined = self.doublet_flux_posterior(line_a, line_b)
+        med = float(np.median(combined))
+        lo = med - float(np.percentile(combined, 16))
+        hi = float(np.percentile(combined, 84)) - med
+        mean_err = 0.5 * (lo + hi)
+        return med / mean_err if mean_err > 0 else 0.0
+
     def flux_ratio_posterior(
         self,
         line_a: str,
@@ -340,6 +398,20 @@ class MCMCBroadFitResult:
         FitResult
         """
         return self.mcmc_result.to_fit_result()
+
+    def doublet_flux_posterior(self, line_a: str, line_b: str) -> np.ndarray:
+        """Combined flux posterior for a doublet.
+
+        Delegates to :meth:`MCMCResult.doublet_flux_posterior`.
+        """
+        return self.mcmc_result.doublet_flux_posterior(line_a, line_b)
+
+    def doublet_snr(self, line_a: str, line_b: str) -> float:
+        """SNR of a combined doublet flux.
+
+        Delegates to :meth:`MCMCResult.doublet_snr`.
+        """
+        return self.mcmc_result.doublet_snr(line_a, line_b)
 
     def flux_ratio_posterior(self, line_a: str, line_b: str) -> np.ndarray:
         """Compute the posterior distribution of a flux ratio.

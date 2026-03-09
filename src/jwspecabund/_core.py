@@ -342,11 +342,33 @@ def _doublet_snr_ok(
     fluxes: dict[str, float],
     errors: dict[str, float],
     snr_ne: float,
+    *,
+    combined: bool = False,
 ) -> bool:
-    """Return True if both doublet members have SNR >= *snr_ne*."""
+    """Return True if a doublet passes the SNR gate.
+
+    Parameters
+    ----------
+    combined : bool
+        If ``True``, use the summed doublet flux and quadrature-
+        propagated error.  This correctly handles blended doublets
+        where individual member SNRs are low due to MCMC amplitude
+        degeneracy (e.g. CIII] 1907/1909).  If ``False`` (default),
+        require both members individually above *snr_ne*.
+    """
     for name in (line1, line2):
         if name not in fluxes or name not in errors:
             return False
+
+    if combined:
+        f1, f2 = fluxes[line1], fluxes[line2]
+        e1, e2 = errors.get(line1, 0.0), errors.get(line2, 0.0)
+        flux_tot = f1 + f2
+        err_tot = np.sqrt(e1**2 + e2**2) if (e1 > 0 and e2 > 0) else 0.0
+        snr = flux_tot / err_tot if err_tot > 0 else np.inf
+        return snr >= snr_ne
+
+    for name in (line1, line2):
         err = errors.get(name, 0.0)
         snr = fluxes[name] / err if err > 0 else np.inf
         if snr < snr_ne:
@@ -428,7 +450,7 @@ def _compute_multi_ne(
     # Mid-ionisation zone: CIII] 1907/1909 (~24 eV).
     ne_mid = None
     if "CIII]_1907" in fluxes and "CIII]" in fluxes:
-        if _doublet_snr_ok("CIII]_1907", "CIII]", fluxes, errors, snr_ne):
+        if _doublet_snr_ok("CIII]_1907", "CIII]", fluxes, errors, snr_ne, combined=True):
             try:
                 ne_mid = compute_ne_CIII(fluxes["CIII]_1907"], fluxes["CIII]"])
                 logger.info("n_e(mid) from CIII] = %.0f cm^-3.", ne_mid)
@@ -444,7 +466,7 @@ def _compute_multi_ne(
     # High-ionisation zone: NIV] 1483/1486 (~47 eV).
     ne_high_raw = None
     if "NIV_1483" in fluxes and "NIV_1486" in fluxes:
-        if _doublet_snr_ok("NIV_1483", "NIV_1486", fluxes, errors, snr_ne):
+        if _doublet_snr_ok("NIV_1483", "NIV_1486", fluxes, errors, snr_ne, combined=True):
             try:
                 ne_high_raw = compute_ne_NIV(fluxes["NIV_1483"], fluxes["NIV_1486"])
                 logger.info("n_e(high) from NIV] = %.0f cm^-3.", ne_high_raw)
