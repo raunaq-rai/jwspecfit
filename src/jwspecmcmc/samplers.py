@@ -1,6 +1,6 @@
-"""MCMC sampler wrappers for emcee and nautilus.
+"""MCMC sampler wrappers for emcee, nautilus, and NumPyro NUTS.
 
-Both wrappers accept a :class:`~jwspecmcmc.likelihood.LikelihoodSpec`
+All wrappers accept a :class:`~jwspecmcmc.likelihood.LikelihoodSpec`
 and :class:`~jwspecmcmc.priors.PriorSet`, run the sampler, and return
 a common result dict.
 """
@@ -303,5 +303,157 @@ def run_nautilus(
             "n_eff": n_eff,
             "n_dim": n_dim,
             "n_samples": len(flat_chains),
+        },
+    }
+
+
+def run_nuts(
+    spec: LikelihoodSpec,
+    prior_set: PriorSet,
+    p0_free: np.ndarray,
+    *,
+    n_warmup: int = 500,
+    n_samples: int = 2000,
+    n_chains: int = 1,
+    progress: bool = True,
+    seed: int = 42,
+    target_accept_prob: float = 0.8,
+    max_tree_depth: int = 10,
+) -> dict[str, Any]:
+    """Run NumPyro NUTS (No-U-Turn Sampler) with JAX-accelerated likelihood.
+
+    Uses automatic differentiation through the emission-line model for
+    gradient-based HMC sampling, requiring far fewer likelihood evaluations
+    than ensemble samplers like emcee.
+
+    Parameters
+    ----------
+    spec : LikelihoodSpec
+        Cached data for likelihood evaluation.
+    prior_set : PriorSet
+        Prior distributions.
+    p0_free : np.ndarray
+        MLE estimate in free-parameter space (used to initialise).
+    n_warmup : int
+        Number of warmup (adaptation) steps (default 500).
+    n_samples : int
+        Number of posterior samples per chain (default 2000).
+    n_chains : int
+        Number of independent chains (default 1).
+    progress : bool
+        Show a progress bar.
+    seed : int
+        Random seed.
+    target_accept_prob : float
+        Target acceptance probability for NUTS adaptation (default 0.8).
+    max_tree_depth : int
+        Maximum tree depth for NUTS (default 10).
+
+    Returns
+    -------
+    dict
+        Same keys as :func:`run_emcee`.
+    """
+    import jax
+    import jax.numpy as jnp
+    import numpyro
+    import numpyro.distributions as dist
+    from numpyro.infer import MCMC, NUTS
+
+    from .jax_likelihood import make_jax_log_likelihood
+    from .priors import GaussianPrior, LogUniformPrior, UniformPrior
+
+    n_dim = prior_set.n_dim
+
+    # Build JIT-compiled log-likelihood.
+    log_likelihood_jax, static_data = make_jax_log_likelihood(spec)
+
+    # Build bounds arrays for the uniform priors.
+    lb = np.array([
+        p.lo if isinstance(p, (UniformPrior, LogUniformPrior)) else -np.inf
+        for p in prior_set.priors
+    ])
+    ub = np.array([
+        p.hi if isinstance(p, (UniformPrior, LogUniformPrior)) else np.inf
+        for p in prior_set.priors
+    ])
+    lb_jax = jnp.array(lb, dtype=jnp.float64)
+    ub_jax = jnp.array(ub, dtype=jnp.float64)
+
+    # Pre-compute log-prior normalisation for uniform priors.
+    log_prior_norm = 0.0
+    for prior in prior_set.priors:
+        if isinstance(prior, UniformPrior):
+            log_prior_norm -= np.log(prior.hi - prior.lo)
+
+    def numpyro_model():
+        # Sample each free parameter with its prior.
+        p_free = numpyro.sample(
+            "params",
+            dist.Uniform(lb_jax, ub_jax),
+        )
+        # Add log-likelihood as a factor.
+        ll = log_likelihood_jax(p_free)
+        numpyro.factor("log_likelihood", ll)
+
+    kernel = NUTS(
+        numpyro_model,
+        target_accept_prob=target_accept_prob,
+        max_tree_depth=max_tree_depth,
+        init_strategy=numpyro.infer.init_to_value(
+            values={"params": jnp.array(p0_free, dtype=jnp.float64)},
+        ),
+    )
+
+    mcmc = MCMC(
+        kernel,
+        num_warmup=n_warmup,
+        num_samples=n_samples,
+        num_chains=n_chains,
+        progress_bar=progress,
+    )
+
+    logger.info(
+        "Running NumPyro NUTS: %d warmup, %d samples, %d chain(s), %d dims",
+        n_warmup, n_samples, n_chains, n_dim,
+    )
+
+    rng_key = jax.random.PRNGKey(seed)
+    mcmc.run(rng_key)
+
+    # Extract samples.
+    samples = mcmc.get_samples()["params"]  # (n_samples * n_chains, n_dim)
+    flat_chains = np.array(samples)
+
+    # Compute log-probabilities for each sample.
+    log_prob_fn = jax.jit(lambda p: log_likelihood_jax(p) + log_prior_norm)
+    flat_log_prob = np.array(jax.vmap(log_prob_fn)(jnp.array(flat_chains)))
+
+    # Extract diagnostics.
+    extra_fields = mcmc.get_extra_fields()
+    diverging = extra_fields.get("diverging", None)
+    n_divergent = int(np.sum(diverging)) if diverging is not None else 0
+    if n_divergent > 0:
+        logger.warning(
+            "%d divergent transitions detected (%.1f%%). Consider increasing "
+            "target_accept_prob or max_tree_depth.",
+            n_divergent, 100.0 * n_divergent / len(flat_chains),
+        )
+
+    return {
+        "flat_chains": flat_chains,
+        "flat_log_prob": flat_log_prob,
+        "chains": None,
+        "log_prob_chains": None,
+        "n_burn": 0,
+        "sampler_name": "nuts",
+        "sampler_meta": {
+            "n_warmup": n_warmup,
+            "n_samples": n_samples,
+            "n_chains": n_chains,
+            "n_dim": n_dim,
+            "n_divergent": n_divergent,
+            "target_accept_prob": target_accept_prob,
+            "max_tree_depth": max_tree_depth,
         },
     }

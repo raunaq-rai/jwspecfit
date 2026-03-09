@@ -66,6 +66,11 @@ def fit_lines(
     n_burn: int | None = None,
     n_live: int = 2000,
     n_eff: int = 10000,
+    n_warmup: int = 500,
+    n_samples_nuts: int = 2000,
+    n_chains: int = 1,
+    target_accept_prob: float = 0.8,
+    max_tree_depth: int = 10,
     progress: bool = True,
     seed: int = 42,
     mode: str = "auto",
@@ -93,7 +98,7 @@ def fit_lines(
     z : float
         Source redshift.
     sampler : str
-        ``"emcee"`` (default) or ``"nautilus"``.
+        ``"emcee"`` (default), ``"nautilus"``, or ``"nuts"``.
     grating : str, optional
         Grating name.
     R : float or callable, optional
@@ -178,6 +183,11 @@ def fit_lines(
             n_burn=n_burn,
             n_live=n_live,
             n_eff=n_eff,
+            n_warmup=n_warmup,
+            n_samples_nuts=n_samples_nuts,
+            n_chains=n_chains,
+            target_accept_prob=target_accept_prob,
+            max_tree_depth=max_tree_depth,
             progress=progress,
             seed=seed,
             sigma_factor=sigma_factor,
@@ -208,6 +218,11 @@ def fit_lines(
         n_burn=n_burn,
         n_live=n_live,
         n_eff=n_eff,
+        n_warmup=n_warmup,
+        n_samples_nuts=n_samples_nuts,
+        n_chains=n_chains,
+        target_accept_prob=target_accept_prob,
+        max_tree_depth=max_tree_depth,
         progress=progress,
         seed=seed,
         sigma_factor=sigma_factor,
@@ -241,6 +256,11 @@ def fit_with_broad(
     n_burn: int | None = None,
     n_live: int = 2000,
     n_eff: int = 10000,
+    n_warmup: int = 500,
+    n_samples_nuts: int = 2000,
+    n_chains: int = 1,
+    target_accept_prob: float = 0.8,
+    max_tree_depth: int = 10,
     progress: bool = True,
     seed: int = 42,
     sigma_factor: float = 1.0,
@@ -263,7 +283,7 @@ def fit_with_broad(
     z : float
         Source redshift.
     sampler : str
-        ``"emcee"`` (default) or ``"nautilus"``.
+        ``"emcee"`` (default), ``"nautilus"``, or ``"nuts"``.
     grating : str, optional
         Grating name.
     R : float or callable, optional
@@ -339,6 +359,11 @@ def fit_with_broad(
         n_burn=n_burn,
         n_live=n_live,
         n_eff=n_eff,
+        n_warmup=n_warmup,
+        n_samples_nuts=n_samples_nuts,
+        n_chains=n_chains,
+        target_accept_prob=target_accept_prob,
+        max_tree_depth=max_tree_depth,
         progress=progress,
         seed=seed,
         sigma_factor=sigma_factor,

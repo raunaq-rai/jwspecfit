@@ -208,6 +208,17 @@ class ConstraintSet:
                         ratio = REST_LINES_A[name] / lam_anchor
                         p[2 * nL + i_t] = sigma_anchor * ratio
 
+        # --- Doublet-internal width tying (always active) ---
+        # Members of these doublets always share the same velocity width,
+        # even when tie_uv_doublets is False.
+        _ALWAYS_TIE_WIDTH = [
+            ("CIII]_1907", "CIII]"),
+        ]
+        for pri, sec in _ALWAYS_TIE_WIDTH:
+            if pri in idx and sec in idx:
+                lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
+                p[2 * nL + idx[sec]] = p[2 * nL + idx[pri]] * lam_ratio
+
         return p
 
     def free_mask(self) -> np.ndarray:
@@ -307,6 +318,14 @@ class ConstraintSet:
                 if len(_uv_present) >= 2:
                     for name in _uv_present[1:]:
                         free[2 * nL + idx[name]] = False
+
+        # Doublet-internal width tying (always active).
+        _ALWAYS_TIE_WIDTH = [
+            ("CIII]_1907", "CIII]"),
+        ]
+        for pri, sec in _ALWAYS_TIE_WIDTH:
+            if pri in idx and sec in idx:
+                free[2 * nL + idx[sec]] = False
 
         return free
 

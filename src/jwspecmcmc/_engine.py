@@ -26,7 +26,7 @@ from .diagnostics import summarise_convergence
 from .likelihood import LikelihoodSpec
 from .priors import GaussianPrior, PriorSet, UniformPrior, priors_from_bounds
 from .result import MCMCBroadFitResult, MCMCLineResult, MCMCResult
-from .samplers import run_emcee, run_nautilus
+from .samplers import run_emcee, run_nautilus, run_nuts
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,12 @@ def _fit_lines_mcmc(
     # nautilus options
     n_live: int = 2000,
     n_eff: int = 10000,
+    # nuts options
+    n_warmup: int = 500,
+    n_samples_nuts: int = 2000,
+    n_chains: int = 1,
+    target_accept_prob: float = 0.8,
+    max_tree_depth: int = 10,
     # common options
     progress: bool = True,
     seed: int = 42,
@@ -437,8 +443,17 @@ def _fit_lines_mcmc(
             n_live=n_live, n_eff=n_eff,
             progress=progress, seed=seed,
         )
+    elif sampler == "nuts":
+        sampler_result = run_nuts(
+            like_spec, prior_set, p0_free,
+            n_warmup=n_warmup, n_samples=n_samples_nuts,
+            n_chains=n_chains,
+            progress=progress, seed=seed,
+            target_accept_prob=target_accept_prob,
+            max_tree_depth=max_tree_depth,
+        )
     else:
-        raise ValueError(f"Unknown sampler: '{sampler}'. Use 'emcee' or 'nautilus'.")
+        raise ValueError(f"Unknown sampler: '{sampler}'. Use 'emcee', 'nautilus', or 'nuts'.")
 
     # ------------------------------------------------------------------
     # 9. Post-process: expand chains to full param space
@@ -573,6 +588,12 @@ def _fit_with_broad_mcmc(
     # nautilus options
     n_live: int = 2000,
     n_eff: int = 10000,
+    # nuts options
+    n_warmup: int = 500,
+    n_samples_nuts: int = 2000,
+    n_chains: int = 1,
+    target_accept_prob: float = 0.8,
+    max_tree_depth: int = 10,
     # common options
     progress: bool = True,
     seed: int = 42,
@@ -708,6 +729,11 @@ def _fit_with_broad_mcmc(
         n_burn=n_burn,
         n_live=n_live,
         n_eff=n_eff,
+        n_warmup=n_warmup,
+        n_samples_nuts=n_samples_nuts,
+        n_chains=n_chains,
+        target_accept_prob=target_accept_prob,
+        max_tree_depth=max_tree_depth,
         progress=progress,
         seed=seed,
         sigma_factor=sigma_factor,

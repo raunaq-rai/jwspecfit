@@ -34,6 +34,11 @@ mcmc = [
     "corner>=2.2",
     "h5py>=3.8",
 ]
+nuts = [
+    "jax>=0.4",
+    "jaxlib>=0.4",
+    "numpyro>=0.13",
+]
 abund = [
     "pyneb>=1.1.25",
 ]

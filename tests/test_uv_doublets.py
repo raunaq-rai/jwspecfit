@@ -95,12 +95,24 @@ class TestConstraintSetFreeMask:
     """Test free_mask() with tie_uv_doublets on and off."""
 
     def test_no_uv_tying(self):
-        """With tie_uv_doublets=False, all UV doublet params are free."""
+        """With tie_uv_doublets=False, all UV params free except CIII]
+        sigma which is always tied to CIII]_1907."""
         names = ["CIV_1", "CIV_2", "CIII]_1907", "CIII]"]
+        nL = 4
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=False)
         free = cs.free_mask()
-        assert free.all(), "All 12 parameters should be free"
+        # CIV: fully free
+        assert free[:2].all()
+        assert free[nL:nL + 2].all()
+        assert free[2 * nL:2 * nL + 2].all()
+        # CIII]: amplitude and centroid free, sigma of secondary tied
+        assert free[2] is np.True_          # CIII]_1907 amplitude
+        assert free[3] is np.True_          # CIII] amplitude
+        assert free[nL + 2] is np.True_     # CIII]_1907 centroid
+        assert free[nL + 3] is np.True_     # CIII] centroid
+        assert free[2 * nL + 2] is np.True_   # CIII]_1907 sigma (free)
+        assert free[2 * nL + 3] is np.False_  # CIII] sigma (tied)
 
     def test_civ_kinematic_tied_free_mask(self):
         """CIV doublet: amplitude free, centroid/sigma derived."""
@@ -210,11 +222,13 @@ class TestConstraintSetFreeMask:
                               tie_uv_doublets=True)
         n_free_off = int(cs_off.free_mask().sum())
         n_free_on = int(cs_on.free_mask().sum())
-        assert n_free_off == 18
+        # CIII] sigma always tied: 18 - 1 = 17
+        assert n_free_off == 17
         # CIV_2: -2 (centroid+sigma), CIII]: -2 (centroid+sigma),
         # NIV_1483: -2 (centroid+sigma) = 18 - 6 = 12
         # UV intercom width tying (CIV excluded — resonance line):
         # CIII]_1907 is anchor, NIV_1486 width derived: -1
+        # CIII] sigma already tied unconditionally (no double-count)
         # Total: 18 - 6 - 1 = 11
         assert n_free_on == 11
 
@@ -332,13 +346,33 @@ class TestConstraintSetApply:
         p2 = cs.apply(p1)
         np.testing.assert_array_almost_equal(p1, p2)
 
-    def test_apply_without_tying_is_identity(self):
-        names = ["CIV_1", "CIV_2", "CIII]_1907", "CIII]"]
+    def test_apply_without_tying_civ_identity(self):
+        """CIV-only: apply is identity when tie_uv_doublets=False."""
+        names = ["CIV_1", "CIV_2"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=False)
         p = self._make_params(names)
         p_out = cs.apply(p)
         np.testing.assert_array_equal(p, p_out)
+
+    def test_apply_without_tying_ciii_sigma_tied(self):
+        """CIII] sigma always tied even with tie_uv_doublets=False."""
+        names = ["CIII]_1907", "CIII]"]
+        cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
+                           tie_uv_doublets=False)
+        p = self._make_params(names)
+        p_out = cs.apply(p)
+        nL = 2
+        # Amplitudes and centroids unchanged
+        np.testing.assert_array_equal(p[:nL], p_out[:nL])
+        np.testing.assert_array_equal(p[nL:2 * nL], p_out[nL:2 * nL])
+        # Primary sigma unchanged
+        assert p_out[2 * nL] == p[2 * nL]
+        # Secondary sigma derived from primary
+        from jwspecfit.lines import REST_LINES_A
+        lam_ratio = REST_LINES_A["CIII]"] / REST_LINES_A["CIII]_1907"]
+        expected = p[2 * nL] * lam_ratio
+        np.testing.assert_almost_equal(p_out[2 * nL + 1], expected)
 
 
 class TestExpandFreeToFull:
