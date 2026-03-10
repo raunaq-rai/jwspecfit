@@ -248,6 +248,97 @@ class MCMCResult:
         mean_err = 0.5 * (lo + hi)
         return med / mean_err if mean_err > 0 else 0.0
 
+    def flux_upper_limit(
+        self,
+        line_name: str,
+        n_sigma: float = 3.0,
+    ) -> float | None:
+        """Compute a noise-based flux upper limit for a line.
+
+        Uses the local RMS of the continuum-and-model-subtracted
+        residuals near the line, multiplied by the line width and
+        *n_sigma*.  This is the standard approach for non-detections
+        and is independent of the posterior (which may be prior-
+        dominated for weak lines).
+
+        Parameters
+        ----------
+        line_name : str
+            Line name.
+        n_sigma : float
+            Number of sigma for the upper limit (default 3).
+
+        Returns
+        -------
+        float or None
+            Integrated flux upper limit in f_lam units, or ``None``
+            if there are insufficient pixels near the line.
+        """
+        if line_name not in self.lines:
+            raise KeyError(f"Line '{line_name}' not found in result.")
+
+        lr = self.lines[line_name]
+        spec = self.spectrum
+
+        # Residuals in f_lam: data - continuum - model.
+        from jwspecfit.io import _ujy_to_flam
+        data_flam = _ujy_to_flam(spec.flux_ujy, spec.wave_um)
+        cont_flam = _ujy_to_flam(self.continuum, spec.wave_um)
+        model_flam = _ujy_to_flam(self.model_flux, spec.wave_um)
+        resid = data_flam - cont_flam - model_flam
+        valid = np.isfinite(resid)
+
+        wave_A = spec.wave_A
+        lam_obs = lr.centroid_A
+        sig_line = lr.sigma_A
+
+        # Window: ±5σ around line, excluding central ±2σ.
+        near = np.abs(wave_A - lam_obs)
+        window = valid & (near < 5.0 * sig_line) & (near > 2.0 * sig_line)
+        if int(np.sum(window)) < 3:
+            window = valid & (near < 10.0 * sig_line)
+        if int(np.sum(window)) < 3:
+            return None
+
+        rms = float(np.sqrt(np.nanmean(resid[window] ** 2)))
+        return n_sigma * rms * sig_line * _SQRT2PI
+
+    def flux_upper_limits(
+        self,
+        line_names: list[str] | None = None,
+        n_sigma: float = 3.0,
+        snr_threshold: float = 3.0,
+    ) -> dict[str, float]:
+        """Compute noise-based upper limits for low-SNR lines.
+
+        Parameters
+        ----------
+        line_names : list of str, optional
+            Lines to check.  If ``None``, checks all fitted lines.
+        n_sigma : float
+            Number of sigma for the upper limit (default 3).
+        snr_threshold : float
+            Only compute upper limits for lines with SNR below this
+            (default 3.0).  Lines above this threshold are detections.
+
+        Returns
+        -------
+        dict of {str: float}
+            ``{line_name: flux_upper_limit}`` for each line below
+            the SNR threshold.
+        """
+        names = line_names if line_names is not None else list(self.lines.keys())
+        uls: dict[str, float] = {}
+        for name in names:
+            if name not in self.lines:
+                continue
+            if self.lines[name].snr >= snr_threshold:
+                continue
+            ul = self.flux_upper_limit(name, n_sigma=n_sigma)
+            if ul is not None:
+                uls[name] = ul
+        return uls
+
     def flux_ratio_posterior(
         self,
         line_a: str,
@@ -412,6 +503,25 @@ class MCMCBroadFitResult:
         Delegates to :meth:`MCMCResult.doublet_snr`.
         """
         return self.mcmc_result.doublet_snr(line_a, line_b)
+
+    def flux_upper_limit(self, line_name: str, n_sigma: float = 3.0) -> float | None:
+        """Noise-based flux upper limit for a line.
+
+        Delegates to :meth:`MCMCResult.flux_upper_limit`.
+        """
+        return self.mcmc_result.flux_upper_limit(line_name, n_sigma=n_sigma)
+
+    def flux_upper_limits(
+        self, line_names: list[str] | None = None,
+        n_sigma: float = 3.0, snr_threshold: float = 3.0,
+    ) -> dict[str, float]:
+        """Noise-based upper limits for low-SNR lines.
+
+        Delegates to :meth:`MCMCResult.flux_upper_limits`.
+        """
+        return self.mcmc_result.flux_upper_limits(
+            line_names=line_names, n_sigma=n_sigma, snr_threshold=snr_threshold,
+        )
 
     def flux_ratio_posterior(self, line_a: str, line_b: str) -> np.ndarray:
         """Compute the posterior distribution of a flux ratio.

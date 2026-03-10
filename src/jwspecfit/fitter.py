@@ -124,6 +124,90 @@ class FitResult:
     constraints: ConstraintSet | None = None
     success: bool = True
 
+    def flux_upper_limit(
+        self,
+        line_name: str,
+        n_sigma: float = 3.0,
+    ) -> float | None:
+        """Compute a noise-based flux upper limit for a line.
+
+        Uses the local RMS of the residuals near the line position,
+        multiplied by *n_sigma* and the line width.
+
+        Parameters
+        ----------
+        line_name : str
+            Line name.
+        n_sigma : float
+            Number of sigma for the upper limit (default 3).
+
+        Returns
+        -------
+        float or None
+            Integrated flux upper limit in f_lam units, or ``None``
+            if there are insufficient pixels near the line.
+        """
+        if line_name not in self.lines:
+            raise KeyError(f"Line '{line_name}' not found in result.")
+
+        lr = self.lines[line_name]
+        spec = self.spectrum
+        _SQRT2PI = np.sqrt(2.0 * np.pi)
+
+        from .io import _ujy_to_flam
+        resid_flam = _ujy_to_flam(self.residuals, spec.wave_um)
+        valid = np.isfinite(resid_flam)
+
+        wave_A = spec.wave_A
+        lam_obs = lr.centroid_A
+        sig_line = lr.sigma_A
+
+        near = np.abs(wave_A - lam_obs)
+        window = valid & (near < 5.0 * sig_line) & (near > 2.0 * sig_line)
+        if int(np.sum(window)) < 3:
+            window = valid & (near < 10.0 * sig_line)
+        if int(np.sum(window)) < 3:
+            return None
+
+        rms = float(np.sqrt(np.nanmean(resid_flam[window] ** 2)))
+        return n_sigma * rms * sig_line * _SQRT2PI
+
+    def flux_upper_limits(
+        self,
+        line_names: list[str] | None = None,
+        n_sigma: float = 3.0,
+        snr_threshold: float = 3.0,
+    ) -> dict[str, float]:
+        """Compute noise-based upper limits for low-SNR lines.
+
+        Parameters
+        ----------
+        line_names : list of str, optional
+            Lines to check.  If ``None``, checks all fitted lines.
+        n_sigma : float
+            Number of sigma for the upper limit (default 3).
+        snr_threshold : float
+            Only compute upper limits for lines with SNR below this
+            (default 3.0).
+
+        Returns
+        -------
+        dict of {str: float}
+            ``{line_name: flux_upper_limit}`` for each line below
+            the SNR threshold.
+        """
+        names = line_names if line_names is not None else list(self.lines.keys())
+        uls: dict[str, float] = {}
+        for name in names:
+            if name not in self.lines:
+                continue
+            if self.lines[name].snr_int_err >= snr_threshold:
+                continue
+            ul = self.flux_upper_limit(name, n_sigma=n_sigma)
+            if ul is not None:
+                uls[name] = ul
+        return uls
+
 
 def _grating_bounds(
     grating: str | None,
