@@ -52,7 +52,7 @@ def fit_lines(
     spectrum: Spectrum,
     z: float,
     *,
-    sampler: str = "emcee",
+    sampler: str = "nuts",
     grating: str | None = None,
     R: float | Callable | None = None,
     lines: list[str] | None = None,
@@ -100,7 +100,7 @@ def fit_lines(
     z : float
         Source redshift.
     sampler : str
-        ``"emcee"`` (default), ``"nautilus"``, or ``"nuts"``.
+        ``"nuts"`` (default), ``"emcee"``, or ``"nautilus"``.
     grating : str, optional
         Grating name.
     R : float or callable, optional
@@ -244,7 +244,7 @@ def fit_with_broad(
     spectrum: Spectrum,
     z: float,
     *,
-    sampler: str = "emcee",
+    sampler: str = "nuts",
     grating: str | None = None,
     R: float | Callable | None = None,
     lines: list[str] | None = None,
@@ -291,7 +291,7 @@ def fit_with_broad(
     z : float
         Source redshift.
     sampler : str
-        ``"emcee"`` (default), ``"nautilus"``, or ``"nuts"``.
+        ``"nuts"`` (default), ``"emcee"``, or ``"nautilus"``.
     grating : str, optional
         Grating name.
     R : float or callable, optional
