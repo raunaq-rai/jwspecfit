@@ -179,15 +179,45 @@ class AbundanceResult:
                     lines.append(f"  {key:14s}  not detected")
 
         # --- N/O tiers (all eligible methods) ---
-        if self.NO_tiers and len(self.NO_tiers) > 1:
-            lines.append("")
-            lines.append("N/O by method (all eligible tiers):")
-            for tier_name, log_no in self.NO_tiers.items():
-                selected = " ← selected" if (
-                    self.NO is not None
-                    and abs(log_no - self.NO) < 0.001
-                ) else ""
-                lines.append(f"  {tier_name}: {log_no:.3f}{selected}")
+        if self.NO_tiers:
+            # Filter out internal ICF value keys (prefixed with _).
+            display_tiers = {k: v for k, v in self.NO_tiers.items()
+                            if not k.startswith("_")}
+            if display_tiers:
+                lines.append("")
+                lines.append("N/O by method (all eligible):")
+                for tier_name, log_no in display_tiers.items():
+                    selected = " ← selected" if (
+                        self.NO is not None
+                        and abs(log_no - self.NO) < 0.001
+                    ) else ""
+                    # Show ICF value if stored.
+                    icf_str = ""
+                    if "ICF 1:" in tier_name:
+                        icf_val = self.NO_tiers.get("_icf1_value")
+                        if icf_val is not None:
+                            icf_str = f"  [ICF={icf_val:.3f}]"
+                    elif "ICF 2:" in tier_name:
+                        icf_val = self.NO_tiers.get("_icf2_value")
+                        if icf_val is not None:
+                            icf_str = f"  [ICF={icf_val:.3f}]"
+                    elif "ICF 3:" in tier_name:
+                        icf_val = self.NO_tiers.get("_icf3_value")
+                        if icf_val is not None:
+                            icf_str = f"  [ICF={icf_val:.3f}]"
+                    elif "ICF 4:" in tier_name:
+                        icf_val = self.NO_tiers.get("_icf4_value")
+                        if icf_val is not None:
+                            icf_str = f"  [ICF={icf_val:.3f}]"
+                    elif "ICF 5:" in tier_name:
+                        icf_val = self.NO_tiers.get("_icf5_value")
+                        if icf_val is not None:
+                            icf_str = f"  [ICF={icf_val:.3f}]"
+                    elif "Izotov" in tier_name:
+                        icf_val = self.NO_tiers.get("_izotov06_icf_value")
+                        if icf_val is not None:
+                            icf_str = f"  [ICF={icf_val:.3f}]"
+                    lines.append(f"  {tier_name}: {log_no:.3f}{icf_str}{selected}")
 
         # --- Strong-line info ---
         if self.ratios_used:

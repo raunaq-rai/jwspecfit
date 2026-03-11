@@ -819,38 +819,81 @@ def compute_total_abundances(
                 )
 
         # Compute ALL eligible N/O tiers for comparison.
+        # This mirrors Berg+2025 Section 4.3.2 (Eqs 2–5) which reports
+        # individual-ion ICF results alongside the direct sum.
         NO_tiers: dict[str, float] = {}
         N_plus = ionic.get("N+/H+", 0.0)
         N_pp = ionic.get("N++/H+", 0.0)
         N_ppp = ionic.get("N+++/H+", 0.0)
         N_pppp = ionic.get("N4+/H+", 0.0)
 
-        # Martinez+25
+        # Martinez+25 — compute ALL individual ICFs (not just the priority pick)
         if logU is not None and Z_Zsun is not None:
-            from .martinez25_icf import compute_NO_martinez25
+            from .martinez25_icf import (
+                icf_NpOp, icf_NppOpp, icf_NpppOpp,
+                icf_NpNpp_OpOpp, icf_NppNppp_Opp,
+            )
             ne_icf = ne if ne is not None else NE_DEFAULT
-            m25_val, m25_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)
-            if m25_val is not None and m25_val > 0:
-                NO_tiers[f"martinez25 ({m25_name})"] = np.log10(m25_val)
 
-        # Tier 1: direct sum (N+ + N++ + N+++) / OH
+            # ICF 1: N+/O+ × ICF  (Berg+2025 Eq. 2)
+            if N_plus > 0 and O_plus > 0:
+                icf1 = icf_NpOp(logU, Z_Zsun, ne_icf)
+                val1 = (N_plus / O_plus) * icf1
+                if val1 > 0:
+                    NO_tiers["ICF 1: N⁺/O⁺ × ICF (Martinez+25)"] = np.log10(val1)
+                    NO_tiers["_icf1_value"] = icf1
+
+            # ICF 2: N²⁺/O²⁺ × ICF  (Berg+2025 Eq. 3)
+            if N_pp > 0 and O_pp > 0:
+                icf2 = icf_NppOpp(logU, Z_Zsun, ne_icf)
+                val2 = (N_pp / O_pp) * icf2
+                if val2 > 0:
+                    NO_tiers["ICF 2: N²⁺/O²⁺ × ICF (Martinez+25)"] = np.log10(val2)
+                    NO_tiers["_icf2_value"] = icf2
+
+            # ICF 3: N³⁺/O²⁺ × ICF  (Berg+2025 Eq. 4)
+            if N_ppp > 0 and O_pp > 0:
+                icf3 = icf_NpppOpp(logU, Z_Zsun, ne_icf)
+                val3 = (N_ppp / O_pp) * icf3
+                if val3 > 0:
+                    NO_tiers["ICF 3: N³⁺/O²⁺ × ICF (Martinez+25)"] = np.log10(val3)
+                    NO_tiers["_icf3_value"] = icf3
+
+            # ICF 4: (N⁺+N²⁺)/(O⁺+O²⁺) × ICF  (Martinez+25 Table 4)
+            if N_plus > 0 and N_pp > 0 and O_plus > 0 and O_pp > 0:
+                icf4 = icf_NpNpp_OpOpp(logU, Z_Zsun, ne_icf)
+                val4 = ((N_plus + N_pp) / (O_plus + O_pp)) * icf4
+                if val4 > 0:
+                    NO_tiers["ICF 4: (N⁺+N²⁺)/(O⁺+O²⁺) × ICF (Martinez+25)"] = np.log10(val4)
+                    NO_tiers["_icf4_value"] = icf4
+
+            # ICF 5: (N²⁺+N³⁺)/O²⁺ × ICF  (Martinez+25 Table 4, recommended)
+            if N_pp > 0 and N_ppp > 0 and O_pp > 0:
+                icf5 = icf_NppNppp_Opp(logU, Z_Zsun, ne_icf)
+                val5 = ((N_pp + N_ppp) / O_pp) * icf5
+                if val5 > 0:
+                    NO_tiers["ICF 5: (N²⁺+N³⁺)/O²⁺ × ICF (Martinez+25)"] = np.log10(val5)
+                    NO_tiers["_icf5_value"] = icf5
+
+        # Direct sum: (N⁺ + N²⁺ + N³⁺) / (O⁺ + O²⁺)  (Berg+2025 Eq. 5)
         if N_plus > 0 and (N_pp + N_ppp) > 0:
             t1 = (N_plus + N_pp + N_ppp + N_pppp) / OH
             if t1 > 0:
-                NO_tiers["direct_sum Tier 1 (Np+Npp+Nppp/OH)"] = np.log10(t1)
+                NO_tiers["Direct sum: (N⁺+N²⁺+N³⁺)/(O⁺+O²⁺)"] = np.log10(t1)
 
-        # Tier 2/3: UV only (N++ + N+++) / O++
+        # UV-only direct sum: (N²⁺ + N³⁺) / O²⁺
         if (N_pp + N_ppp) > 0 and O_pp > 0:
             t23 = (N_pp + N_ppp + N_pppp) / O_pp
             if t23 > 0:
-                NO_tiers["direct_sum Tier 2/3 (UV N/O++)"] = np.log10(t23)
+                NO_tiers["Direct sum UV: (N²⁺+N³⁺)/O²⁺"] = np.log10(t23)
 
-        # Tier 4: Izotov+06 — ICF × N+/O+
+        # Izotov+06: ICF × N⁺/O⁺
         if N_plus > 0 and O_plus > 0:
             icf_n_all = icf_nitrogen(O_plus, OH)
             t4 = icf_n_all * N_plus / O_plus
             if t4 > 0:
-                NO_tiers["izotov06 Tier 4 (ICF × N+/O+)"] = np.log10(t4)
+                NO_tiers["Izotov+06: ICF × N⁺/O⁺"] = np.log10(t4)
+                NO_tiers["_izotov06_icf_value"] = icf_n_all
 
         if NO_tiers:
             totals["_NO_tiers"] = NO_tiers
