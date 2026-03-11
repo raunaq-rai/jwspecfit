@@ -331,11 +331,11 @@ def compute_Av_from_balmer(
 
 
 # Mapping from flux-dict key to (rest wavelength in Å, intrinsic Hx/Hβ ratio).
+# EXCLUDED: Hε (blended with [NeIII] 3968, Δλ=3 Å) and
+#           H8 (blended with HeI 3889, Δλ=0.4 Å).
 _BALMER_DECREMENT_LINES: dict[str, tuple[float, float]] = {
     "HGAMMA":   (4342.90, 0.468),
     "HDELTA":   (4102.89, 0.259),
-    "HEPSILON": (3971.20, 0.159),
-    "H8":       (3890.17, 0.105),
     "H9":       (3836.48, 0.0731),
     "H10":      (3799.00, 0.0530),
 }
