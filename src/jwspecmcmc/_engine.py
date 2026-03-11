@@ -64,6 +64,7 @@ def _fit_lines_mcmc(
     seed: int = 42,
     sigma_factor: float = 1.0,
     moving_average: bool | int = False,
+    tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
@@ -281,7 +282,8 @@ def _fit_lines_mcmc(
                     )
 
     constraints = ConstraintSet(
-        line_names, tie_uv_doublets=tie_uv_doublets,
+        line_names, tie_balmer_to_oiii=tie_balmer_to_oiii,
+        tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids, tie_uv_widths=tie_uv_widths,
         blended_doublets=_blended if _blended else None,
     )
@@ -654,6 +656,7 @@ def _fit_with_broad_mcmc(
     seed: int = 42,
     sigma_factor: float = 1.0,
     moving_average: bool | int = False,
+    tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
@@ -798,6 +801,7 @@ def _fit_with_broad_mcmc(
         seed=seed,
         sigma_factor=sigma_factor,
         moving_average=moving_average,
+        tie_balmer_to_oiii=tie_balmer_to_oiii,
         tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,

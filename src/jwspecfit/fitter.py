@@ -271,6 +271,7 @@ def fit_lines(
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
     moving_average: bool | int = False,
+    tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
     tie_uv_widths: bool = True,
@@ -319,6 +320,11 @@ def fit_lines(
         If ``False`` (default), use polynomial continuum.  If ``True``,
         use a median filter with a default window of 75 pixels.  If an
         ``int``, use that as the median-filter window size.
+    tie_balmer_to_oiii : bool
+        Tie Balmer line widths and centroids to [OIII] 5007 in velocity
+        space (default ``True``).  Set to ``False`` for stacked spectra
+        where OIII may be broader than the true narrow component, causing
+        Ha to absorb flux from neighbouring lines like [NII] 6585.
     tie_uv_doublets : bool
         Tie UV doublet kinematics and fix resonance-line flux ratios.
         Recommended for stacked spectra where doublets are poorly
@@ -518,6 +524,7 @@ def fit_lines(
     # Setup constraints.
     constraints = ConstraintSet(
         line_names,
+        tie_balmer_to_oiii=tie_balmer_to_oiii,
         tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
