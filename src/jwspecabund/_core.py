@@ -923,6 +923,7 @@ def _build_diagnostics(
     NO_icf_name: str | None,
     ne_default: float,
     totals: dict[str, Any] | None = None,
+    niv_rejected: bool = False,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -1015,14 +1016,18 @@ def _build_diagnostics(
     if _has_niv and ne_high != ne_mid_or_low:
         diag["ne(high)"] = f"NIV] 1483/1486 doublet ratio -> {ne_high:.0f} cm^-3"
     else:
-        if _has_niv:
-            fallback_label = "ne(mid)" if ne_mid is not None else "ne(low)"
+        fallback_label = "ne(mid)" if ne_mid is not None else "ne(low)"
+        if niv_rejected:
+            diag["ne(high)"] = (
+                f"fallback to {fallback_label} = {ne_mid_or_low:.0f} cm^-3 "
+                f"— NIV] rejected (unphysical doublet ratio F(1483)/F(1486) >= 1)"
+            )
+        elif _has_niv:
             diag["ne(high)"] = (
                 f"fallback to {fallback_label} = {ne_mid_or_low:.0f} cm^-3 "
                 f"— NIV] failed SNR cut or solve"
             )
         else:
-            fallback_label = "ne(mid)" if ne_mid is not None else "ne(low)"
             diag["ne(high)"] = (
                 f"fallback to {fallback_label} = {ne_mid_or_low:.0f} cm^-3 "
                 f"— no NIV] doublet available"
@@ -1080,6 +1085,7 @@ def _run_direct(
     icf_method: str = "auto",
     snr_NO: float = 1.5,
     continuum_rms_limits: dict[str, float] | None = None,
+    niv_rejected: bool = False,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -1201,7 +1207,7 @@ def _run_direct(
     diagnostics = _build_diagnostics(
         fluxes, Te_high, Te_relation, ne_low, ne_mid, ne_high,
         logU, logU_diag, icf_method, NO_icf_name, NE_DEFAULT,
-        totals=totals,
+        totals=totals, niv_rejected=niv_rejected,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -1351,6 +1357,7 @@ def _run_direct_mcmc(
     icf_method: str = "auto",
     snr_NO: float = 1.5,
     continuum_rms_limits: dict[str, float] | None = None,
+    niv_rejected: bool = False,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -1587,7 +1594,7 @@ def _run_direct_mcmc(
             med_fluxes, Te_high_pt if np.isfinite(Te_high_pt) else None,
             Te_relation, ne_low, ne_mid, ne_high, logU_pt, logU_diag,
             icf_method, NO_icf_name, NE_DEFAULT,
-            totals=totals_pt,
+            totals=totals_pt, niv_rejected=niv_rejected,
         ),
         "failures": failures if failures else None,
         "NO_tiers": NO_tiers,
@@ -1886,6 +1893,32 @@ def compute_abundances(
             for name in excluded_lines:
                 posteriors.pop(name, None)
 
+    # --- NIV] doublet ratio validity check ---
+    # The physical low-density limit is F(1483)/F(1486) ≈ 0.67 (roughly 1:2).
+    # At higher densities the ratio can increase but must remain < 1.
+    # If the ratio exceeds 1, the doublet is unphysical (noise/fitting artifact)
+    # and we zero out both NIV fluxes to prevent contaminating nₑ(high),
+    # logU, and N³⁺/H⁺.
+    _niv_rejected = False
+    _niv1483 = fluxes.get("NIV_1483", 0.0)
+    _niv1486 = fluxes.get("NIV_1486", 0.0)
+    if _niv1483 > 0 and _niv1486 > 0:
+        niv_ratio = _niv1483 / _niv1486
+        if niv_ratio >= 1.0:
+            logger.warning(
+                "NIV] ratio F(1483)/F(1486) = %.2f >= 1.0 — unphysical; "
+                "excluding NIV] doublet.",
+                niv_ratio,
+            )
+            fluxes.pop("NIV_1483", None)
+            fluxes.pop("NIV_1486", None)
+            errors.pop("NIV_1483", None)
+            errors.pop("NIV_1486", None)
+            posteriors.pop("NIV_1483", None)
+            posteriors.pop("NIV_1486", None)
+            excluded_lines.extend(["NIV_1483", "NIV_1486"])
+            _niv_rejected = True
+
     # --- Continuum-RMS flux limits for upper limits ---
     continuum_rms_limits = _compute_continuum_rms_limits(
         result, z, Av_derived, dust_law, **dust_kwargs,
@@ -1962,6 +1995,7 @@ def compute_abundances(
                 snr_ne=snr_ne, snr_logU=snr_logU,
                 icf_method=icf_method, snr_NO=snr_NO,
                 continuum_rms_limits=continuum_rms_limits,
+                niv_rejected=_niv_rejected,
             )
         else:
             direct_out = _run_direct(
@@ -1970,6 +2004,7 @@ def compute_abundances(
                 snr_ne=snr_ne, snr_logU=snr_logU,
                 icf_method=icf_method, snr_NO=snr_NO,
                 continuum_rms_limits=continuum_rms_limits,
+                niv_rejected=_niv_rejected,
             )
 
         primary_result = AbundanceResult(
@@ -2035,6 +2070,7 @@ def compute_abundances(
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU,
                             icf_method=icf_method, snr_NO=snr_NO,
+                            niv_rejected=_niv_rejected,
                         )
                     else:
                         d_out = _run_direct(
@@ -2042,6 +2078,7 @@ def compute_abundances(
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU,
                             icf_method=icf_method, snr_NO=snr_NO,
+                            niv_rejected=_niv_rejected,
                         )
                     alt["direct"] = AbundanceResult(
                         method="direct",
