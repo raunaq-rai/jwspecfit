@@ -1186,6 +1186,9 @@ def _run_direct(
     OH_mc = []
     NO_mc = []
     CO_mc = []
+    # Collect per-tier N/O posteriors for uncertainty on each method.
+    _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
+    NO_tier_mc: dict[str, list[float]] = {k: [] for k in _tier_keys}
 
     for _ in tqdm(range(n_mc), desc="Direct Te (MC)", disable=not progress):
         mc_fluxes = {}
@@ -1254,10 +1257,18 @@ def _run_direct(
                 CO_mc.append(np.log10(co_mc))
             else:
                 CO_mc.append(np.nan)
+
+            # Collect per-tier N/O values.
+            mc_tiers = totals_mc.get("_NO_tiers", {})
+            for k in _tier_keys:
+                val = mc_tiers.get(k, np.nan)
+                NO_tier_mc[k].append(val if np.isfinite(val) else np.nan)
         except (ValueError, RuntimeError):
             OH_mc.append(np.nan)
             NO_mc.append(np.nan)
             CO_mc.append(np.nan)
+            for k in _tier_keys:
+                NO_tier_mc[k].append(np.nan)
 
     OH_mc = np.array(OH_mc)
     NO_mc = np.array(NO_mc)
@@ -1266,6 +1277,13 @@ def _run_direct(
     OH_err = float(np.nanstd(OH_mc)) if np.any(np.isfinite(OH_mc)) else np.nan
     NO_err = float(np.nanstd(NO_mc)) if np.any(np.isfinite(NO_mc)) else None
     CO_err = float(np.nanstd(CO_mc)) if np.any(np.isfinite(CO_mc)) else None
+
+    # Attach per-tier uncertainties (symmetric std) to NO_tiers.
+    if NO_tiers:
+        for k in _tier_keys:
+            arr = np.array(NO_tier_mc[k])
+            if np.any(np.isfinite(arr)):
+                NO_tiers[f"_err_{k}"] = float(np.nanstd(arr))
 
     return {
         "OH": OH_12,
@@ -1426,6 +1444,9 @@ def _run_direct_mcmc(
     failures = totals_pt.pop("_failures", {})
     failures.update(ne_failures)
     NO_tiers = totals_pt.pop("_NO_tiers", None)
+    # Collect per-tier N/O posteriors for uncertainty on each method.
+    _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
+    NO_tier_post: dict[str, list[float]] = {k: [] for k in _tier_keys}
 
     for i in tqdm(range(n_samples), desc="Direct Te (posterior)", disable=not progress):
         sample = {name: max(float(post[i]), 1e-50) for name, post in posteriors.items()}
@@ -1478,7 +1499,15 @@ def _run_direct_mcmc(
             co = totals_i.get("C/O", np.nan)
             if co is not None and np.isfinite(co) and co > 0:
                 CO_post[i] = np.log10(co)
+
+            # Collect per-tier N/O values.
+            mc_tiers = totals_i.get("_NO_tiers", {})
+            for k in _tier_keys:
+                val = mc_tiers.get(k, np.nan)
+                NO_tier_post[k].append(val if np.isfinite(val) else np.nan)
         except (ValueError, RuntimeError):
+            for k in _tier_keys:
+                NO_tier_post[k].append(np.nan)
             continue
 
     # Point estimates from posteriors.
@@ -1495,6 +1524,16 @@ def _run_direct_mcmc(
     if CO_med is not None:
         CO_lo = float(CO_med - np.nanpercentile(CO_post, 16))
         CO_hi = float(np.nanpercentile(CO_post, 84) - CO_med)
+
+    # Attach per-tier asymmetric uncertainties to NO_tiers.
+    if NO_tiers:
+        for k in _tier_keys:
+            arr = np.array(NO_tier_post[k])
+            if np.any(np.isfinite(arr)):
+                med = float(np.nanmedian(arr))
+                lo = float(med - np.nanpercentile(arr, 16))
+                hi = float(np.nanpercentile(arr, 84) - med)
+                NO_tiers[f"_err_{k}"] = (lo, hi)
 
     return {
         "OH": OH_med,
