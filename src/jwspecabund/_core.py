@@ -1020,7 +1020,8 @@ def _build_diagnostics(
         if niv_rejected:
             diag["ne(high)"] = (
                 f"fallback to {fallback_label} = {ne_mid_or_low:.0f} cm^-3 "
-                f"— NIV] rejected (unphysical doublet ratio F(1483)/F(1486) >= 1)"
+                f"— NIV] rejected (doublet ratio F(1483)/F(1486) > 1.6, "
+                f"exceeds low-density limit ~1.5)"
             )
         elif _has_niv:
             diag["ne(high)"] = (
@@ -1894,20 +1895,20 @@ def compute_abundances(
                 posteriors.pop(name, None)
 
     # --- NIV] doublet ratio validity check ---
-    # The physical low-density limit is F(1483)/F(1486) ≈ 0.67 (roughly 1:2).
-    # At higher densities the ratio can increase but must remain < 1.
-    # If the ratio exceeds 1, the doublet is unphysical (noise/fitting artifact)
-    # and we zero out both NIV fluxes to prevent contaminating nₑ(high),
-    # logU, and N³⁺/H⁺.
+    # NIV] 1483 (³P₂→¹S₀, M2) and 1486 (³P₁→¹S₀, E1 intercombination).
+    # At low density F(1483)/F(1486) ≈ 1.50 (1483 is the brighter line).
+    # The ratio decreases monotonically with density (1483 gets collisionally
+    # de-excited first due to its tiny A-value).  Physical range: ~0 to ~1.53.
+    # Reject if the ratio exceeds 1.6 (generous margin above low-density limit).
     _niv_rejected = False
     _niv1483 = fluxes.get("NIV_1483", 0.0)
     _niv1486 = fluxes.get("NIV_1486", 0.0)
     if _niv1483 > 0 and _niv1486 > 0:
         niv_ratio = _niv1483 / _niv1486
-        if niv_ratio >= 1.0:
+        if niv_ratio > 1.6:
             logger.warning(
-                "NIV] ratio F(1483)/F(1486) = %.2f >= 1.0 — unphysical; "
-                "excluding NIV] doublet.",
+                "NIV] ratio F(1483)/F(1486) = %.2f > 1.6 — exceeds "
+                "low-density limit (~1.5); excluding NIV] doublet.",
                 niv_ratio,
             )
             fluxes.pop("NIV_1483", None)

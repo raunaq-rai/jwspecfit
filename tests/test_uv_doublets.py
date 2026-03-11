@@ -180,15 +180,18 @@ class TestConstraintSetFreeMask:
         assert free[2 * nL + 1] is np.False_
 
     def test_niv_free_mask(self):
-        """NIV] doublet: kinematics-only (amplitude free)."""
-        names = ["NIV_1486", "NIV_1483"]
+        """NIV] doublet: kinematics-only (amplitude free).
+
+        Primary = NIV_1483 (brighter at low density), secondary = NIV_1486.
+        """
+        names = ["NIV_1483", "NIV_1486"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         free = cs.free_mask()
         nL = 2
-        assert free[1] is np.True_
-        assert free[nL + 1] is np.False_
-        assert free[2 * nL + 1] is np.False_
+        assert free[1] is np.True_         # secondary amplitude free
+        assert free[nL + 1] is np.False_   # secondary centroid tied
+        assert free[2 * nL + 1] is np.False_  # secondary width tied
 
     def test_niii_free_mask(self):
         """NIII] doublet: kinematics-only."""
@@ -513,11 +516,12 @@ class TestFitLinesNIVDoublet:
 
     @pytest.fixture
     def uv_spectrum_niv(self):
+        # 1483 is the brighter component at low density (ratio ~ 1.5).
         return _make_uv_spectrum(
             z=3.0,
             lines_to_inject={
-                "NIV_1486": 3.0e-17,
-                "NIV_1483": 1.0e-17,
+                "NIV_1483": 3.0e-17,
+                "NIV_1486": 1.0e-17,
             },
             R=1000.0,
             noise_level=0.003,
@@ -526,7 +530,7 @@ class TestFitLinesNIVDoublet:
     def test_niv_kinematics_tied(self, uv_spectrum_niv):
         result = fit_lines(
             uv_spectrum_niv, z=3.0, R=1000.0,
-            lines=["NIV_1486", "NIV_1483"],
+            lines=["NIV_1483", "NIV_1486"],
             tie_uv_doublets=True, n_boot=0,
         )
         assert result.success
@@ -539,14 +543,15 @@ class TestFitLinesNIVDoublet:
     def test_niv_amplitudes_free(self, uv_spectrum_niv):
         result = fit_lines(
             uv_spectrum_niv, z=3.0, R=1000.0,
-            lines=["NIV_1486", "NIV_1483"],
+            lines=["NIV_1483", "NIV_1486"],
             tie_uv_doublets=True, n_boot=0,
         )
         niv86 = result.lines["NIV_1486"]
         niv83 = result.lines["NIV_1483"]
-        ratio = niv83.amplitude / niv86.amplitude
+        # F(1486)/F(1483) should be freely fitted; injected ratio ~ 0.33.
+        ratio = niv86.amplitude / niv83.amplitude
         assert 0.1 < ratio < 0.8, (
-            f"NIV ratio {ratio:.3f} should be freely fitted, not fixed"
+            f"NIV ratio F(1486)/F(1483) = {ratio:.3f} should be freely fitted"
         )
 
 

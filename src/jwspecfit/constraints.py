@@ -31,7 +31,7 @@ _INTERCOM_LOW_DENSITY_RATIOS: dict[tuple[str, str], float] = {
     ("OIII_1666", "OIII_1661"): 0.83,   # 1/1.20, low-density limit
     ("CIII]_1907", "CIII]"):     0.65,   # Keenan+1992
     ("CII]_2326", "CII]_2324"):  0.49,   # A-value ratio, same upper level
-    ("NIV_1486",   "NIV_1483"):  0.67,
+    ("NIV_1483",   "NIV_1486"):  0.67,   # 1483 brighter at low ne
     ("NIII_1749",  "NIII_1752"): 0.67,
     ("SiIII_1",   "SiIII_2"):   0.67,
 }
@@ -167,7 +167,7 @@ class ConstraintSet:
                 ("CIV_1",     "CIV_2"),
                 ("OIII_1666", "OIII_1661"),
                 ("CIII]_1907", "CIII]"),
-                ("NIV_1486",   "NIV_1483"),
+                ("NIV_1483",   "NIV_1486"),
                 ("NIII_1749",  "NIII_1752"),
                 ("SiIII_1",   "SiIII_2"),
                 ("CII]_2326", "CII]_2324"),
@@ -197,7 +197,7 @@ class ConstraintSet:
             # doublet constraint already ties 1661 to 1666).
             if self.tie_uv_widths:
                 _UV_INTERCOM = [
-                    "CIII]_1907", "NIV_1486", "NIII_1749",
+                    "CIII]_1907", "NIV_1483", "NIII_1749",
                 ]
                 _uv_present = [n for n in _UV_INTERCOM if n in idx]
                 if len(_uv_present) >= 2:
@@ -295,7 +295,7 @@ class ConstraintSet:
                 ("CIV_1",     "CIV_2"),
                 ("OIII_1666", "OIII_1661"),
                 ("CIII]_1907", "CIII]"),
-                ("NIV_1486",   "NIV_1483"),
+                ("NIV_1483",   "NIV_1486"),
                 ("NIII_1749",  "NIII_1752"),
                 ("SiIII_1",   "SiIII_2"),
                 ("CII]_2326", "CII]_2324"),
@@ -315,7 +315,7 @@ class ConstraintSet:
             # OIII] excluded — its width is independent.
             if self.tie_uv_widths:
                 _UV_INTERCOM = [
-                    "CIII]_1907", "NIV_1486", "NIII_1749",
+                    "CIII]_1907", "NIV_1483", "NIII_1749",
                 ]
                 _uv_present = [n for n in _UV_INTERCOM if n in idx]
                 if len(_uv_present) >= 2:
