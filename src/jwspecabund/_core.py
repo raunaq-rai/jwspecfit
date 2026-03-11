@@ -17,7 +17,7 @@ from tqdm import tqdm
 from jwspecfit.fitter import FitResult
 from jwspecfit.lines import REST_LINES_A
 
-from .dust import compute_Av_from_balmer, dust_correct_fluxes
+from .dust import compute_Av_from_balmer, compute_Av_multi_balmer, dust_correct_fluxes
 from .result import AbundanceResult
 
 logger = logging.getLogger(__name__)
@@ -1836,21 +1836,28 @@ def compute_abundances(
         dust_kwargs = {"Rv": Rv, "delta": delta, "B": B_bump}
 
     Av_derived = None
+    _balmer_info: dict | None = None
     if dust_correct:
         if Av is None:
-            # Derive A_V from Balmer decrement (Hgamma/Hbeta).
-            if "HGAMMA" in fluxes and "HBETA" in fluxes and fluxes["HGAMMA"] > 0 and fluxes["HBETA"] > 0:
-                Av_val, Av_err = compute_Av_from_balmer(
-                    fluxes["HGAMMA"], fluxes["HBETA"],
-                    errors["HGAMMA"], errors["HBETA"],
-                    law=dust_law,
-                    intrinsic_ratio=0.468,
-                    wave_num_A=REST_LINES_A.get("HGAMMA", 4341.68),
-                    wave_den_A=REST_LINES_A.get("HBETA", 4862.68),
-                    **dust_kwargs,
+            # Derive A_V from all available Balmer decrements (Hγ–H10)/Hβ.
+            balmer_out = compute_Av_multi_balmer(
+                fluxes, errors, law=dust_law, **dust_kwargs,
+            )
+            if balmer_out["n_lines"] > 0:
+                Av_derived = balmer_out["Av"]
+                _balmer_info = balmer_out
+                for r in balmer_out["individual"]:
+                    logger.info(
+                        "A_V from %s/Hb = %.3f +/- %.3f  (obs ratio = %.4f, "
+                        "intrinsic = %.4f)",
+                        r["line"], r["Av"], r["Av_err"],
+                        r["observed_ratio"], r["intrinsic_ratio"],
+                    )
+                logger.info(
+                    "A_V weighted mean = %.3f +/- %.3f (%d lines).",
+                    balmer_out["Av"], balmer_out["Av_err"],
+                    balmer_out["n_lines"],
                 )
-                Av_derived = Av_val
-                logger.info("A_V from Hg/Hb = %.3f +/- %.3f", Av_val, Av_err)
             else:
                 Av_derived = 0.0
                 logger.info("No Balmer pair available for A_V; assuming A_V=0.")
@@ -2043,6 +2050,16 @@ def compute_abundances(
             NO_tiers=direct_out.get("NO_tiers"),
             failures=direct_out.get("failures"),
             diagnostics=direct_out.get("diagnostics"),
+        )
+
+    # Inject per-line Balmer decrement details into diagnostics.
+    if _balmer_info and primary_result is not None and primary_result.diagnostics is not None:
+        parts = []
+        for r in _balmer_info["individual"]:
+            parts.append(f"{r['line']}/Hb → A_V={r['Av']:.3f}±{r['Av_err']:.3f}")
+        primary_result.diagnostics["A_V"] = (
+            f"weighted mean of {_balmer_info['n_lines']} decrements: "
+            + "; ".join(parts)
         )
 
     if primary_result is None:

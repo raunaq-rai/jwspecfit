@@ -51,6 +51,7 @@ from .martinez25_icf import (
 from .dust import (
     cardelli_extinction,
     compute_Av_from_balmer,
+    compute_Av_multi_balmer,
     dust_correct_fluxes,
     salim_attenuation,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "cardelli_extinction",
     "compute_abundances",
     "compute_Av_from_balmer",
+    "compute_Av_multi_balmer",
     "compute_ionic_abundances",
     "compute_line_ratios",
     "compute_ne",

@@ -14,11 +14,15 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 # Intrinsic Balmer decrements (Case B, T=10^4 K, n_e=100 cm^-3).
-# Osterbrock & Ferland (2006).
+# Osterbrock & Ferland (2006), Table 4.2.
 BALMER_RATIOS: dict[str, float] = {
     "Ha/Hb": 2.86,
     "Hg/Hb": 0.468,
     "Hd/Hb": 0.259,
+    "He/Hb": 0.159,
+    "H8/Hb": 0.105,
+    "H9/Hb": 0.0731,
+    "H10/Hb": 0.0530,
 }
 
 
@@ -324,3 +328,100 @@ def compute_Av_from_balmer(
     Av_err = abs(dAv_dR * sigma_R)
 
     return max(Av, 0.0), Av_err
+
+
+# Mapping from flux-dict key to (rest wavelength in Å, intrinsic Hx/Hβ ratio).
+_BALMER_DECREMENT_LINES: dict[str, tuple[float, float]] = {
+    "HGAMMA":   (4342.90, 0.468),
+    "HDELTA":   (4102.89, 0.259),
+    "HEPSILON": (3971.20, 0.159),
+    "H8":       (3890.17, 0.105),
+    "H9":       (3836.48, 0.0731),
+    "H10":      (3799.00, 0.0530),
+}
+
+
+def compute_Av_multi_balmer(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    law: str = "salim",
+    snr_min: float = 3.0,
+    **kwargs,
+) -> dict[str, object]:
+    """Derive A_V from every available Balmer decrement.
+
+    Uses all detected Balmer lines (Hγ through H10) relative to Hβ,
+    returning individual and weighted-average A_V values.
+
+    Parameters
+    ----------
+    fluxes : dict
+        Emission-line fluxes (observed, not dust-corrected).
+    errors : dict
+        Corresponding 1σ errors.
+    law : str
+        ``"salim"`` (default) or ``"cardelli"``.
+    snr_min : float
+        Minimum SNR for a Balmer line to be included (default 3.0).
+    **kwargs
+        Extra arguments to the attenuation law (Rv, delta, B).
+
+    Returns
+    -------
+    dict
+        Keys: ``"Av"`` (weighted mean), ``"Av_err"`` (error on mean),
+        ``"individual"`` (list of dicts with per-line results),
+        ``"n_lines"`` (number of lines used).
+    """
+    if "HBETA" not in fluxes or fluxes["HBETA"] <= 0:
+        return {"Av": 0.0, "Av_err": np.nan, "individual": [], "n_lines": 0}
+
+    hb_flux = fluxes["HBETA"]
+    hb_err = errors.get("HBETA", 0.0)
+    hb_wave = 4864.04  # default
+
+    results = []
+    for name, (wave, intrinsic_ratio) in _BALMER_DECREMENT_LINES.items():
+        if name not in fluxes or fluxes[name] <= 0:
+            continue
+        f = fluxes[name]
+        e = errors.get(name, 0.0)
+        if e > 0 and f / e < snr_min:
+            continue
+
+        av, av_err = compute_Av_from_balmer(
+            f, hb_flux, e, hb_err,
+            law=law, intrinsic_ratio=intrinsic_ratio,
+            wave_num_A=wave, wave_den_A=hb_wave,
+            **kwargs,
+        )
+        results.append({
+            "line": name, "wave": wave, "Av": av, "Av_err": av_err,
+            "observed_ratio": f / hb_flux,
+            "intrinsic_ratio": intrinsic_ratio,
+        })
+
+    if not results:
+        return {"Av": 0.0, "Av_err": np.nan, "individual": results, "n_lines": 0}
+
+    # Inverse-variance weighted mean.
+    avs = np.array([r["Av"] for r in results])
+    errs = np.array([r["Av_err"] for r in results])
+    valid = np.isfinite(errs) & (errs > 0)
+    if valid.sum() >= 2:
+        w = 1.0 / errs[valid] ** 2
+        av_mean = np.average(avs[valid], weights=w)
+        av_mean_err = 1.0 / np.sqrt(np.sum(w))
+    elif valid.sum() == 1:
+        av_mean = avs[valid][0]
+        av_mean_err = errs[valid][0]
+    else:
+        av_mean = np.median(avs)
+        av_mean_err = np.nan
+
+    return {
+        "Av": max(av_mean, 0.0),
+        "Av_err": av_mean_err,
+        "individual": results,
+        "n_lines": len(results),
+    }
