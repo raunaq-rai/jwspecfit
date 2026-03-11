@@ -381,7 +381,7 @@ def _compute_multi_ne(
     fluxes: dict[str, float],
     errors: dict[str, float] | None = None,
     snr_ne: float = 3.0,
-    ne_high_max: float = 1e5,
+    ne_high_max: float = 5e5,
 ) -> tuple[float, float | None, float, dict[str, str]]:
     """Compute 3-zone electron densities (Berg+2025 step 1).
 
@@ -398,7 +398,7 @@ def _compute_multi_ne(
         density.  Set to 0 to disable gating.
     ne_high_max : float
         Maximum allowed high-ionisation electron density in cm^-3
-        (default 1e5).  If n_e(high) exceeds this, falls back to
+        (default 5e5).  If n_e(high) exceeds this, falls back to
         n_e(mid) (or n_e(low) if no mid measurement).
 
     Returns
@@ -1079,7 +1079,7 @@ def _run_direct(
     n_mc: int,
     seed: int = 42,
     progress: bool = True,
-    ne_high_max: float = 1e5,
+    ne_high_max: float = 5e5,
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
     icf_method: str = "auto",
@@ -1108,7 +1108,7 @@ def _run_direct(
     progress : bool
         Show a ``tqdm`` progress bar (default ``True``).
     ne_high_max : float
-        Maximum allowed n_e(high) in cm^-3 (default 1e5).
+        Maximum allowed n_e(high) in cm^-3 (default 5e5).
     snr_ne : float
         Minimum SNR for density-sensitive doublet members (default 3.0).
         Doublets failing this cut are skipped and the default density
@@ -1351,7 +1351,7 @@ def _run_direct_mcmc(
     n_posterior: int = 1000,
     progress: bool = True,
     seed: int = 42,
-    ne_high_max: float = 1e5,
+    ne_high_max: float = 5e5,
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
     icf_method: str = "auto",
@@ -1377,7 +1377,7 @@ def _run_direct_mcmc(
     seed : int
         Random seed for subsampling (default 42).
     ne_high_max : float
-        Maximum allowed n_e(high) in cm^-3 (default 1e5).
+        Maximum allowed n_e(high) in cm^-3 (default 5e5).
     snr_ne : float
         Minimum SNR for density-sensitive doublet members (default 3.0).
         SNR is computed from the median/std of the posterior for each
@@ -1708,7 +1708,7 @@ def compute_abundances(
     method: str = "auto",
     snr_auroral: float = 3.0,
     snr_line: float = 2.0,
-    ne_high_max: float = 1e5,
+    ne_high_max: float = 5e5,
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
     n_mc: int = 1000,
@@ -1759,7 +1759,7 @@ def compute_abundances(
         Set to 0 to disable filtering.
     ne_high_max : float
         Maximum allowed high-ionisation electron density in cm^-3
-        (default 1e5).  If n_e(high) from a UV doublet exceeds this,
+        (default 5e5).  If n_e(high) from a UV doublet exceeds this,
         the code falls back to n_e(low).  Prevents unphysical density
         estimates from noisy doublet ratios.
     snr_ne : float
