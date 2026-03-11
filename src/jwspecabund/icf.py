@@ -1,9 +1,12 @@
-"""Ionisation correction factors from Izotov et al. (2006).
+"""Ionisation correction factors.
 
 References
 ----------
 Izotov, Y. I., Stasinska, G., Meynet, G., Guseva, N. G., & Thuan, T. X.
 2006, A&A, 448, 955.  Equations 18--23.
+
+Garnett, D. R., Shields, G. A., Skillman, E. D., Sagan, S. P., &
+Dufour, R. J.  1997, ApJ, 489, 63.
 """
 
 from __future__ import annotations
@@ -92,6 +95,37 @@ def icf_sulfur(O_plus: float, O_total: float) -> float:
     x = O_plus / O_total
     # Eq. 20: accounts for S3+ not captured by optical lines
     icf = 0.013 + x * (5.986 + x * (-21.085 + x * (26.462 - x * 11.282)))
+    return max(icf, 1.0)
+
+
+def icf_carbon(O_plus: float, O_pp: float) -> float:
+    """ICF for carbon (Garnett+1997).
+
+    When C+ is not detected, the observed (C2+ + C3+)/O2+ underestimates
+    C/O because C+ in the low-ionisation zone is missing.  The correction
+    assumes C+/C_total ~ O+/O_total (similar ionisation structure):
+
+        C/O = ICF_C * (C2+ + C3+) / O2+
+        ICF_C = (O+ + O2+) / O2+
+
+    Parameters
+    ----------
+    O_plus : float
+        Ionic abundance O+/H+.
+    O_pp : float
+        Ionic abundance O++/H+.
+
+    Returns
+    -------
+    float
+        ICF_C.  Returns 1.0 when O+ is negligible or not detected.
+    """
+    if O_pp <= 0:
+        return 1.0
+    if O_plus <= 0:
+        # No O+ detected -> ICF = 1 (high-ionisation object)
+        return 1.0
+    icf = (O_plus + O_pp) / O_pp
     return max(icf, 1.0)
 
 

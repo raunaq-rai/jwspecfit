@@ -29,6 +29,8 @@ REST_LINES_A: dict[str, float] = {
     "SiIII_2": 1892.03,
     "CIII]_1907": 1906.683,
     "CIII]": 1908.734,
+    "CII]_2324": 2324.21346335,
+    "CII]_2326": 2325.40372661,
     # UV absorption lines
     "abs_SiII1260": 1260.422,
     "abs_CII1334":  1334.532,
@@ -157,6 +159,9 @@ _GRATING_LINES = [
     "SiIII_2",
     "CIII]_1907",
     "CIII]",
+    # CII] intercombination doublet
+    "CII]_2324",
+    "CII]_2326",
     # Semi-forbidden / weak UV
     "OIII]_2321",
     "OIII]_2331",

@@ -287,7 +287,7 @@ class AbundanceResult:
                                  f" limits for non-detected N ions)")
 
                 # C/O upper limit.
-                _c_ions = ["C++/H+", "C+++/H+"]
+                _c_ions = ["C+/H+", "C++/H+", "C+++/H+"]
                 C_total = 0.0
                 has_ul_c = False
                 for ck in _c_ions:

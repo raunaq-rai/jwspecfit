@@ -46,6 +46,7 @@ _SNR_PROTECTED = {
     "NV_1", "NV_2",
     "CIV_1", "CIV_2",
     "CIII]_1907", "CIII]",
+    "CII]_2324", "CII]_2326",
 }
 
 
@@ -533,6 +534,7 @@ def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
         (("NIV_1483", "NIV_1486"), "N+++/H+"),
         (("NV_1", "NV_2"), "N4+/H+"),
         (("CIV_1", "CIV_2"), "C+++/H+"),
+        (("CII]_2324", "CII]_2326"), "C+/H+"),
     ]
     for (name_a, name_b), ion_key in _uv_doublets:
         has_a = fluxes.get(name_a, 0.0) > 0
@@ -839,6 +841,7 @@ def _compute_ionic_upper_limits(
         ("N+/H+",   "N", 2, ["NII_6585"],    [6584],       Te_low,  ne_low),
         ("N++/H+",  "N", 3, ["NIII_1749", "NIII_1752"], [1749, 1752], Te_high, ne_mid),
         ("N+++/H+", "N", 4, ["NIV_1483", "NIV_1486"],   [1483, 1486], Te_high, ne_high),
+        ("C+/H+",   "C", 2, ["CII]_2324", "CII]_2326"], [2323, 2325, 2326, 2327, 2328], Te_low, ne_low),
         ("C++/H+",  "C", 3, ["CIII]_1907", "CIII]"],    [1907, 1909], Te_high, ne_mid),
         ("C+++/H+", "C", 4, ["CIV_1", "CIV_2"],         [1548, 1551], Te_high, ne_high),
         ("Ne++/H+", "Ne", 3, ["NeIII_3869"], [3869],     Te_high, ne_high),
@@ -919,6 +922,7 @@ def _build_diagnostics(
     icf_method: str | None,
     NO_icf_name: str | None,
     ne_default: float,
+    totals: dict[str, Any] | None = None,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -946,12 +950,15 @@ def _build_diagnostics(
         Specific ICF name used for N/O.
     ne_default : float
         Default electron density in cm^-3.
+    totals : dict, optional
+        Total abundance dict from ``compute_total_abundances()``.
 
     Returns
     -------
     dict
         Human-readable explanations keyed by quantity name.
     """
+    totals = totals or {}
     diag: dict[str, str] = {}
 
     # Te(high)
@@ -1041,6 +1048,21 @@ def _build_diagnostics(
         )
     elif icf_method is not None:
         diag["N/O ICF"] = "N/O could not be computed (no eligible ions)"
+
+    # C/O method
+    co_method = totals.get("CO_method")
+    if co_method == "direct_sum":
+        diag["C/O"] = "direct sum (C⁺ + C²⁺ + C³⁺) / (O⁺ + O²⁺) — CII] detected"
+    elif co_method == "garnett97_icf":
+        icf_val = totals.get("CO_icf_value", 1.0)
+        diag["C/O"] = (
+            f"Garnett+1997 ICF × (C²⁺ + C³⁺) / O²⁺ — "
+            f"ICF = O_total/O²⁺ = {icf_val:.3f}"
+        )
+    elif "C/O" not in (totals.get("_failures") or {}):
+        pass  # C/O not attempted (no carbon lines)
+    else:
+        diag["C/O"] = totals.get("_failures", {}).get("C/O", "not computed")
 
     return diag
 
@@ -1179,6 +1201,7 @@ def _run_direct(
     diagnostics = _build_diagnostics(
         fluxes, Te_high, Te_relation, ne_low, ne_mid, ne_high,
         logU, logU_diag, icf_method, NO_icf_name, NE_DEFAULT,
+        totals=totals,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -1564,6 +1587,7 @@ def _run_direct_mcmc(
             med_fluxes, Te_high_pt if np.isfinite(Te_high_pt) else None,
             Te_relation, ne_low, ne_mid, ne_high, logU_pt, logU_diag,
             icf_method, NO_icf_name, NE_DEFAULT,
+            totals=totals_pt,
         ),
         "failures": failures if failures else None,
         "NO_tiers": NO_tiers,

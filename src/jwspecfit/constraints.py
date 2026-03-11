@@ -30,6 +30,7 @@ _INTERCOM_LOW_DENSITY_RATIOS: dict[tuple[str, str], float] = {
     ("CIV_1",     "CIV_2"):     0.50,   # optically thin limit
     ("OIII_1666", "OIII_1661"): 0.83,   # 1/1.20, low-density limit
     ("CIII]_1907", "CIII]"):     0.65,   # Keenan+1992
+    ("CII]_2326", "CII]_2324"):  0.49,   # A-value ratio, same upper level
     ("NIV_1486",   "NIV_1483"):  0.67,
     ("NIII_1749",  "NIII_1752"): 0.67,
     ("SiIII_1",   "SiIII_2"):   0.67,
@@ -169,6 +170,7 @@ class ConstraintSet:
                 ("NIV_1486",   "NIV_1483"),
                 ("NIII_1749",  "NIII_1752"),
                 ("SiIII_1",   "SiIII_2"),
+                ("CII]_2326", "CII]_2324"),
             ]
             _blended = self.blended_doublets or set()
             for pri, sec in _KINEMATIC_TIED:
@@ -296,6 +298,7 @@ class ConstraintSet:
                 ("NIV_1486",   "NIV_1483"),
                 ("NIII_1749",  "NIII_1752"),
                 ("SiIII_1",   "SiIII_2"),
+                ("CII]_2326", "CII]_2324"),
             ]
             _blended = self.blended_doublets or set()
             for pri, sec in _KINEMATIC_TIED:

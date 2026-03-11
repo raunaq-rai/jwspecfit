@@ -510,6 +510,21 @@ def compute_ionic_abundances(
     # with its single-line emissivity to avoid underestimating the
     # abundance (the other member may have been excluded by SNR filtering).
 
+    # C+/H+ from CII] 2324 + 2326 — low-ionisation zone
+    # CII] 2326 is a 5-component multiplet (²P → ⁴P) spanning 2323–2329 Å.
+    # The user fits 2 Gaussians that capture the full blended flux.
+    # We must sum emissivities over ALL multiplet components so the
+    # ionic abundance is correct (the 2 fitted lines are only ~13% of
+    # the total emissivity).
+    _CII_MULTIPLET_WAVES = [2323, 2325, 2326, 2327, 2328]
+    _cii2324 = fluxes.get("CII]_2324", 0.0)
+    _cii2326 = fluxes.get("CII]_2326", 0.0)
+    if _cii2324 > 0 or _cii2326 > 0:
+        cii_flux = _cii2324 + _cii2326
+        ionic["C+/H+"] = _ionic_abundance(
+            "C", 2, cii_flux, Hb, Te_low, ne_lo, _CII_MULTIPLET_WAVES,
+        )
+
     # C2+/H+ from CIII] 1907 + 1909 — mid-ionisation zone
     _c1907 = fluxes.get("CIII]_1907", 0.0)
     _c1909 = fluxes.get("CIII]", 0.0)
@@ -707,7 +722,7 @@ def compute_total_abundances(
         When Martinez+25 is used, also includes ``"NO_icf_name"`` and
         ``"icf_method"`` keys.
     """
-    from .icf import icf_argon, icf_neon, icf_nitrogen, icf_sulfur
+    from .icf import icf_argon, icf_carbon, icf_neon, icf_nitrogen, icf_sulfur
 
     totals: dict[str, float] = {}
     failures: dict[str, str] = {}
@@ -934,13 +949,26 @@ def compute_total_abundances(
         else:
             failures["Ar/O"] = "no O++ ion for Ar/O normalisation"
 
-        # C/O — direct sum (C2+ + C3+) / O2+  (Jones+2023)
+        # C/O — tiered approach:
+        #   1. Direct sum (C+ + C2+ + C3+) / (O+ + O2+) when C+ detected
+        #   2. Garnett+1997 ICF × (C2+ + C3+) / O2+ when C+ not detected
+        #   3. Raw (C2+ + C3+) / O2+ when O+ also missing (ICF=1)
+        C_p = ionic.get("C+/H+", 0.0)
         C_pp = ionic.get("C++/H+", 0.0)
         C_ppp = ionic.get("C+++/H+", 0.0)
-        if (C_pp + C_ppp) > 0 and O_pp > 0:
-            totals["C/O"] = (C_pp + C_ppp) / O_pp
-        elif (C_pp + C_ppp) <= 0:
-            failures["C/O"] = "no C++ or C+++ ions detected (CIII]/CIV missing)"
+        C_uv = C_pp + C_ppp
+        if C_p > 0 and C_uv > 0 and OH > 0:
+            # Direct sum — all C ions detected, use total O
+            totals["C/O"] = (C_p + C_uv) / OH
+            totals["CO_method"] = "direct_sum"
+        elif C_uv > 0 and O_pp > 0:
+            # Apply Garnett+1997 ICF to correct for missing C+
+            icf_c = icf_carbon(O_plus, O_pp)
+            totals["C/O"] = icf_c * C_uv / O_pp
+            totals["CO_method"] = "garnett97_icf"
+            totals["CO_icf_value"] = icf_c
+        elif C_uv <= 0 and C_p <= 0:
+            failures["C/O"] = "no carbon ions detected (CII]/CIII]/CIV missing)"
         else:
             failures["C/O"] = "no O++ ion for C/O normalisation"
 
