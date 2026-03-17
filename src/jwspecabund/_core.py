@@ -1086,6 +1086,9 @@ def _run_direct(
     snr_NO: float = 1.5,
     continuum_rms_limits: dict[str, float] | None = None,
     niv_rejected: bool = False,
+    ne_low_override: float | None = None,
+    ne_mid_override: float | None = None,
+    ne_high_override: float | None = None,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -1137,6 +1140,16 @@ def _run_direct(
     ne_low, ne_mid, ne_high, ne_failures = _compute_multi_ne(
         fluxes, errors=errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
     )
+    # Apply user overrides (bypass diagnostic computation).
+    if ne_low_override is not None:
+        ne_low = ne_low_override
+        logger.info("n_e(low) overridden to %.0f cm^-3.", ne_low)
+    if ne_mid_override is not None:
+        ne_mid = ne_mid_override
+        logger.info("n_e(mid) overridden to %.0f cm^-3.", ne_mid)
+    if ne_high_override is not None:
+        ne_high = ne_high_override
+        logger.info("n_e(high) overridden to %.0f cm^-3.", ne_high)
 
     # --- Step 2: Electron temperature with zone-appropriate ne ---
     Te_high = compute_Te_OIII(
@@ -1358,6 +1371,9 @@ def _run_direct_mcmc(
     snr_NO: float = 1.5,
     continuum_rms_limits: dict[str, float] | None = None,
     niv_rejected: bool = False,
+    ne_low_override: float | None = None,
+    ne_mid_override: float | None = None,
+    ne_high_override: float | None = None,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -1424,6 +1440,13 @@ def _run_direct_mcmc(
     ne_low, ne_mid, ne_high, ne_failures = _compute_multi_ne(
         med_fluxes, errors=med_errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
     )
+    # Apply user overrides (bypass diagnostic computation).
+    if ne_low_override is not None:
+        ne_low = ne_low_override
+    if ne_mid_override is not None:
+        ne_mid = ne_mid_override
+    if ne_high_override is not None:
+        ne_high = ne_high_override
 
     # Point estimate: logU and Z_Zsun from medians.
     try:
@@ -1718,6 +1741,10 @@ def compute_abundances(
     B_bump: float = 2.27,
     icf_method: str = "auto",
     snr_NO: float = 1.5,
+    # Electron density overrides (bypass diagnostic computation)
+    ne_low_override: float | None = None,
+    ne_mid_override: float | None = None,
+    ne_high_override: float | None = None,
     # Forward model kwargs (method="forward")
     forward_sampler: str = "emcee",
     forward_n_walkers: int = 32,
@@ -1799,6 +1826,16 @@ def compute_abundances(
         quadrature-summed error.  Ions below this threshold are
         excluded from the direct sum, causing the code to fall
         through to a lower tier (or Izotov+06).
+    ne_low_override : float or None
+        If set, use this value (cm^-3) for the low-ionisation zone
+        density instead of deriving it from [SII] or [OII].
+    ne_mid_override : float or None
+        If set, use this value (cm^-3) for the mid-ionisation zone
+        density instead of deriving it from CIII].
+    ne_high_override : float or None
+        If set, use this value (cm^-3) for the high-ionisation zone
+        density instead of deriving it from NIV] (or the fallback
+        chain).  Useful when the CIII]-derived fallback is suspect.
     forward_sampler : str
         Sampler for forward model: ``"emcee"`` or ``"dynesty"`` (default ``"emcee"``).
     forward_n_walkers : int
@@ -2008,6 +2045,9 @@ def compute_abundances(
                 icf_method=icf_method, snr_NO=snr_NO,
                 continuum_rms_limits=continuum_rms_limits,
                 niv_rejected=_niv_rejected,
+                ne_low_override=ne_low_override,
+                ne_mid_override=ne_mid_override,
+                ne_high_override=ne_high_override,
             )
         else:
             direct_out = _run_direct(
@@ -2017,6 +2057,9 @@ def compute_abundances(
                 icf_method=icf_method, snr_NO=snr_NO,
                 continuum_rms_limits=continuum_rms_limits,
                 niv_rejected=_niv_rejected,
+                ne_low_override=ne_low_override,
+                ne_mid_override=ne_mid_override,
+                ne_high_override=ne_high_override,
             )
 
         primary_result = AbundanceResult(
@@ -2093,6 +2136,9 @@ def compute_abundances(
                             snr_ne=snr_ne, snr_logU=snr_logU,
                             icf_method=icf_method, snr_NO=snr_NO,
                             niv_rejected=_niv_rejected,
+                            ne_low_override=ne_low_override,
+                            ne_mid_override=ne_mid_override,
+                            ne_high_override=ne_high_override,
                         )
                     else:
                         d_out = _run_direct(
@@ -2101,6 +2147,9 @@ def compute_abundances(
                             snr_ne=snr_ne, snr_logU=snr_logU,
                             icf_method=icf_method, snr_NO=snr_NO,
                             niv_rejected=_niv_rejected,
+                            ne_low_override=ne_low_override,
+                            ne_mid_override=ne_mid_override,
+                            ne_high_override=ne_high_override,
                         )
                     alt["direct"] = AbundanceResult(
                         method="direct",
