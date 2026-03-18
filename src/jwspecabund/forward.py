@@ -319,7 +319,13 @@ def _build_observables(
     ratio_errs: list[float] = []
     obs_components: list[list[tuple[str, int, int]]] = []
 
+    # Lines that require more atomic levels than PyNEB's default data
+    # provides (e.g. [OIII] 1661/1666 need a 6-level O++ atom).
+    _SKIP_LINES = {"OIII_1661", "OIII_1666"}
+
     for name, components in _LINE_COMPONENTS.items():
+        if name in _SKIP_LINES:
+            continue
         if name not in line_fluxes or line_fluxes[name] <= 0:
             continue
 
