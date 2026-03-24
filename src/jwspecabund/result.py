@@ -73,7 +73,9 @@ class AbundanceResult:
     CO: float | None = None
     CO_err: float | tuple[float, float] | None = None
     Te_high: float | None = None
+    Te_high_err: float | tuple[float, float] | None = None
     Te_low: float | None = None
+    Te_low_err: float | tuple[float, float] | None = None
     ne: float | None = None
     Av: float | None = None
     Av_err: float | None = None
@@ -90,6 +92,7 @@ class AbundanceResult:
     ArO: float | None = None
     ArO_err: float | tuple[float, float] | None = None
     logU: float | None = None
+    logU_err: float | tuple[float, float] | None = None
     ne_low: float | None = None
     ne_mid: float | None = None
     ne_high: float | None = None
@@ -143,9 +146,15 @@ class AbundanceResult:
 
         # --- Physical conditions ---
         if self.Te_high is not None:
-            lines.append(f"  T_e(high)   = {self.Te_high:.0f} K")
+            if self.Te_high_err is not None:
+                lines.append(f"  T_e(high)   = {self.Te_high:.0f} +/- {self.Te_high_err} K")
+            else:
+                lines.append(f"  T_e(high)   = {self.Te_high:.0f} K")
         if self.Te_low is not None:
-            lines.append(f"  T_e(low)    = {self.Te_low:.0f} K")
+            if self.Te_low_err is not None:
+                lines.append(f"  T_e(low)    = {self.Te_low:.0f} +/- {self.Te_low_err} K")
+            else:
+                lines.append(f"  T_e(low)    = {self.Te_low:.0f} K")
         if self.ne is not None:
             lines.append(f"  n_e         = {self.ne:.0f} cm^-3")
         if self.ne_low is not None and self.ne_high is not None:
@@ -154,7 +163,10 @@ class AbundanceResult:
                 lines.append(f"  n_e(mid)    = {self.ne_mid:.0f} cm^-3")
             lines.append(f"  n_e(high)   = {self.ne_high:.0f} cm^-3")
         if self.logU is not None:
-            lines.append(f"  log(U)      = {self.logU:.2f}")
+            if self.logU_err is not None:
+                lines.append(f"  log(U)      = {self.logU:.2f} +/- {self.logU_err}")
+            else:
+                lines.append(f"  log(U)      = {self.logU:.2f}")
         if self.Av is not None:
             if self.Av_err is not None:
                 lines.append(f"  A_V         = {self.Av:.3f} +/- {self.Av_err:.3f}")

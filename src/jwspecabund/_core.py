@@ -1231,6 +1231,9 @@ def _run_direct(
     SO_mc = []
     NeO_mc = []
     ArO_mc = []
+    Te_high_mc = []
+    Te_low_mc = []
+    logU_mc_arr = []
     # Collect per-tier N/O posteriors for uncertainty on each method.
     _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
     NO_tier_mc: dict[str, list[float]] = {k: [] for k in _tier_keys}
@@ -1275,6 +1278,10 @@ def _run_direct(
                 )
                 if logU_mc_val is not None:
                     logU_mc = float(np.clip(logU_mc_val, *_LOG_U_VALID))
+
+            Te_high_mc.append(Te_h)
+            Te_low_mc.append(Te_l)
+            logU_mc_arr.append(logU_mc if logU_mc is not None else np.nan)
 
             # Gate nitrogen ions using the *original* errors so the
             # same ions are included/excluded as in the point estimate.
@@ -1333,6 +1340,9 @@ def _run_direct(
             SO_mc.append(np.nan)
             NeO_mc.append(np.nan)
             ArO_mc.append(np.nan)
+            Te_high_mc.append(np.nan)
+            Te_low_mc.append(np.nan)
+            logU_mc_arr.append(np.nan)
             for k in _tier_keys:
                 NO_tier_mc[k].append(np.nan)
 
@@ -1349,6 +1359,12 @@ def _run_direct(
     SO_err = float(np.nanstd(SO_mc)) if np.any(np.isfinite(SO_mc)) else None
     NeO_err = float(np.nanstd(NeO_mc)) if np.any(np.isfinite(NeO_mc)) else None
     ArO_err = float(np.nanstd(ArO_mc)) if np.any(np.isfinite(ArO_mc)) else None
+    Te_high_mc = np.array(Te_high_mc)
+    Te_low_mc = np.array(Te_low_mc)
+    logU_mc_arr = np.array(logU_mc_arr)
+    Te_high_err = float(np.nanstd(Te_high_mc)) if np.any(np.isfinite(Te_high_mc)) else None
+    Te_low_err = float(np.nanstd(Te_low_mc)) if np.any(np.isfinite(Te_low_mc)) else None
+    logU_err = float(np.nanstd(logU_mc_arr)) if np.any(np.isfinite(logU_mc_arr)) else None
 
     # Attach per-tier uncertainties (symmetric std) to NO_tiers.
     if NO_tiers:
@@ -1365,12 +1381,15 @@ def _run_direct(
         "CO": CO_log,
         "CO_err": CO_err,
         "Te_high": Te_high,
+        "Te_high_err": Te_high_err,
         "Te_low": Te_low,
+        "Te_low_err": Te_low_err,
         "ne": ne_low,
         "ne_low": ne_low,
         "ne_mid": ne_mid,
         "ne_high": ne_high,
         "logU": logU,
+        "logU_err": logU_err,
         "icf_method": icf_method,
         "NO_icf_name": NO_icf_name,
         "ionic": ionic,
@@ -1469,6 +1488,9 @@ def _run_direct_mcmc(
     SO_post = np.full(n_samples, np.nan)
     NeO_post = np.full(n_samples, np.nan)
     ArO_post = np.full(n_samples, np.nan)
+    Te_high_post = np.full(n_samples, np.nan)
+    Te_low_post = np.full(n_samples, np.nan)
+    logU_post = np.full(n_samples, np.nan)
 
     # Compute medians and errors for the point estimate and multi-phase ne.
     med_fluxes = {name: float(np.median(post)) for name, post in posteriors.items()}
@@ -1568,6 +1590,10 @@ def _run_direct_mcmc(
                 if logU_val is not None:
                     logU_i = float(np.clip(logU_val, *_LOG_U_VALID))
 
+            Te_high_post[i] = Te_h
+            Te_low_post[i] = Te_l
+            logU_post[i] = logU_i if logU_i is not None else np.nan
+
             # Gate nitrogen ions using median errors (same ions as
             # point estimate to prevent tier-switching across samples).
             _gate_nitrogen_ions(ionic_i, sample, med_errors, snr_NO=snr_NO)
@@ -1640,6 +1666,21 @@ def _run_direct_mcmc(
     if ArO_med is not None:
         ArO_lo = float(ArO_med - np.nanpercentile(ArO_post, 16))
         ArO_hi = float(np.nanpercentile(ArO_post, 84) - ArO_med)
+    Te_high_med = float(np.nanmedian(Te_high_post)) if np.any(np.isfinite(Te_high_post)) else None
+    Te_high_lo = Te_high_hi = None
+    if Te_high_med is not None:
+        Te_high_lo = float(Te_high_med - np.nanpercentile(Te_high_post, 16))
+        Te_high_hi = float(np.nanpercentile(Te_high_post, 84) - Te_high_med)
+    Te_low_med = float(np.nanmedian(Te_low_post)) if np.any(np.isfinite(Te_low_post)) else None
+    Te_low_lo = Te_low_hi = None
+    if Te_low_med is not None:
+        Te_low_lo = float(Te_low_med - np.nanpercentile(Te_low_post, 16))
+        Te_low_hi = float(np.nanpercentile(Te_low_post, 84) - Te_low_med)
+    logU_med = float(np.nanmedian(logU_post)) if np.any(np.isfinite(logU_post)) else None
+    logU_lo = logU_hi = None
+    if logU_med is not None:
+        logU_lo = float(logU_med - np.nanpercentile(logU_post, 16))
+        logU_hi = float(np.nanpercentile(logU_post, 84) - logU_med)
 
     # Attach per-tier asymmetric uncertainties to NO_tiers.
     if NO_tiers:
@@ -1658,13 +1699,16 @@ def _run_direct_mcmc(
         "NO_err": (NO_lo, NO_hi) if NO_lo is not None else None,
         "CO": CO_med,
         "CO_err": (CO_lo, CO_hi) if CO_lo is not None else None,
-        "Te_high": Te_high_pt if np.isfinite(Te_high_pt) else None,
-        "Te_low": Te_low_pt if np.isfinite(Te_low_pt) else None,
+        "Te_high": Te_high_med if Te_high_med is not None else (Te_high_pt if np.isfinite(Te_high_pt) else None),
+        "Te_high_err": (Te_high_lo, Te_high_hi) if Te_high_lo is not None else None,
+        "Te_low": Te_low_med if Te_low_med is not None else (Te_low_pt if np.isfinite(Te_low_pt) else None),
+        "Te_low_err": (Te_low_lo, Te_low_hi) if Te_low_lo is not None else None,
         "ne": ne_low,
         "ne_low": ne_low,
         "ne_mid": ne_mid,
         "ne_high": ne_high,
-        "logU": logU_pt,
+        "logU": logU_med if logU_med is not None else logU_pt,
+        "logU_err": (logU_lo, logU_hi) if logU_lo is not None else None,
         "icf_method": icf_method,
         "NO_icf_name": NO_icf_name,
         "ionic": ionic_pt if ionic_pt else None,
@@ -2142,7 +2186,9 @@ def compute_abundances(
             CO=direct_out.get("CO"),
             CO_err=direct_out.get("CO_err"),
             Te_high=direct_out.get("Te_high"),
+            Te_high_err=direct_out.get("Te_high_err"),
             Te_low=direct_out.get("Te_low"),
+            Te_low_err=direct_out.get("Te_low_err"),
             ne=direct_out.get("ne"),
             Av=Av_derived,
             Av_err=Av_err_derived,
@@ -2159,6 +2205,7 @@ def compute_abundances(
             ArO=direct_out.get("ArO"),
             ArO_err=direct_out.get("ArO_err"),
             logU=direct_out.get("logU"),
+            logU_err=direct_out.get("logU_err"),
             ne_low=direct_out.get("ne_low"),
             ne_mid=direct_out.get("ne_mid"),
             ne_high=direct_out.get("ne_high"),
