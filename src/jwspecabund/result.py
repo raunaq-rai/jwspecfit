@@ -76,6 +76,7 @@ class AbundanceResult:
     Te_low: float | None = None
     ne: float | None = None
     Av: float | None = None
+    Av_err: float | None = None
     ionic: dict[str, float] | None = None
     OH_posterior: np.ndarray | None = None
     NO_posterior: np.ndarray | None = None
@@ -83,8 +84,11 @@ class AbundanceResult:
     ratios_used: list[str] | None = None
     chi2: float | None = None
     SO: float | None = None
+    SO_err: float | tuple[float, float] | None = None
     NeO: float | None = None
+    NeO_err: float | tuple[float, float] | None = None
     ArO: float | None = None
+    ArO_err: float | tuple[float, float] | None = None
     logU: float | None = None
     ne_low: float | None = None
     ne_mid: float | None = None
@@ -125,15 +129,15 @@ class AbundanceResult:
         elif "C/O" in _f:
             lines.append(f"  log(C/O)    = FAILED — {_f['C/O']}")
         if self.SO is not None:
-            lines.append(f"  log(S/O)    = {self.SO:.3f}")
+            lines.append(f"  log(S/O)    = {self.SO:.3f} +/- {self.SO_err}")
         elif "S/O" in _f:
             lines.append(f"  log(S/O)    = FAILED — {_f['S/O']}")
         if self.NeO is not None:
-            lines.append(f"  log(Ne/O)   = {self.NeO:.3f}")
+            lines.append(f"  log(Ne/O)   = {self.NeO:.3f} +/- {self.NeO_err}")
         elif "Ne/O" in _f:
             lines.append(f"  log(Ne/O)   = FAILED — {_f['Ne/O']}")
         if self.ArO is not None:
-            lines.append(f"  log(Ar/O)   = {self.ArO:.3f}")
+            lines.append(f"  log(Ar/O)   = {self.ArO:.3f} +/- {self.ArO_err}")
         elif "Ar/O" in _f:
             lines.append(f"  log(Ar/O)   = FAILED — {_f['Ar/O']}")
 
@@ -152,7 +156,10 @@ class AbundanceResult:
         if self.logU is not None:
             lines.append(f"  log(U)      = {self.logU:.2f}")
         if self.Av is not None:
-            lines.append(f"  A_V         = {self.Av:.3f}")
+            if self.Av_err is not None:
+                lines.append(f"  A_V         = {self.Av:.3f} +/- {self.Av_err:.3f}")
+            else:
+                lines.append(f"  A_V         = {self.Av:.3f}")
 
         # --- Density solve failures ---
         _ne_keys = [k for k in _f if k.startswith("n_e(")]

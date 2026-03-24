@@ -1228,6 +1228,9 @@ def _run_direct(
     OH_mc = []
     NO_mc = []
     CO_mc = []
+    SO_mc = []
+    NeO_mc = []
+    ArO_mc = []
     # Collect per-tier N/O posteriors for uncertainty on each method.
     _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
     NO_tier_mc: dict[str, list[float]] = {k: [] for k in _tier_keys}
@@ -1300,6 +1303,24 @@ def _run_direct(
             else:
                 CO_mc.append(np.nan)
 
+            so_mc = totals_mc.get("S/O", np.nan)
+            if so_mc is not None and np.isfinite(so_mc) and so_mc > 0:
+                SO_mc.append(np.log10(so_mc))
+            else:
+                SO_mc.append(np.nan)
+
+            neo_mc = totals_mc.get("Ne/O", np.nan)
+            if neo_mc is not None and np.isfinite(neo_mc) and neo_mc > 0:
+                NeO_mc.append(np.log10(neo_mc))
+            else:
+                NeO_mc.append(np.nan)
+
+            aro_mc = totals_mc.get("Ar/O", np.nan)
+            if aro_mc is not None and np.isfinite(aro_mc) and aro_mc > 0:
+                ArO_mc.append(np.log10(aro_mc))
+            else:
+                ArO_mc.append(np.nan)
+
             # Collect per-tier N/O values.
             mc_tiers = totals_mc.get("_NO_tiers", {})
             for k in _tier_keys:
@@ -1309,16 +1330,25 @@ def _run_direct(
             OH_mc.append(np.nan)
             NO_mc.append(np.nan)
             CO_mc.append(np.nan)
+            SO_mc.append(np.nan)
+            NeO_mc.append(np.nan)
+            ArO_mc.append(np.nan)
             for k in _tier_keys:
                 NO_tier_mc[k].append(np.nan)
 
     OH_mc = np.array(OH_mc)
     NO_mc = np.array(NO_mc)
     CO_mc = np.array(CO_mc)
+    SO_mc = np.array(SO_mc)
+    NeO_mc = np.array(NeO_mc)
+    ArO_mc = np.array(ArO_mc)
 
     OH_err = float(np.nanstd(OH_mc)) if np.any(np.isfinite(OH_mc)) else np.nan
     NO_err = float(np.nanstd(NO_mc)) if np.any(np.isfinite(NO_mc)) else None
     CO_err = float(np.nanstd(CO_mc)) if np.any(np.isfinite(CO_mc)) else None
+    SO_err = float(np.nanstd(SO_mc)) if np.any(np.isfinite(SO_mc)) else None
+    NeO_err = float(np.nanstd(NeO_mc)) if np.any(np.isfinite(NeO_mc)) else None
+    ArO_err = float(np.nanstd(ArO_mc)) if np.any(np.isfinite(ArO_mc)) else None
 
     # Attach per-tier uncertainties (symmetric std) to NO_tiers.
     if NO_tiers:
@@ -1350,8 +1380,11 @@ def _run_direct(
         "NO_posterior": NO_mc,
         "CO_posterior": CO_mc,
         "SO": SO_log,
+        "SO_err": SO_err,
         "NeO": NeO_log,
+        "NeO_err": NeO_err,
         "ArO": ArO_log,
+        "ArO_err": ArO_err,
         "diagnostics": diagnostics,
         "failures": failures if failures else None,
         "NO_tiers": NO_tiers,
@@ -1433,6 +1466,9 @@ def _run_direct_mcmc(
     OH_post = np.full(n_samples, np.nan)
     NO_post = np.full(n_samples, np.nan)
     CO_post = np.full(n_samples, np.nan)
+    SO_post = np.full(n_samples, np.nan)
+    NeO_post = np.full(n_samples, np.nan)
+    ArO_post = np.full(n_samples, np.nan)
 
     # Compute medians and errors for the point estimate and multi-phase ne.
     med_fluxes = {name: float(np.median(post)) for name, post in posteriors.items()}
@@ -1553,6 +1589,18 @@ def _run_direct_mcmc(
             if co is not None and np.isfinite(co) and co > 0:
                 CO_post[i] = np.log10(co)
 
+            so = totals_i.get("S/O", np.nan)
+            if so is not None and np.isfinite(so) and so > 0:
+                SO_post[i] = np.log10(so)
+
+            neo = totals_i.get("Ne/O", np.nan)
+            if neo is not None and np.isfinite(neo) and neo > 0:
+                NeO_post[i] = np.log10(neo)
+
+            aro = totals_i.get("Ar/O", np.nan)
+            if aro is not None and np.isfinite(aro) and aro > 0:
+                ArO_post[i] = np.log10(aro)
+
             # Collect per-tier N/O values.
             mc_tiers = totals_i.get("_NO_tiers", {})
             for k in _tier_keys:
@@ -1577,6 +1625,21 @@ def _run_direct_mcmc(
     if CO_med is not None:
         CO_lo = float(CO_med - np.nanpercentile(CO_post, 16))
         CO_hi = float(np.nanpercentile(CO_post, 84) - CO_med)
+    SO_med = float(np.nanmedian(SO_post)) if np.any(np.isfinite(SO_post)) else None
+    SO_lo = SO_hi = None
+    if SO_med is not None:
+        SO_lo = float(SO_med - np.nanpercentile(SO_post, 16))
+        SO_hi = float(np.nanpercentile(SO_post, 84) - SO_med)
+    NeO_med = float(np.nanmedian(NeO_post)) if np.any(np.isfinite(NeO_post)) else None
+    NeO_lo = NeO_hi = None
+    if NeO_med is not None:
+        NeO_lo = float(NeO_med - np.nanpercentile(NeO_post, 16))
+        NeO_hi = float(np.nanpercentile(NeO_post, 84) - NeO_med)
+    ArO_med = float(np.nanmedian(ArO_post)) if np.any(np.isfinite(ArO_post)) else None
+    ArO_lo = ArO_hi = None
+    if ArO_med is not None:
+        ArO_lo = float(ArO_med - np.nanpercentile(ArO_post, 16))
+        ArO_hi = float(np.nanpercentile(ArO_post, 84) - ArO_med)
 
     # Attach per-tier asymmetric uncertainties to NO_tiers.
     if NO_tiers:
@@ -1610,9 +1673,12 @@ def _run_direct_mcmc(
         "OH_posterior": OH_post,
         "NO_posterior": NO_post if np.any(np.isfinite(NO_post)) else None,
         "CO_posterior": CO_post if np.any(np.isfinite(CO_post)) else None,
-        "SO": np.log10(totals_pt["S/O"]) if "S/O" in totals_pt and totals_pt["S/O"] > 0 else None,
-        "NeO": np.log10(totals_pt["Ne/O"]) if "Ne/O" in totals_pt and totals_pt["Ne/O"] > 0 else None,
-        "ArO": np.log10(totals_pt["Ar/O"]) if "Ar/O" in totals_pt and totals_pt["Ar/O"] > 0 else None,
+        "SO": SO_med if SO_med is not None else (np.log10(totals_pt["S/O"]) if "S/O" in totals_pt and totals_pt["S/O"] > 0 else None),
+        "SO_err": (SO_lo, SO_hi) if SO_lo is not None else None,
+        "NeO": NeO_med if NeO_med is not None else (np.log10(totals_pt["Ne/O"]) if "Ne/O" in totals_pt and totals_pt["Ne/O"] > 0 else None),
+        "NeO_err": (NeO_lo, NeO_hi) if NeO_lo is not None else None,
+        "ArO": ArO_med if ArO_med is not None else (np.log10(totals_pt["Ar/O"]) if "Ar/O" in totals_pt and totals_pt["Ar/O"] > 0 else None),
+        "ArO_err": (ArO_lo, ArO_hi) if ArO_lo is not None else None,
         "diagnostics": _build_diagnostics(
             med_fluxes, Te_high_pt if np.isfinite(Te_high_pt) else None,
             Te_relation, ne_low, ne_mid, ne_high, logU_pt, logU_diag,
@@ -1700,6 +1766,7 @@ def _run_strong_line(
             OH=OH_med,
             OH_err=(OH_lo, OH_hi),
             Av=Av_derived,
+            Av_err=Av_err_derived,
             OH_posterior=OH_post,
             ratios_used=list(ratios.keys()),
             excluded_lines=excluded_lines if excluded_lines else None,
@@ -1714,6 +1781,7 @@ def _run_strong_line(
         OH=Z_best,
         OH_err=(Z_best - Z_lo, Z_hi - Z_best),
         Av=Av_derived,
+        Av_err=Av_err_derived,
         chi2=chi2,
         ratios_used=ratios_used,
         OH_posterior=Z_mc,
@@ -1873,6 +1941,7 @@ def compute_abundances(
         dust_kwargs = {"Rv": Rv, "delta": delta, "B": B_bump}
 
     Av_derived = None
+    Av_err_derived = None
     _balmer_info: dict | None = None
     if dust_correct:
         if Av is None:
@@ -1882,6 +1951,7 @@ def compute_abundances(
             )
             if balmer_out["n_lines"] > 0:
                 Av_derived = balmer_out["Av"]
+                Av_err_derived = balmer_out["Av_err"]
                 _balmer_info = balmer_out
                 for r in balmer_out["individual"]:
                     logger.info(
@@ -2024,6 +2094,7 @@ def compute_abundances(
             Te_low=None,
             ne=fwd_out.get("ne"),
             Av=Av_derived,
+            Av_err=Av_err_derived,
             ionic=fwd_out.get("ionic"),
             OH_posterior=fwd_out.get("OH_posterior"),
             NO_posterior=fwd_out.get("NO_posterior"),
@@ -2074,6 +2145,7 @@ def compute_abundances(
             Te_low=direct_out.get("Te_low"),
             ne=direct_out.get("ne"),
             Av=Av_derived,
+            Av_err=Av_err_derived,
             ionic=direct_out.get("ionic"),
             ionic_upper_limits=direct_out.get("ionic_upper_limits"),
             ionic_ul_details=direct_out.get("ionic_ul_details"),
@@ -2081,8 +2153,11 @@ def compute_abundances(
             NO_posterior=direct_out.get("NO_posterior"),
             CO_posterior=direct_out.get("CO_posterior"),
             SO=direct_out.get("SO"),
+            SO_err=direct_out.get("SO_err"),
             NeO=direct_out.get("NeO"),
+            NeO_err=direct_out.get("NeO_err"),
             ArO=direct_out.get("ArO"),
+            ArO_err=direct_out.get("ArO_err"),
             logU=direct_out.get("logU"),
             ne_low=direct_out.get("ne_low"),
             ne_mid=direct_out.get("ne_mid"),
@@ -2163,6 +2238,7 @@ def compute_abundances(
                         Te_low=d_out.get("Te_low"),
                         ne=d_out.get("ne"),
                         Av=Av_derived,
+                        Av_err=Av_err_derived,
                         ionic=d_out.get("ionic"),
                         failures=d_out.get("failures"),
                     )
