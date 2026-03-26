@@ -529,7 +529,7 @@ def compute_NO_martinez25_locked(
     O_plus = ionic.get("O+/H+", 0.0)
     O_pp = ionic.get("O++/H+", 0.0)
 
-    if icf_name == "NppNppp_Opp" and (N_pp + N_ppp) > 0 and O_pp > 0:
+    if icf_name == "NppNppp_Opp" and N_pp > 0 and N_ppp > 0 and O_pp > 0:
         return (N_pp + N_ppp) / O_pp * icf_NppNppp_Opp(logU, Z_Zsun, ne)
     if icf_name == "NpNpp_OpOpp" and (N_plus + N_pp) > 0 and (O_plus + O_pp) > 0:
         return (N_plus + N_pp) / (O_plus + O_pp) * icf_NpNpp_OpOpp(logU, Z_Zsun, ne)

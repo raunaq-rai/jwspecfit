@@ -780,16 +780,23 @@ def compute_total_abundances(
             from .martinez25_icf import compute_NO_martinez25, compute_NO_martinez25_locked
             ne_icf = ne if ne is not None else NE_DEFAULT
             # If locked to a specific ICF tier, use it directly.
+            # When locked, do NOT fall back — return no N/O so the MC
+            # iteration gets NaN rather than mixing tiers.
             if _lock_NO_icf is not None:
                 NO_val = compute_NO_martinez25_locked(ionic, logU, Z_Zsun, ne_icf, _lock_NO_icf)
                 NO_icf_name = _lock_NO_icf
+                if NO_val is not None:
+                    totals["N/O"] = NO_val
+                    totals["NO_icf_name"] = NO_icf_name
+                    totals["icf_method"] = "martinez25"
+                # else: N/O stays unset → NaN in MC loop
             else:
                 NO_val, NO_icf_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)
-            if NO_val is not None:
+            if _lock_NO_icf is None and NO_val is not None:
                 totals["N/O"] = NO_val
                 totals["NO_icf_name"] = NO_icf_name
                 totals["icf_method"] = "martinez25"
-            else:
+            elif _lock_NO_icf is None and NO_val is None:
                 # Fall back to direct_sum tiers if Martinez+25 has no
                 # suitable ionic ratios (e.g. nitrogen ions SNR-gated).
                 N_plus = ionic.get("N+/H+", 0.0)
