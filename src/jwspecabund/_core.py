@@ -1354,11 +1354,17 @@ def _run_direct(
     NeO_mc = np.array(NeO_mc)
     ArO_mc = np.array(ArO_mc)
 
+    OH_med_mc = float(np.nanmedian(OH_mc)) if np.any(np.isfinite(OH_mc)) else OH_12
     OH_err = float(np.nanstd(OH_mc)) if np.any(np.isfinite(OH_mc)) else np.nan
+    NO_med_mc = float(np.nanmedian(NO_mc)) if np.any(np.isfinite(NO_mc)) else NO_log
     NO_err = float(np.nanstd(NO_mc)) if np.any(np.isfinite(NO_mc)) else None
+    CO_med_mc = float(np.nanmedian(CO_mc)) if np.any(np.isfinite(CO_mc)) else CO_log
     CO_err = float(np.nanstd(CO_mc)) if np.any(np.isfinite(CO_mc)) else None
+    SO_med_mc = float(np.nanmedian(SO_mc)) if np.any(np.isfinite(SO_mc)) else SO_log
     SO_err = float(np.nanstd(SO_mc)) if np.any(np.isfinite(SO_mc)) else None
+    NeO_med_mc = float(np.nanmedian(NeO_mc)) if np.any(np.isfinite(NeO_mc)) else NeO_log
     NeO_err = float(np.nanstd(NeO_mc)) if np.any(np.isfinite(NeO_mc)) else None
+    ArO_med_mc = float(np.nanmedian(ArO_mc)) if np.any(np.isfinite(ArO_mc)) else ArO_log
     ArO_err = float(np.nanstd(ArO_mc)) if np.any(np.isfinite(ArO_mc)) else None
     Te_high_mc = np.array(Te_high_mc)
     Te_low_mc = np.array(Te_low_mc)
@@ -1367,19 +1373,21 @@ def _run_direct(
     Te_low_err = float(np.nanstd(Te_low_mc)) if np.any(np.isfinite(Te_low_mc)) else None
     logU_err = float(np.nanstd(logU_mc_arr)) if np.any(np.isfinite(logU_mc_arr)) else None
 
-    # Attach per-tier uncertainties (symmetric std) to NO_tiers.
+    # Replace per-tier point estimates with MC medians and attach errors.
     if NO_tiers:
         for k in _tier_keys:
             arr = np.array(NO_tier_mc[k])
             if np.any(np.isfinite(arr)):
+                med = float(np.nanmedian(arr))
+                NO_tiers[k] = med
                 NO_tiers[f"_err_{k}"] = float(np.nanstd(arr))
 
     return {
-        "OH": OH_12,
+        "OH": OH_med_mc,
         "OH_err": OH_err,
-        "NO": NO_log,
+        "NO": NO_med_mc,
         "NO_err": NO_err,
-        "CO": CO_log,
+        "CO": CO_med_mc,
         "CO_err": CO_err,
         "Te_high": Te_high,
         "Te_high_err": Te_high_err,
@@ -1399,11 +1407,11 @@ def _run_direct(
         "OH_posterior": OH_mc,
         "NO_posterior": NO_mc,
         "CO_posterior": CO_mc,
-        "SO": SO_log,
+        "SO": SO_med_mc,
         "SO_err": SO_err,
-        "NeO": NeO_log,
+        "NeO": NeO_med_mc,
         "NeO_err": NeO_err,
-        "ArO": ArO_log,
+        "ArO": ArO_med_mc,
         "ArO_err": ArO_err,
         "diagnostics": diagnostics,
         "failures": failures if failures else None,
@@ -1684,7 +1692,7 @@ def _run_direct_mcmc(
         logU_lo = float(logU_med - np.nanpercentile(logU_post, 16))
         logU_hi = float(np.nanpercentile(logU_post, 84) - logU_med)
 
-    # Attach per-tier asymmetric uncertainties to NO_tiers.
+    # Replace per-tier point estimates with posterior medians and attach errors.
     if NO_tiers:
         for k in _tier_keys:
             arr = np.array(NO_tier_post[k])
@@ -1692,6 +1700,7 @@ def _run_direct_mcmc(
                 med = float(np.nanmedian(arr))
                 lo = float(med - np.nanpercentile(arr, 16))
                 hi = float(np.nanpercentile(arr, 84) - med)
+                NO_tiers[k] = med
                 NO_tiers[f"_err_{k}"] = (lo, hi)
 
     return {
