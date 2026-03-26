@@ -1743,6 +1743,7 @@ def _run_strong_line(
     n_posterior: int,
     progress: bool,
     Av_derived: float | None,
+    Av_err_derived: float | None,
     excluded_lines: list[str],
 ) -> AbundanceResult:
     """Run the strong-line method and return an AbundanceResult."""
@@ -2231,7 +2232,7 @@ def compute_abundances(
         # --- Strong-line method ---
         primary_result = _run_strong_line(
             fluxes, errors, is_mcmc, posteriors, n_mc, n_posterior,
-            progress, Av_derived, excluded_lines,
+            progress, Av_derived, Av_err_derived, excluded_lines,
         )
 
     # --- Auto mode: run the alternative method for comparison ---
@@ -2242,7 +2243,7 @@ def compute_abundances(
             try:
                 alt["strong_line"] = _run_strong_line(
                     fluxes, errors, is_mcmc, posteriors, n_mc, n_posterior,
-                    progress, Av_derived, excluded_lines,
+                    progress, Av_derived, Av_err_derived, excluded_lines,
                 )
             except Exception:
                 logger.info("Alternative strong-line method failed; skipping.")
