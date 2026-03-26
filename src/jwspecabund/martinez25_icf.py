@@ -494,3 +494,49 @@ def compute_NO_martinez25(
         return ratio * icf, "NpppOpp"
 
     return None, None
+
+
+def compute_NO_martinez25_locked(
+    ionic: dict[str, float],
+    logU: float,
+    Z_Zsun: float,
+    ne: float,
+    icf_name: str,
+) -> float | None:
+    """Compute N/O using a specific Martinez+25 ICF (no cascade).
+
+    Parameters
+    ----------
+    ionic : dict
+        Ionic abundance dict.
+    logU : float
+        Ionisation parameter log(U).
+    Z_Zsun : float
+        Gas-phase metallicity in solar units.
+    ne : float
+        Electron density in cm^-3.
+    icf_name : str
+        ICF name to use, e.g. ``"NppNppp_Opp"`` for ICF 5.
+
+    Returns
+    -------
+    float or None
+        N/O value, or None if the required ions are not available.
+    """
+    N_plus = ionic.get("N+/H+", 0.0)
+    N_pp = ionic.get("N++/H+", 0.0)
+    N_ppp = ionic.get("N+++/H+", 0.0)
+    O_plus = ionic.get("O+/H+", 0.0)
+    O_pp = ionic.get("O++/H+", 0.0)
+
+    if icf_name == "NppNppp_Opp" and (N_pp + N_ppp) > 0 and O_pp > 0:
+        return (N_pp + N_ppp) / O_pp * icf_NppNppp_Opp(logU, Z_Zsun, ne)
+    if icf_name == "NpNpp_OpOpp" and (N_plus + N_pp) > 0 and (O_plus + O_pp) > 0:
+        return (N_plus + N_pp) / (O_plus + O_pp) * icf_NpNpp_OpOpp(logU, Z_Zsun, ne)
+    if icf_name == "NppOpp" and N_pp > 0 and O_pp > 0:
+        return N_pp / O_pp * icf_NppOpp(logU, Z_Zsun, ne)
+    if icf_name == "NpOp" and N_plus > 0 and O_plus > 0:
+        return N_plus / O_plus * icf_NpOp(logU, Z_Zsun, ne)
+    if icf_name == "NpppOpp" and N_ppp > 0 and O_pp > 0:
+        return N_ppp / O_pp * icf_NpppOpp(logU, Z_Zsun, ne)
+    return None

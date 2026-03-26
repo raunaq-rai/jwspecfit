@@ -691,6 +691,7 @@ def compute_total_abundances(
     ne: float | None = None,
     icf_method: str = "auto",
     ionic_upper_limits: dict[str, float] | None = None,
+    _lock_NO_icf: str | None = None,
 ) -> dict[str, float]:
     """Derive total element abundances from ionic abundances + ICFs.
 
@@ -776,9 +777,14 @@ def compute_total_abundances(
 
         # N/O — Martinez+25 with direct_sum fallback
         elif use_martinez:
-            from .martinez25_icf import compute_NO_martinez25
+            from .martinez25_icf import compute_NO_martinez25, compute_NO_martinez25_locked
             ne_icf = ne if ne is not None else NE_DEFAULT
-            NO_val, NO_icf_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)
+            # If locked to a specific ICF tier, use it directly.
+            if _lock_NO_icf is not None:
+                NO_val = compute_NO_martinez25_locked(ionic, logU, Z_Zsun, ne_icf, _lock_NO_icf)
+                NO_icf_name = _lock_NO_icf
+            else:
+                NO_val, NO_icf_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)
             if NO_val is not None:
                 totals["N/O"] = NO_val
                 totals["NO_icf_name"] = NO_icf_name

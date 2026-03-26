@@ -1290,6 +1290,7 @@ def _run_direct(
             totals_mc = compute_total_abundances(
                 ionic_mc, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
                 icf_method=icf_method,
+                _lock_NO_icf=NO_icf_name,
             )
 
             oh_mc = totals_mc.get("O/H", np.nan)
@@ -1601,6 +1602,7 @@ def _run_direct_mcmc(
             totals_i = compute_total_abundances(
                 ionic_i, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,
                 icf_method=icf_method,
+                _lock_NO_icf=NO_icf_name,
             )
 
             oh = totals_i.get("O/H", np.nan)
