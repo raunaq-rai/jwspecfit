@@ -1084,6 +1084,7 @@ def _run_direct(
     snr_logU: float = 1.5,
     icf_method: str = "auto",
     snr_NO: float = 1.5,
+    icf_tier: str | None = None,
     continuum_rms_limits: dict[str, float] | None = None,
     niv_rejected: bool = False,
     ne_low_override: float | None = None,
@@ -1212,6 +1213,10 @@ def _run_direct(
 
     icf_method = totals.get("icf_method")
     NO_icf_name = totals.get("NO_icf_name")
+    # User-requested ICF tier override.
+    if icf_tier is not None:
+        NO_icf_name = icf_tier
+        logger.info("ICF tier overridden to %s.", icf_tier)
     failures = totals.pop("_failures", {})
     failures.update(ne_failures)
     NO_tiers = totals.pop("_NO_tiers", None)
@@ -1430,6 +1435,7 @@ def _run_direct_mcmc(
     snr_logU: float = 1.5,
     icf_method: str = "auto",
     snr_NO: float = 1.5,
+    icf_tier: str | None = None,
     continuum_rms_limits: dict[str, float] | None = None,
     niv_rejected: bool = False,
     ne_low_override: float | None = None,
@@ -1561,6 +1567,10 @@ def _run_direct_mcmc(
     ) if ionic_pt else {}
     icf_method = totals_pt.get("icf_method")
     NO_icf_name = totals_pt.get("NO_icf_name")
+    # User-requested ICF tier override.
+    if icf_tier is not None:
+        NO_icf_name = icf_tier
+        logger.info("ICF tier overridden to %s.", icf_tier)
     failures = totals_pt.pop("_failures", {})
     failures.update(ne_failures)
     NO_tiers = totals_pt.pop("_NO_tiers", None)
@@ -1865,6 +1875,7 @@ def compute_abundances(
     B_bump: float = 2.27,
     icf_method: str = "auto",
     snr_NO: float = 1.5,
+    icf_tier: str | None = None,
     # Electron density overrides (bypass diagnostic computation)
     ne_low_override: float | None = None,
     ne_mid_override: float | None = None,
@@ -2169,7 +2180,7 @@ def compute_abundances(
                 posteriors, Te_relation, n_posterior=n_posterior,
                 progress=progress, ne_high_max=ne_high_max,
                 snr_ne=snr_ne, snr_logU=snr_logU,
-                icf_method=icf_method, snr_NO=snr_NO,
+                icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                 continuum_rms_limits=continuum_rms_limits,
                 niv_rejected=_niv_rejected,
                 ne_low_override=ne_low_override,
@@ -2181,7 +2192,7 @@ def compute_abundances(
                 fluxes, errors, Te_relation, n_mc,
                 progress=progress, ne_high_max=ne_high_max,
                 snr_ne=snr_ne, snr_logU=snr_logU,
-                icf_method=icf_method, snr_NO=snr_NO,
+                icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                 continuum_rms_limits=continuum_rms_limits,
                 niv_rejected=_niv_rejected,
                 ne_low_override=ne_low_override,
@@ -2268,7 +2279,7 @@ def compute_abundances(
                             posteriors, Te_relation, n_posterior=n_posterior,
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU,
-                            icf_method=icf_method, snr_NO=snr_NO,
+                            icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
@@ -2279,7 +2290,7 @@ def compute_abundances(
                             fluxes, errors, Te_relation, n_mc,
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU,
-                            icf_method=icf_method, snr_NO=snr_NO,
+                            icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
