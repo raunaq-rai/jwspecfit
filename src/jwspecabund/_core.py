@@ -2496,29 +2496,33 @@ def compute_abundances(
                         )
                     else:
                         # MC/posterior path failed — compute point estimate.
-                        from .direct import compute_Te_OIII_1666 as _Te1666
-                        Te_1666_pt = _Te1666(f_1666_alt, f_5007_alt,
-                                             fluxes.get("OIII_4959", 0.0),
-                                             primary_result.ne_high or 300)
-                        Te_1666_low = Te_low_from_high(Te_1666_pt, relation=Te_relation)
-                        ionic_1666 = compute_ionic_abundances(
-                            fluxes, Te_1666_pt, Te_1666_low,
-                            primary_result.ne_low or 300,
-                            ne_mid=primary_result.ne_mid,
-                            ne_high=primary_result.ne_high,
-                        )
-                        OH_1666 = ionic_1666.get("O+/H+", 0.0) + ionic_1666.get("O++/H+", 0.0)
-                        OH_1666_12 = 12.0 + np.log10(OH_1666) if OH_1666 > 0 else np.nan
-                        alt["direct_1666"] = AbundanceResult(
-                            method="direct (O III] 1666)",
-                            OH=OH_1666_12,
-                            OH_err=np.nan,
-                            Te_high=Te_1666_pt,
-                            Te_low=Te_1666_low,
-                            Av=Av_derived,
-                            Av_err=Av_err_derived,
-                            ionic=ionic_1666,
-                        )
+                        try:
+                            Te_1666_pt = compute_Te_OIII_1666(
+                                f_1666_alt, f_5007_alt,
+                                fluxes.get("OIII_4959", 0.0),
+                                primary_result.ne_high or 300,
+                            )
+                            Te_1666_low = Te_low_from_high(Te_1666_pt, relation=Te_relation)
+                            ionic_1666 = compute_ionic_abundances(
+                                fluxes, Te_1666_pt, Te_1666_low,
+                                primary_result.ne_low or 300,
+                                ne_mid=primary_result.ne_mid,
+                                ne_high=primary_result.ne_high,
+                            )
+                            OH_1666 = ionic_1666.get("O+/H+", 0.0) + ionic_1666.get("O++/H+", 0.0)
+                            OH_1666_12 = 12.0 + np.log10(OH_1666) if OH_1666 > 0 else np.nan
+                            alt["direct_1666"] = AbundanceResult(
+                                method="direct (O III] 1666)",
+                                OH=OH_1666_12,
+                                OH_err=np.nan,
+                                Te_high=Te_1666_pt,
+                                Te_low=Te_1666_low,
+                                Av=Av_derived,
+                                Av_err=Av_err_derived,
+                                ionic=ionic_1666,
+                            )
+                        except Exception as e:
+                            logger.info("Point-estimate fallback for 1666 also failed: %s", e)
                 except Exception as e:
                     logger.info("Alternative direct (1666) method failed: %s", e)
         elif primary_result.method == "strong_line":
