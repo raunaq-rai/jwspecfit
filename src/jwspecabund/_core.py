@@ -1415,6 +1415,56 @@ def _run_direct(
                 NO_tiers[k] = med
                 NO_tiers[f"_err_{k}"] = float(np.nanstd(arr))
 
+    # --- Alternative Te from O III] 1666 (cross-check) ---
+    _alt_1666 = None
+    if _Te_diagnostic == "4363" and f_1666 > 0 and f_5007 > 0:
+        try:
+            Te_alt = compute_Te_OIII_1666(f_1666, f_5007, f_4959, ne_high)
+            Te_alt_low = Te_low_from_high(Te_alt, relation=Te_relation)
+            ionic_alt = compute_ionic_abundances(
+                fluxes, Te_alt, Te_alt_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+            )
+            OH_alt = ionic_alt.get("O+/H+", 0.0) + ionic_alt.get("O++/H+", 0.0)
+            OH_alt_12 = 12.0 + np.log10(OH_alt) if OH_alt > 0 else np.nan
+            _alt_1666 = {
+                "Te_high": Te_alt,
+                "Te_low": Te_alt_low,
+                "OH": OH_alt_12,
+                "ionic": ionic_alt,
+            }
+            # MC propagation for 1666-based Te
+            OH_alt_mc = []
+            for _ in range(min(n_mc, 500)):
+                mc_f = {}
+                for name in fluxes:
+                    mc_f[name] = rng.normal(fluxes[name], errors.get(name, 0.0))
+                    mc_f[name] = max(mc_f[name], 1e-50)
+                try:
+                    Te_a = compute_Te_OIII_1666(
+                        mc_f.get("OIII_1666", 0), mc_f.get("OIII_5007", 0),
+                        mc_f.get("OIII_4959", 0), ne_high,
+                    )
+                    Te_a_low = Te_low_from_high(Te_a, relation=Te_relation)
+                    ion_a = compute_ionic_abundances(
+                        mc_f, Te_a, Te_a_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+                    )
+                    oh_a = ion_a.get("O+/H+", 0.0) + ion_a.get("O++/H+", 0.0)
+                    if oh_a > 0:
+                        OH_alt_mc.append(12.0 + np.log10(oh_a))
+                except (ValueError, RuntimeError):
+                    pass
+            if OH_alt_mc:
+                OH_alt_mc = np.array(OH_alt_mc)
+                _alt_1666["OH"] = float(np.nanmedian(OH_alt_mc))
+                _alt_1666["OH_err"] = float(np.nanstd(OH_alt_mc))
+            diagnostics["Te(high) from 1666"] = (
+                f"O III] 1666/(5007+4959) → T_e = {Te_alt:.0f} K → "
+                f"12+log(O/H) = {_alt_1666['OH']:.3f}"
+                + (f" ± {_alt_1666.get('OH_err', 0):.3f}" if 'OH_err' in _alt_1666 else "")
+            )
+        except (ValueError, RuntimeError) as e:
+            logger.info("Could not compute alternative Te from 1666: %s", e)
+
     return {
         "OH": OH_med_mc,
         "OH_err": OH_err,
@@ -1768,6 +1818,56 @@ def _run_direct_mcmc(
                 NO_tiers[k] = med
                 NO_tiers[f"_err_{k}"] = (lo, hi)
 
+    # --- Alternative Te from O III] 1666 (cross-check) ---
+    _diag_extra = {}
+    if _Te_diagnostic == "4363" and med_fluxes.get("OIII_1666", 0) > 0 and med_fluxes.get("OIII_5007", 0) > 0:
+        try:
+            Te_alt = compute_Te_OIII_1666(
+                med_fluxes["OIII_1666"], med_fluxes["OIII_5007"],
+                med_fluxes.get("OIII_4959", 0), ne_high,
+            )
+            Te_alt_low = Te_low_from_high(Te_alt, relation=Te_relation)
+            ionic_alt = compute_ionic_abundances(
+                med_fluxes, Te_alt, Te_alt_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+            )
+            OH_alt = ionic_alt.get("O+/H+", 0.0) + ionic_alt.get("O++/H+", 0.0)
+            OH_alt_12 = 12.0 + np.log10(OH_alt) if OH_alt > 0 else np.nan
+            # Quick MC for error
+            OH_alt_mc = []
+            rng_alt = np.random.default_rng(42)
+            for j in range(min(n_samples, 500)):
+                samp = {name: max(float(posteriors[name][j % len(posteriors[name])]), 1e-50)
+                        for name in posteriors}
+                try:
+                    Ta = compute_Te_OIII_1666(
+                        samp.get("OIII_1666", 0), samp.get("OIII_5007", 0),
+                        samp.get("OIII_4959", 0), ne_high,
+                    )
+                    Tl = Te_low_from_high(Ta, relation=Te_relation)
+                    ion_a = compute_ionic_abundances(
+                        samp, Ta, Tl, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+                    )
+                    oh_a = ion_a.get("O+/H+", 0.0) + ion_a.get("O++/H+", 0.0)
+                    if oh_a > 0:
+                        OH_alt_mc.append(12.0 + np.log10(oh_a))
+                except (ValueError, RuntimeError):
+                    pass
+            if OH_alt_mc:
+                arr_alt = np.array(OH_alt_mc)
+                oh_alt_med = float(np.nanmedian(arr_alt))
+                oh_alt_err = float(np.nanstd(arr_alt))
+                _diag_extra["Te(high) from 1666"] = (
+                    f"O III] 1666/(5007+4959) → T_e = {Te_alt:.0f} K → "
+                    f"12+log(O/H) = {oh_alt_med:.3f} ± {oh_alt_err:.3f}"
+                )
+            else:
+                _diag_extra["Te(high) from 1666"] = (
+                    f"O III] 1666/(5007+4959) → T_e = {Te_alt:.0f} K → "
+                    f"12+log(O/H) = {OH_alt_12:.3f}"
+                )
+        except (ValueError, RuntimeError) as e:
+            logger.info("Could not compute alternative Te from 1666: %s", e)
+
     return {
         "OH": OH_med,
         "OH_err": (OH_lo, OH_hi),
@@ -1799,12 +1899,15 @@ def _run_direct_mcmc(
         "NeO_err": (NeO_lo, NeO_hi) if NeO_lo is not None else None,
         "ArO": ArO_med if ArO_med is not None else (np.log10(totals_pt["Ar/O"]) if "Ar/O" in totals_pt and totals_pt["Ar/O"] > 0 else None),
         "ArO_err": (ArO_lo, ArO_hi) if ArO_lo is not None else None,
-        "diagnostics": _build_diagnostics(
-            med_fluxes, Te_high_pt if np.isfinite(Te_high_pt) else None,
-            Te_relation, ne_low, ne_mid, ne_high, logU_pt, logU_diag,
-            icf_method, NO_icf_name, NE_DEFAULT,
-            totals=totals_pt, niv_rejected=niv_rejected,
-        ),
+        "diagnostics": {
+            **_build_diagnostics(
+                med_fluxes, Te_high_pt if np.isfinite(Te_high_pt) else None,
+                Te_relation, ne_low, ne_mid, ne_high, logU_pt, logU_diag,
+                icf_method, NO_icf_name, NE_DEFAULT,
+                totals=totals_pt, niv_rejected=niv_rejected,
+            ),
+            **_diag_extra,
+        },
         "failures": failures if failures else None,
         "NO_tiers": NO_tiers,
     }
