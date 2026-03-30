@@ -2437,6 +2437,60 @@ def compute_abundances(
                 )
             except Exception:
                 logger.info("Alternative strong-line method failed; skipping.")
+            # If primary used 4363, also compute Te from 1666 as an alternative.
+            f_1666_alt = fluxes.get("OIII_1666", 0.0)
+            f_5007_alt = fluxes.get("OIII_5007", 0.0)
+            f_4959_alt = fluxes.get("OIII_4959", 0.0)
+            if f_1666_alt > 0 and f_5007_alt > 0 and fluxes.get("OIII_4363", 0.0) > 0:
+                from .direct import compute_Te_OIII_1666, Te_low_from_high, compute_ionic_abundances
+                try:
+                    # Run full direct method using 1666 instead of 4363.
+                    # Temporarily zero out 4363 so _run_direct/mcmc picks 1666.
+                    fluxes_1666 = dict(fluxes)
+                    fluxes_1666.pop("OIII_4363", None)
+                    errors_1666 = dict(errors)
+                    errors_1666.pop("OIII_4363", None)
+                    if is_mcmc and posteriors and "OIII_1666" in posteriors:
+                        post_1666 = {k: v for k, v in posteriors.items() if k != "OIII_4363"}
+                        d1666_out = _run_direct_mcmc(
+                            post_1666, Te_relation, n_posterior=n_posterior,
+                            progress=progress, ne_high_max=ne_high_max,
+                            snr_ne=snr_ne, snr_logU=snr_logU,
+                            icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                            niv_rejected=_niv_rejected,
+                            ne_low_override=ne_low_override,
+                            ne_mid_override=ne_mid_override,
+                            ne_high_override=ne_high_override,
+                        )
+                    else:
+                        d1666_out = _run_direct(
+                            fluxes_1666, errors_1666, Te_relation, n_mc,
+                            progress=progress, ne_high_max=ne_high_max,
+                            snr_ne=snr_ne, snr_logU=snr_logU,
+                            icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                            niv_rejected=_niv_rejected,
+                            ne_low_override=ne_low_override,
+                            ne_mid_override=ne_mid_override,
+                            ne_high_override=ne_high_override,
+                        )
+                    alt["direct_1666"] = AbundanceResult(
+                        method="direct (O III] 1666)",
+                        OH=d1666_out["OH"],
+                        OH_err=d1666_out["OH_err"],
+                        NO=d1666_out.get("NO"),
+                        NO_err=d1666_out.get("NO_err"),
+                        CO=d1666_out.get("CO"),
+                        CO_err=d1666_out.get("CO_err"),
+                        Te_high=d1666_out.get("Te_high"),
+                        Te_high_err=d1666_out.get("Te_high_err"),
+                        Te_low=d1666_out.get("Te_low"),
+                        Av=Av_derived,
+                        Av_err=Av_err_derived,
+                        ionic=d1666_out.get("ionic"),
+                        failures=d1666_out.get("failures"),
+                    )
+                except Exception as e:
+                    logger.info("Alternative direct (1666) method failed: %s", e)
         elif primary_result.method == "strong_line":
             # Also try direct if 4363 is present (even if SNR was below threshold).
             has_auroral_alt = (

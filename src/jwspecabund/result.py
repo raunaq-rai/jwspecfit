@@ -335,6 +335,9 @@ class AbundanceResult:
                 if alt.ratios_used:
                     lines.append(f"    Ratios used = {alt.ratios_used}")
                 if alt.Te_high is not None:
-                    lines.append(f"    T_e(high)   = {alt.Te_high:.0f} K")
+                    if alt.Te_high_err is not None:
+                        lines.append(f"    T_e(high)   = {alt.Te_high:.0f} +/- {alt.Te_high_err} K")
+                    else:
+                        lines.append(f"    T_e(high)   = {alt.Te_high:.0f} K")
 
         return "\n".join(lines)
