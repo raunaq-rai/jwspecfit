@@ -2440,17 +2440,18 @@ def compute_abundances(
             # If primary used 4363, also compute Te from 1666 as an alternative.
             f_1666_alt = fluxes.get("OIII_1666", 0.0)
             f_5007_alt = fluxes.get("OIII_5007", 0.0)
-            f_4959_alt = fluxes.get("OIII_4959", 0.0)
-            if f_1666_alt > 0 and f_5007_alt > 0 and fluxes.get("OIII_4363", 0.0) > 0:
+            _has_1666_posterior = is_mcmc and posteriors and "OIII_1666" in posteriors
+            _has_1666_flux = f_1666_alt > 0 and f_5007_alt > 0
+            if _has_1666_flux and fluxes.get("OIII_4363", 0.0) > 0:
                 from .direct import compute_Te_OIII_1666, Te_low_from_high, compute_ionic_abundances
                 try:
                     # Run full direct method using 1666 instead of 4363.
-                    # Temporarily zero out 4363 so _run_direct/mcmc picks 1666.
+                    # Remove 4363 so _run_direct/mcmc picks 1666.
                     fluxes_1666 = dict(fluxes)
                     fluxes_1666.pop("OIII_4363", None)
                     errors_1666 = dict(errors)
                     errors_1666.pop("OIII_4363", None)
-                    if is_mcmc and posteriors and "OIII_1666" in posteriors:
+                    if _has_1666_posterior:
                         post_1666 = {k: v for k, v in posteriors.items() if k != "OIII_4363"}
                         d1666_out = _run_direct_mcmc(
                             post_1666, Te_relation, n_posterior=n_posterior,
@@ -2463,6 +2464,7 @@ def compute_abundances(
                             ne_high_override=ne_high_override,
                         )
                     else:
+                        # No 1666 posterior — use MC on point-estimate fluxes.
                         d1666_out = _run_direct(
                             fluxes_1666, errors_1666, Te_relation, n_mc,
                             progress=progress, ne_high_max=ne_high_max,
@@ -2473,22 +2475,50 @@ def compute_abundances(
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
                         )
-                    alt["direct_1666"] = AbundanceResult(
-                        method="direct (O III] 1666)",
-                        OH=d1666_out["OH"],
-                        OH_err=d1666_out["OH_err"],
-                        NO=d1666_out.get("NO"),
-                        NO_err=d1666_out.get("NO_err"),
-                        CO=d1666_out.get("CO"),
-                        CO_err=d1666_out.get("CO_err"),
-                        Te_high=d1666_out.get("Te_high"),
-                        Te_high_err=d1666_out.get("Te_high_err"),
-                        Te_low=d1666_out.get("Te_low"),
-                        Av=Av_derived,
-                        Av_err=Av_err_derived,
-                        ionic=d1666_out.get("ionic"),
-                        failures=d1666_out.get("failures"),
-                    )
+                    # Check if the result is valid (not all NaN).
+                    oh_1666 = d1666_out.get("OH")
+                    if oh_1666 is not None and np.isfinite(oh_1666):
+                        alt["direct_1666"] = AbundanceResult(
+                            method="direct (O III] 1666)",
+                            OH=d1666_out["OH"],
+                            OH_err=d1666_out["OH_err"],
+                            NO=d1666_out.get("NO"),
+                            NO_err=d1666_out.get("NO_err"),
+                            CO=d1666_out.get("CO"),
+                            CO_err=d1666_out.get("CO_err"),
+                            Te_high=d1666_out.get("Te_high"),
+                            Te_high_err=d1666_out.get("Te_high_err"),
+                            Te_low=d1666_out.get("Te_low"),
+                            Av=Av_derived,
+                            Av_err=Av_err_derived,
+                            ionic=d1666_out.get("ionic"),
+                            failures=d1666_out.get("failures"),
+                        )
+                    else:
+                        # MC/posterior path failed — compute point estimate.
+                        from .direct import compute_Te_OIII_1666 as _Te1666
+                        Te_1666_pt = _Te1666(f_1666_alt, f_5007_alt,
+                                             fluxes.get("OIII_4959", 0.0),
+                                             primary_result.ne_high or 300)
+                        Te_1666_low = Te_low_from_high(Te_1666_pt, relation=Te_relation)
+                        ionic_1666 = compute_ionic_abundances(
+                            fluxes, Te_1666_pt, Te_1666_low,
+                            primary_result.ne_low or 300,
+                            ne_mid=primary_result.ne_mid,
+                            ne_high=primary_result.ne_high,
+                        )
+                        OH_1666 = ionic_1666.get("O+/H+", 0.0) + ionic_1666.get("O++/H+", 0.0)
+                        OH_1666_12 = 12.0 + np.log10(OH_1666) if OH_1666 > 0 else np.nan
+                        alt["direct_1666"] = AbundanceResult(
+                            method="direct (O III] 1666)",
+                            OH=OH_1666_12,
+                            OH_err=np.nan,
+                            Te_high=Te_1666_pt,
+                            Te_low=Te_1666_low,
+                            Av=Av_derived,
+                            Av_err=Av_err_derived,
+                            ionic=ionic_1666,
+                        )
                 except Exception as e:
                     logger.info("Alternative direct (1666) method failed: %s", e)
         elif primary_result.method == "strong_line":
