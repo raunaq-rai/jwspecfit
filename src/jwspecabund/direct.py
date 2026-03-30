@@ -292,12 +292,21 @@ def compute_Te_OIII_1666(
         return e_1666 / (e_5007 + e_4959) - observed_ratio
 
     try:
-        log_Te = brentq(_ratio_minus_obs, 3.5, 5.0, xtol=1e-6)
+        log_Te = brentq(_ratio_minus_obs, 3.5, 5.4, xtol=1e-6)
         Te = 10.0 ** log_Te
     except ValueError:
+        # Check if the ratio exceeds the physical maximum.
+        max_ratio = -_ratio_minus_obs(5.4) + observed_ratio
+        if observed_ratio > max_ratio:
+            raise ValueError(
+                f"O III] 1666/(5007+4959)={observed_ratio:.6f} exceeds the "
+                f"physical maximum ({max_ratio:.6f}) at ne={ne:.0f} cm^-3. "
+                f"This can happen when dust correction over-inflates the UV "
+                f"flux relative to optical. Consider using [OIII] 4363 instead."
+            )
         raise ValueError(
             f"Could not solve T_e for O III] 1666/(5007+4959)={observed_ratio:.6f}. "
-            f"Ratio may be outside the valid temperature range (3000–100000 K)."
+            f"Ratio may be outside the valid temperature range (3000–250000 K)."
         )
 
     if np.isnan(Te) or Te <= 0:
