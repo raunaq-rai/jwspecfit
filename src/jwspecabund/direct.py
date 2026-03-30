@@ -238,6 +238,76 @@ def compute_Te_OIII(
     return float(Te)
 
 
+def compute_Te_OIII_1666(
+    flux_1666: float,
+    flux_5007: float,
+    flux_4959: float,
+    ne: float,
+) -> float:
+    """Compute T_e(O++) from the [OIII] UV/optical ratio 1666/(5007+4959).
+
+    Uses the O III] 1666 Å intercombination line (5→2 transition) as a
+    UV auroral diagnostic when [OIII] 4363 is unavailable or low-SNR.
+    The emissivity ratio 1666/(5007+4959) is monotonically increasing
+    with T_e and more temperature-sensitive than 4363/(5007+4959) due
+    to the larger energy gap (7.5 eV vs 2.8 eV).
+
+    Parameters
+    ----------
+    flux_1666 : float
+        O III] 1666 flux (dust-corrected).
+    flux_5007 : float
+        [OIII] 5007 flux (dust-corrected).
+    flux_4959 : float
+        [OIII] 4959 flux (dust-corrected).
+    ne : float
+        Electron density in cm^-3.
+
+    Returns
+    -------
+    float
+        T_e(O++) in K.
+    """
+    from scipy.optimize import brentq
+
+    pn = _get_pyneb()
+
+    nebular = flux_5007 + flux_4959
+    if nebular <= 0:
+        raise ValueError("[OIII] nebular flux (5007+4959) is non-positive.")
+    if flux_1666 <= 0:
+        raise ValueError("O III] 1666 flux is non-positive.")
+
+    observed_ratio = flux_1666 / nebular
+
+    atom = pn.Atom("O", 3)
+
+    def _ratio_minus_obs(log_Te: float) -> float:
+        Te = 10.0 ** log_Te
+        e_1666 = atom.getEmissivity(Te, ne, lev_i=5, lev_j=2)
+        e_5007 = atom.getEmissivity(Te, ne, wave=5007)
+        e_4959 = atom.getEmissivity(Te, ne, wave=4959)
+        if e_5007 + e_4959 <= 0:
+            return -observed_ratio
+        return e_1666 / (e_5007 + e_4959) - observed_ratio
+
+    try:
+        log_Te = brentq(_ratio_minus_obs, 3.5, 5.0, xtol=1e-6)
+        Te = 10.0 ** log_Te
+    except ValueError:
+        raise ValueError(
+            f"Could not solve T_e for O III] 1666/(5007+4959)={observed_ratio:.6f}. "
+            f"Ratio may be outside the valid temperature range (3000–100000 K)."
+        )
+
+    if np.isnan(Te) or Te <= 0:
+        raise ValueError(
+            f"Invalid T_e from O III] 1666/(5007+4959)={observed_ratio:.6f}."
+        )
+
+    return float(Te)
+
+
 def compute_Te_NII(
     flux_5756: float,
     flux_6585: float,

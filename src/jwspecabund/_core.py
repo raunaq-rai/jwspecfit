@@ -1133,6 +1133,7 @@ def _run_direct(
         Te_low_from_high,
         compute_ionic_abundances,
         compute_Te_OIII,
+        compute_Te_OIII_1666,
         compute_total_abundances,
     )
     from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
@@ -1153,9 +1154,27 @@ def _run_direct(
         logger.info("n_e(high) overridden to %.0f cm^-3.", ne_high)
 
     # --- Step 2: Electron temperature with zone-appropriate ne ---
-    Te_high = compute_Te_OIII(
-        fluxes["OIII_4363"], fluxes["OIII_5007"], fluxes["OIII_4959"], ne_high
-    )
+    # Try [OIII] 4363 first; fall back to O III] 1666 if 4363 is missing.
+    _Te_diagnostic = None
+    Te_high = None
+    f_4363 = fluxes.get("OIII_4363", 0.0)
+    f_5007 = fluxes.get("OIII_5007", 0.0)
+    f_4959 = fluxes.get("OIII_4959", 0.0)
+    f_1666 = fluxes.get("OIII_1666", 0.0)
+    if f_4363 > 0 and f_5007 > 0:
+        Te_high = compute_Te_OIII(f_4363, f_5007, f_4959, ne_high)
+        _Te_diagnostic = "4363"
+    elif f_1666 > 0 and f_5007 > 0:
+        Te_high = compute_Te_OIII_1666(f_1666, f_5007, f_4959, ne_high)
+        _Te_diagnostic = "1666"
+        logger.info(
+            "[OIII] 4363 not available; using O III] 1666/(5007+4959) "
+            "for T_e(high) = %.0f K.", Te_high,
+        )
+    else:
+        raise ValueError(
+            "Neither [OIII] 4363 nor O III] 1666 available for T_e computation."
+        )
     Te_low = Te_low_from_high(Te_high, relation=Te_relation)
 
     # --- Step 3: Ionic abundances with zone-appropriate ne ---
@@ -1252,12 +1271,21 @@ def _run_direct(
         try:
             # Use fixed ne (varying ne per MC iteration adds noise
             # without improving accuracy for the density diagnostics).
-            Te_h = compute_Te_OIII(
-                mc_fluxes.get("OIII_4363", 0),
-                mc_fluxes.get("OIII_5007", 0),
-                mc_fluxes.get("OIII_4959", 0),
-                ne_high,
-            )
+            # Use the same Te diagnostic as the point estimate.
+            if _Te_diagnostic == "4363":
+                Te_h = compute_Te_OIII(
+                    mc_fluxes.get("OIII_4363", 0),
+                    mc_fluxes.get("OIII_5007", 0),
+                    mc_fluxes.get("OIII_4959", 0),
+                    ne_high,
+                )
+            else:
+                Te_h = compute_Te_OIII_1666(
+                    mc_fluxes.get("OIII_1666", 0),
+                    mc_fluxes.get("OIII_5007", 0),
+                    mc_fluxes.get("OIII_4959", 0),
+                    ne_high,
+                )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
             ionic_mc = compute_ionic_abundances(
                 mc_fluxes, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
@@ -1482,6 +1510,7 @@ def _run_direct_mcmc(
         Te_low_from_high,
         compute_ionic_abundances,
         compute_Te_OIII,
+        compute_Te_OIII_1666,
         compute_total_abundances,
     )
     from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
@@ -1522,13 +1551,31 @@ def _run_direct_mcmc(
         ne_high = ne_high_override
 
     # Point estimate: logU and Z_Zsun from medians.
+    # Try 4363 first; fall back to 1666 if unavailable.
+    _Te_diagnostic = None
     try:
-        Te_high_pt = compute_Te_OIII(
-            med_fluxes.get("OIII_4363", 0),
-            med_fluxes.get("OIII_5007", 0),
-            med_fluxes.get("OIII_4959", 0),
-            ne_high,
-        )
+        if med_fluxes.get("OIII_4363", 0) > 0:
+            Te_high_pt = compute_Te_OIII(
+                med_fluxes.get("OIII_4363", 0),
+                med_fluxes.get("OIII_5007", 0),
+                med_fluxes.get("OIII_4959", 0),
+                ne_high,
+            )
+            _Te_diagnostic = "4363"
+        elif med_fluxes.get("OIII_1666", 0) > 0:
+            Te_high_pt = compute_Te_OIII_1666(
+                med_fluxes.get("OIII_1666", 0),
+                med_fluxes.get("OIII_5007", 0),
+                med_fluxes.get("OIII_4959", 0),
+                ne_high,
+            )
+            _Te_diagnostic = "1666"
+            logger.info(
+                "[OIII] 4363 not available; using O III] 1666 for T_e(high) = %.0f K.",
+                Te_high_pt,
+            )
+        else:
+            Te_high_pt = np.nan
     except ValueError:
         Te_high_pt = np.nan
     Te_low_pt = Te_low_from_high(Te_high_pt, relation=Te_relation) if np.isfinite(Te_high_pt) else np.nan
@@ -1581,12 +1628,20 @@ def _run_direct_mcmc(
     for i in tqdm(range(n_samples), desc="Direct Te (posterior)", disable=not progress):
         sample = {name: max(float(post[i]), 1e-50) for name, post in posteriors.items()}
         try:
-            Te_h = compute_Te_OIII(
-                sample.get("OIII_4363", 0),
-                sample.get("OIII_5007", 0),
-                sample.get("OIII_4959", 0),
-                ne_high,
-            )
+            if _Te_diagnostic == "4363":
+                Te_h = compute_Te_OIII(
+                    sample.get("OIII_4363", 0),
+                    sample.get("OIII_5007", 0),
+                    sample.get("OIII_4959", 0),
+                    ne_high,
+                )
+            else:
+                Te_h = compute_Te_OIII_1666(
+                    sample.get("OIII_1666", 0),
+                    sample.get("OIII_5007", 0),
+                    sample.get("OIII_4959", 0),
+                    ne_high,
+                )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
             ionic_i = compute_ionic_abundances(
                 sample, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
@@ -2118,16 +2173,26 @@ def compute_abundances(
     elif method == "forward":
         use_forward = True
     elif method == "auto":
-        # Check if [OIII] 4363 has sufficient SNR.
+        # Check if [OIII] 4363 or O III] 1666 has sufficient SNR for direct method.
+        has_auroral = False
         if "OIII_4363" in fluxes and "OIII_4363" in errors:
             snr_4363 = fluxes["OIII_4363"] / errors["OIII_4363"] if errors["OIII_4363"] > 0 else 0.0
             if snr_4363 >= snr_auroral:
-                use_direct = True
+                has_auroral = True
                 logger.info("[OIII] 4363 SNR=%.1f >= %.1f; using direct method.", snr_4363, snr_auroral)
             else:
-                logger.info("[OIII] 4363 SNR=%.1f < %.1f; using strong-line method.", snr_4363, snr_auroral)
+                logger.info("[OIII] 4363 SNR=%.1f < %.1f.", snr_4363, snr_auroral)
+        if not has_auroral and "OIII_1666" in fluxes and "OIII_1666" in errors:
+            snr_1666 = fluxes["OIII_1666"] / errors["OIII_1666"] if errors["OIII_1666"] > 0 else 0.0
+            if snr_1666 >= snr_auroral:
+                has_auroral = True
+                logger.info("O III] 1666 SNR=%.1f >= %.1f; using direct method (UV auroral).", snr_1666, snr_auroral)
+            else:
+                logger.info("O III] 1666 SNR=%.1f < %.1f.", snr_1666, snr_auroral)
+        if has_auroral:
+            use_direct = True
         else:
-            logger.info("[OIII] 4363 not detected; using strong-line method.")
+            logger.info("No auroral line available; using strong-line method.")
     elif method != "strong_line":
         raise ValueError(
             f"Unknown method: {method!r}. "
@@ -2271,10 +2336,13 @@ def compute_abundances(
                 logger.info("Alternative strong-line method failed; skipping.")
         elif primary_result.method == "strong_line":
             # Also try direct if 4363 is present (even if SNR was below threshold).
-            has_4363 = "OIII_4363" in fluxes and fluxes.get("OIII_4363", 0) > 0
-            if has_4363:
+            has_auroral_alt = (
+                ("OIII_4363" in fluxes and fluxes.get("OIII_4363", 0) > 0)
+                or ("OIII_1666" in fluxes and fluxes.get("OIII_1666", 0) > 0)
+            )
+            if has_auroral_alt:
                 try:
-                    if is_mcmc and posteriors and "OIII_4363" in posteriors:
+                    if is_mcmc and posteriors and ("OIII_4363" in posteriors or "OIII_1666" in posteriors):
                         d_out = _run_direct_mcmc(
                             posteriors, Te_relation, n_posterior=n_posterior,
                             progress=progress, ne_high_max=ne_high_max,

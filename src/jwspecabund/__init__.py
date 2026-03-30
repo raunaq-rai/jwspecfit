@@ -41,6 +41,7 @@ from .direct import (
     compute_ne_NIV,
     compute_Te_NII,
     compute_Te_OIII,
+    compute_Te_OIII_1666,
     compute_total_abundances,
 )
 from .martinez25_icf import (
@@ -74,6 +75,7 @@ __all__ = [
     "compute_NO_martinez25",
     "compute_Te_NII",
     "compute_Te_OIII",
+    "compute_Te_OIII_1666",
     "compute_total_abundances",
     "dust_correct_fluxes",
     "forward_model",
