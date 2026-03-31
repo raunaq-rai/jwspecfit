@@ -1239,6 +1239,7 @@ def _run_direct(
     failures = totals.pop("_failures", {})
     failures.update(ne_failures)
     NO_tiers = totals.pop("_NO_tiers", None)
+    icf_values = totals.pop("_icf_values", None)
 
     # --- Build diagnostics dict ---
     diagnostics = _build_diagnostics(
@@ -1499,6 +1500,7 @@ def _run_direct(
         "diagnostics": diagnostics,
         "failures": failures if failures else None,
         "NO_tiers": NO_tiers,
+        "icf_values": icf_values,
     }
 
 
@@ -1671,6 +1673,7 @@ def _run_direct_mcmc(
     failures = totals_pt.pop("_failures", {})
     failures.update(ne_failures)
     NO_tiers = totals_pt.pop("_NO_tiers", None)
+    icf_values = totals_pt.pop("_icf_values", None)
     # Collect per-tier N/O posteriors for uncertainty on each method.
     _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
     NO_tier_post: dict[str, list[float]] = {k: [] for k in _tier_keys}
@@ -1910,6 +1913,7 @@ def _run_direct_mcmc(
         },
         "failures": failures if failures else None,
         "NO_tiers": NO_tiers,
+        "icf_values": icf_values,
     }
 
 
@@ -2404,6 +2408,7 @@ def compute_abundances(
             NO_icf_name=direct_out.get("NO_icf_name"),
             excluded_lines=excluded_lines if excluded_lines else None,
             NO_tiers=direct_out.get("NO_tiers"),
+            icf_values=direct_out.get("icf_values"),
             failures=direct_out.get("failures"),
             diagnostics=direct_out.get("diagnostics"),
         )

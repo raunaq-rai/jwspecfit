@@ -806,6 +806,7 @@ def compute_total_abundances(
 
     totals: dict[str, float] = {}
     failures: dict[str, str] = {}
+    icf_dict: dict[str, dict] = {}
 
     O_plus = ionic.get("O+/H+", 0.0)
     O_pp = ionic.get("O++/H+", 0.0)
@@ -837,6 +838,11 @@ def compute_total_abundances(
                 totals["N/O"] = (N_plus + N_pp + N_ppp + N_pppp) / OH
                 totals["icf_method"] = "direct_sum"
                 totals["NO_icf_name"] = "Np_Npp_Nppp"
+                icf_dict["N/O"] = {
+                    "icf": 1.0, "method": "direct sum (no ICF)",
+                    "raw": np.log10(totals["N/O"]) if totals["N/O"] > 0 else None,
+                    "corrected": np.log10(totals["N/O"]) if totals["N/O"] > 0 else None,
+                }
             elif (N_pp + N_ppp) > 0 and O_pp > 0:
                 # Tier 2/3: UV only — Yanagisawa+25 / Cameron+23
                 totals["N/O"] = (N_pp + N_ppp + N_pppp) / O_pp
@@ -847,12 +853,23 @@ def compute_total_abundances(
                     totals["NO_icf_name"] = "Nppp_Opp"
                 else:
                     totals["NO_icf_name"] = "Npp_Opp"
+                icf_dict["N/O"] = {
+                    "icf": 1.0, "method": "direct sum UV (no ICF)",
+                    "raw": np.log10(totals["N/O"]) if totals["N/O"] > 0 else None,
+                    "corrected": np.log10(totals["N/O"]) if totals["N/O"] > 0 else None,
+                }
             elif N_plus > 0 and O_plus > 0:
                 # Tier 4: optical fallback — Izotov+06
                 icf_n = icf_nitrogen(O_plus, OH)
-                totals["N/O"] = icf_n * N_plus / O_plus
+                raw_no_iz = N_plus / O_plus
+                totals["N/O"] = icf_n * raw_no_iz
                 totals["icf_method"] = "izotov06"
                 totals["NO_icf_name"] = "izotov06_fallback"
+                icf_dict["N/O"] = {
+                    "icf": icf_n, "method": "Izotov+06",
+                    "raw": np.log10(raw_no_iz) if raw_no_iz > 0 else None,
+                    "corrected": np.log10(totals["N/O"]) if totals["N/O"] > 0 else None,
+                }
 
         # N/O — Martinez+25 with direct_sum fallback
         elif use_martinez:
@@ -875,6 +892,39 @@ def compute_total_abundances(
                 totals["N/O"] = NO_val
                 totals["NO_icf_name"] = NO_icf_name
                 totals["icf_method"] = "martinez25"
+            # Store N/O ICF value for the selected tier.
+            if NO_val is not None and NO_icf_name is not None:
+                _icf_key_map = {
+                    "NppNppp_Opp": "_icf5_value",
+                    "NpNpp_OpOpp": "_icf4_value",
+                    "NpppOpp": "_icf3_value",
+                    "NppOpp": "_icf2_value",
+                    "NpOp": "_icf1_value",
+                }
+                # Compute raw ionic ratio (without ICF)
+                _raw_NO = NO_val  # NO_val already = raw * icf
+                # Get the ICF value from the tiers if available later,
+                # or compute it now from the ICF functions.
+                _no_icf_funcs = {
+                    "NppNppp_Opp": lambda: (
+                        (ionic.get("N++/H+", 0) + ionic.get("N+++/H+", 0)) / O_pp if O_pp > 0 else 0
+                    ),
+                    "NpOp": lambda: ionic.get("N+/H+", 0) / O_plus if O_plus > 0 else 0,
+                    "NppOpp": lambda: ionic.get("N++/H+", 0) / O_pp if O_pp > 0 else 0,
+                    "NpppOpp": lambda: ionic.get("N+++/H+", 0) / O_pp if O_pp > 0 else 0,
+                    "NpNpp_OpOpp": lambda: (
+                        (ionic.get("N+/H+", 0) + ionic.get("N++/H+", 0)) / (O_plus + O_pp)
+                        if (O_plus + O_pp) > 0 else 0
+                    ),
+                }
+                raw_ratio = _no_icf_funcs.get(NO_icf_name, lambda: 0)()
+                if raw_ratio > 0 and NO_val > 0:
+                    icf_no = NO_val / raw_ratio
+                    icf_dict["N/O"] = {
+                        "icf": icf_no, "method": f"Martinez+25 ({NO_icf_name})",
+                        "raw": np.log10(raw_ratio),
+                        "corrected": np.log10(NO_val),
+                    }
             elif _lock_NO_icf is None and NO_val is None:
                 # Fall back to direct_sum tiers if Martinez+25 has no
                 # suitable ionic ratios (e.g. nitrogen ions SNR-gated).
@@ -1017,7 +1067,13 @@ def compute_total_abundances(
         if S_plus > 0 or S_pp > 0:
             S_total_ion = S_plus + S_pp
             icf_s = icf_sulfur(O_plus, OH)
+            raw_so = S_total_ion / OH if OH > 0 else 0
             totals["S/O"] = icf_s * S_total_ion / OH
+            icf_dict["S/O"] = {
+                "icf": icf_s, "method": "Izotov+06",
+                "raw": np.log10(raw_so) if raw_so > 0 else None,
+                "corrected": np.log10(totals["S/O"]) if totals["S/O"] > 0 else None,
+            }
         else:
             failures["S/O"] = "no S+ or S++ ions detected ([SII]/[SIII] missing)"
 
@@ -1025,7 +1081,13 @@ def compute_total_abundances(
         Ne_pp = ionic.get("Ne++/H+", 0.0)
         if Ne_pp > 0 and O_pp > 0:
             icf_ne = icf_neon(O_plus, OH)
-            totals["Ne/O"] = icf_ne * Ne_pp / O_pp
+            raw_neo = Ne_pp / O_pp
+            totals["Ne/O"] = icf_ne * raw_neo
+            icf_dict["Ne/O"] = {
+                "icf": icf_ne, "method": "Izotov+06",
+                "raw": np.log10(raw_neo) if raw_neo > 0 else None,
+                "corrected": np.log10(totals["Ne/O"]) if totals["Ne/O"] > 0 else None,
+            }
         elif Ne_pp <= 0:
             failures["Ne/O"] = "no Ne++ ion detected ([NeIII] 3869 missing)"
         else:
@@ -1035,7 +1097,13 @@ def compute_total_abundances(
         Ar_pp = ionic.get("Ar++/H+", 0.0)
         if Ar_pp > 0 and O_pp > 0:
             icf_ar = icf_argon(O_plus, OH)
-            totals["Ar/O"] = icf_ar * Ar_pp / O_pp
+            raw_aro = Ar_pp / O_pp
+            totals["Ar/O"] = icf_ar * raw_aro
+            icf_dict["Ar/O"] = {
+                "icf": icf_ar, "method": "Izotov+06",
+                "raw": np.log10(raw_aro) if raw_aro > 0 else None,
+                "corrected": np.log10(totals["Ar/O"]) if totals["Ar/O"] > 0 else None,
+            }
         elif Ar_pp <= 0:
             failures["Ar/O"] = "no Ar++ ion detected ([ArIII] 7136 missing)"
         else:
@@ -1056,9 +1124,15 @@ def compute_total_abundances(
         elif C_uv > 0 and O_pp > 0:
             # Apply Garnett+1997 ICF to correct for missing C+
             icf_c = icf_carbon(O_plus, O_pp)
-            totals["C/O"] = icf_c * C_uv / O_pp
+            raw_co = C_uv / O_pp
+            totals["C/O"] = icf_c * raw_co
             totals["CO_method"] = "garnett97_icf"
             totals["CO_icf_value"] = icf_c
+            icf_dict["C/O"] = {
+                "icf": icf_c, "method": "Garnett+97",
+                "raw": np.log10(raw_co) if raw_co > 0 else None,
+                "corrected": np.log10(totals["C/O"]) if totals["C/O"] > 0 else None,
+            }
         elif C_uv <= 0 and C_p <= 0:
             failures["C/O"] = "no carbon ions detected (CII]/CIII]/CIV missing)"
         else:
@@ -1073,4 +1147,6 @@ def compute_total_abundances(
             totals["N/O_UV_raw"] = N_uv / O_pp
 
     totals["_failures"] = failures
+    if icf_dict:
+        totals["_icf_values"] = icf_dict
     return totals

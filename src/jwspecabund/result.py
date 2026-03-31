@@ -102,6 +102,7 @@ class AbundanceResult:
     ionic_upper_limits: dict[str, float] | None = field(default=None, repr=False)
     ionic_ul_details: dict[str, dict] | None = field(default=None, repr=False)
     NO_tiers: dict[str, float] | None = field(default=None, repr=False)
+    icf_values: dict[str, dict] | None = field(default=None, repr=False)
     failures: dict[str, str] | None = field(default=None, repr=False)
     diagnostics: dict[str, str] | None = field(default=None, repr=False)
     alt_results: dict[str, AbundanceResult] | None = field(default=None, repr=False)
@@ -183,6 +184,25 @@ class AbundanceResult:
             lines.append(f"  ICF method  = {self.icf_method}")
         if self.NO_icf_name is not None:
             lines.append(f"  N/O ICF     = {self.NO_icf_name}")
+
+        # --- ICF values ---
+        if self.icf_values:
+            lines.append("")
+            lines.append("Ionisation correction factors:")
+            for ratio_name, info in self.icf_values.items():
+                icf_val = info.get("icf", 1.0)
+                raw = info.get("raw")
+                corrected = info.get("corrected")
+                method = info.get("method", "")
+                if raw is not None and corrected is not None:
+                    delta = corrected - raw
+                    lines.append(
+                        f"  {ratio_name}: ICF = {icf_val:.4f} ({method})"
+                        f"  raw = {raw:.3f}  →  corrected = {corrected:.3f}"
+                        f"  (Δ = {delta:+.3f} dex)"
+                    )
+                else:
+                    lines.append(f"  {ratio_name}: ICF = {icf_val:.4f} ({method})")
 
         # --- Ionic abundances ---
         if self.ionic:
