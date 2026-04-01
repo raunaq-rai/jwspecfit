@@ -86,7 +86,27 @@ Two laws are implemented:
   Default parameters: R_V = 3.15, delta = -0.35, bump strength
   B = 2.27.
 
-### 2.3 Dust correction of line fluxes
+### 2.3 Multi-Balmer A_V
+
+When multiple Balmer lines are detected (Hgamma through H10), individual
+A_V values are derived from each line's ratio to Hbeta and combined as
+an SNR-weighted average via `compute_Av_multi_balmer()`.  The weights
+are the inverse-variance of each A_V estimate.
+
+**Excluded lines** (blended at typical NIRSpec resolution):
+- Hepsilon (3971 Å): blended with [NeIII] 3968 Å (Δλ = 3 Å)
+- H8 (3890 Å): blended with HeI 3889 Å (Δλ = 0.4 Å)
+
+**Included lines:**
+
+| Line | λ_rest (Å) | Intrinsic ratio to Hβ |
+|------|-----------|----------------------|
+| Hgamma | 4342.90 | 0.468 |
+| Hdelta | 4102.89 | 0.259 |
+| H9 | 3836.48 | 0.0731 |
+| H10 | 3799.00 | 0.0530 |
+
+### 2.4 Dust correction of line fluxes
 
 Each emission-line flux is corrected using:
 
@@ -96,7 +116,7 @@ F_corr = F_obs × 10^(0.4 × A_lambda)
 
 where A_lambda = A_V × f(lambda) from the chosen attenuation law.
 
-### 2.4 Error propagation
+### 2.5 Error propagation
 
 The uncertainty on A_V is propagated from the fractional error on the
 observed ratio:
@@ -129,7 +149,27 @@ root-finding (`log=True`, `start_x=3.0`, `end_x=5.0`) to ensure
 convergence at T_e > 25,000 K, which is typical of metal-poor high-z
 galaxies.
 
-### 3.2 Secondary diagnostic: [NII] auroral-to-nebular ratio
+### 3.2 UV fallback diagnostic: O III] 1666 / ([OIII] 5007 + 4959)
+
+When [OIII] 4363 is unavailable or has insufficient SNR, the O III]
+1666 Å intercombination line provides an alternative T_e diagnostic:
+
+```
+R_1666 = O III] 1666 / ([OIII] 5007 + [OIII] 4959)
+```
+
+The 1666 Å line arises from the 5→2 transition with a 7.5 eV energy
+gap (compared to 2.8 eV for 4363), making this ratio more
+temperature-sensitive.  PyNEB's `Atom("O", 3).getTemDen()` is used
+with `to_eval="(L(1666))/(L(5007)+L(4959))"` and solver range
+extended to 250,000 K (`start_x=3.0, end_x=5.4`).  The ratio is
+monotonically increasing with T_e, so the solution is unique.
+
+This diagnostic is automatically used as a fallback in
+`compute_abundances()` when [OIII] 4363 is not detected but O III]
+1666 and the [OIII] 5007+4959 nebular lines are available.
+
+### 3.3 Secondary diagnostic: [NII] auroral-to-nebular ratio
 
 When [NII] 5756 is detected, T_e(N+) is computed from:
 
@@ -139,7 +179,7 @@ R_NII = [NII] 5756 / [NII] 6585
 
 using PyNEB's `Atom("N", 2).getTemDen()`.
 
-### 3.3 T_e–T_e relations for zone temperatures
+### 3.4 T_e–T_e relations for zone temperatures
 
 A single auroral line measures T_e in one ionisation zone.  Empirical
 relations map T_e(O2+) (the high zone) to the intermediate and low
@@ -386,17 +426,45 @@ Note that CIV can have both stellar wind and nebular components.
 Only the nebular component should be used; broad stellar P Cygni
 profiles must be excluded.
 
-### 7.3 Total C/O (Jones et al. 2023)
+### 7.3 C+ from CII] 2326
 
-The C/O ratio is computed as a direct ionic sum without ICF:
+| Parameter | Value |
+|-----------|-------|
+| Lines | CII] 2324 + CII] 2326 (multiplet sum) |
+| PyNEB ion | `Atom("C", 2)`, waves=[2323, 2325, 2326, 2327, 2328] |
+| Zone | T_low, n_e,low |
+
+The CII] λ2326 multiplet (five components from 2323 to 2328 Å) traces
+C+ in the low-ionisation zone.  When detected, the C+ ionic abundance
+is included in the carbon budget.
+
+### 7.4 Total C/O
+
+Two paths are available depending on whether C+ is detected:
+
+**With CII] 2326 (Garnett+1997 ICF):**
+
+When C+ is detected, the total C/O is computed using the Garnett (1997)
+ionisation correction factor:
+
+```
+C/O = ICF_C × (C2+/H+ + C3+/H+) / O2+/H+
+ICF_C = (O+ + O2+) / O2+
+```
+
+This corrects for any remaining unobserved carbon ions by assuming the
+carbon and oxygen ionisation structures are similar.
+
+**Without CII] 2326 (Jones et al. 2023):**
+
+When C+ is not detected, C/O is computed as a direct ionic sum:
 
 ```
 C/O = (C2+/H+ + C3+/H+) / (O2+/H+)
 ```
 
-This assumes that C2+ and C3+ together account for essentially all
-carbon in the O2+ zone, following the approach of Jones et al. (2023).
-No optical carbon lines are available, so C/O is purely UV-derived.
+This assumes that C2+ and C3+ account for essentially all carbon in the
+O2+ zone, following Jones et al. (2023).
 
 
 ---
@@ -713,6 +781,7 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 | Cullen, F. et al., 2025, (EXCELS) | Bayesian forward model for emission-line abundances |
 | DESI Collaboration, 2026, arXiv:2601.02463 | Updated T_e–T_e relation: T_low = 0.648 × T_high + 3270 |
 | Garnett, D. R., 1992, AJ, 103, 1330 | Classical T_e–T_e relations for intermediate/low zones |
+| Garnett, D. R. et al., 1997, ApJ, 489, 63 | C/O ionisation correction factor: ICF_C = (O+ + O++)/O++ |
 | Izotov, Y. I. et al., 2006, A&A, 448, 955 | ICF equations 18–23 for N, Ne, S, Ar |
 | Jones, T. et al., 2023 | C/O from direct ionic sum: (C2+ + C3+) / O2+ |
 | Martinez, M. A., Berg, D. A. et al., 2025, arXiv:2510.21960 | Density-dependent ICFs and log(U) diagnostics |
@@ -735,6 +804,7 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 | N2+ | NIII] 1749+1752 | High | T_high | n_e,high |
 | N3+ | NIV] 1483+1486 | High | T_high | n_e,high |
 | N4+ | NV 1239+1243 | High | T_high | n_e,high |
+| C+ | CII] 2324+2326 | Low | T_low | n_e,low |
 | C2+ | CIII] 1907+1909 | High | T_high | n_e,high |
 | C3+ | CIV 1548+1551 | High | T_high | n_e,high |
 | S+ | [SII] 6718+6732 | Low | T_low | n_e,low |

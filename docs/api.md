@@ -27,8 +27,8 @@ For tutorials, see the [README](../README.md).
 | Module | Description |
 |--------|-------------|
 | `__init__` | Public API: `fit_lines()`, `fit_with_broad()`, plotting wrappers |
-| `_engine` | MCMC fitting engine (emcee / nautilus backends) |
-| `samplers` | `run_emcee()`, `run_nautilus()` sampler wrappers |
+| `_engine` | MCMC fitting engine (NUTS / emcee / nautilus backends) |
+| `samplers` | `run_nuts()`, `run_emcee()`, `run_nautilus()` sampler wrappers |
 | `likelihood` | Log-likelihood for Gaussian emission-line models |
 | `priors` | `UniformPrior`, `GaussianPrior`, `LogUniformPrior`, `PriorSet` |
 | `result` | `MCMCResult`, `MCMCBroadFitResult`, `MCMCLineResult` |
@@ -43,8 +43,8 @@ For tutorials, see the [README](../README.md).
 | `direct` | Direct T_e method via PyNEB: T_e, n_e, ionic abundances |
 | `forward` | Bayesian forward model (Cullen+25): emcee / dynesty sampling |
 | `strong_line` | Sanders+25 simultaneous polynomial calibrations |
-| `dust` | Salim+18 and Cardelli+89 attenuation curves, Balmer decrement A_V |
-| `icf` | Ionisation correction factors (Izotov+06) |
+| `dust` | Salim+18 and Cardelli+89 attenuation curves, Balmer decrement A_V, multi-Balmer weighted average |
+| `icf` | Ionisation correction factors (Izotov+06, Garnett+97) |
 | `result` | `AbundanceResult` dataclass |
 
 ---
@@ -495,6 +495,20 @@ The parameter vector layout is:
 [A_0, A_1, ..., A_{n-1}, mu_0, mu_1, ..., mu_{n-1}, sigma_0, sigma_1, ..., sigma_{n-1}]
 ```
 where `A` = amplitude (flux in erg/s/cm²), `mu` = centroid (Å), `sigma` = width (Å).
+
+**Methods:**
+
+#### `flux_upper_limit(line_name, n_sigma=3.0)`
+
+Compute a noise-based flux upper limit for a single line from the local
+continuum RMS.  Measures the RMS of fit residuals in a window around the
+expected line position (±5σ, excluding the central ±2σ), then returns
+`n_sigma × RMS × σ_inst × √(2π)`.
+
+#### `flux_upper_limits(line_names=None, n_sigma=3.0)`
+
+Compute upper limits for all non-detected lines (SNR < `n_sigma`) or for
+a specific list of lines.  Returns `{line_name: flux_upper_limit}`.
 
 ---
 
@@ -1044,6 +1058,8 @@ class MCMCResult:
 |--------|---------|-------------|
 | `to_fit_result()` | `FitResult` | Convert median posterior to `jwspecfit.FitResult` for plotting |
 | `flux_ratio_posterior(line_a, line_b)` | `np.ndarray` | Posterior samples of `flux(a) / flux(b)` |
+| `doublet_flux_posterior(line_a, line_b)` | `np.ndarray` | Combined doublet flux posterior |
+| `flux_upper_limit(line_name, n_sigma)` | `float` | Noise-based flux upper limit from continuum RMS |
 
 ---
 
@@ -1405,6 +1421,27 @@ Returns `float` — T_e in K.
 
 ---
 
+### `compute_Te_OIII_1666()`
+
+```python
+def compute_Te_OIII_1666(
+    flux_1666: float,
+    flux_5007: float,
+    flux_4959: float,
+    ne: float,
+) -> float:
+```
+
+Compute T_e(O++) from the O III] UV/optical ratio 1666/(5007+4959).
+Uses the 1666 Å intercombination line as a UV auroral diagnostic when
+[OIII] 4363 is unavailable.  The emissivity ratio is monotonically
+increasing with T_e and more temperature-sensitive than 4363/(5007+4959)
+due to the larger energy gap (7.5 eV vs 2.8 eV).
+
+Returns `float` — T_e in K.
+
+---
+
 ### `compute_Te_NII()`
 
 ```python
@@ -1456,6 +1493,7 @@ Compute all available ionic abundances via PyNEB.  Requires `"HBETA"` in fluxes.
 | O++/H+ | [OIII] 5007 | T_high |
 | O+/H+ | [OII] 3726+3729 | T_low |
 | N+/H+ | [NII] 6585 | T_low |
+| C+/H+ | CII] 2324+2326 | T_low |
 | S+/H+ | [SII] 6718+6732 | T_low |
 | S++/H+ | [SIII] 9069 | T_mid = (T_high + T_low)/2 |
 | Ne++/H+ | [NeIII] 3869 | T_high |
@@ -1474,9 +1512,10 @@ Returns `dict` — e.g. `{"O+/H+": val, "O++/H+": val, "N+/H+": val, ...}`.
 def compute_total_abundances(ionic: dict[str, float]) -> dict[str, float]:
 ```
 
-Derive total element abundances from ionic abundances using Izotov+06 ICFs.
+Derive total element abundances from ionic abundances using Izotov+06 ICFs
+(N, Ne, S, Ar) and Garnett+97 ICF (C/O when CII] 2326 is not detected).
 
-Returns `dict` — `{"O/H": val, "N/O": val, "S/O": val, "Ne/O": val, "Ar/O": val}`.
+Returns `dict` — `{"O/H": val, "N/O": val, "C/O": val, "S/O": val, "Ne/O": val, "Ar/O": val}`.
 
 ---
 
@@ -1678,6 +1717,28 @@ Returns `(Av, Av_err)`.
 
 ---
 
+### `compute_Av_multi_balmer()`
+
+```python
+def compute_Av_multi_balmer(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    law: str = "salim",
+    snr_min: float = 3.0,
+    **kwargs,
+) -> dict[str, object]:
+```
+
+Derive A_V from every available Balmer decrement (Hgamma through H10
+relative to Hbeta), returning individual and SNR-weighted average A_V
+values.  Excludes Hepsilon (blended with [NeIII] 3968) and H8 (blended
+with HeI 3889).
+
+Returns `dict` with keys: `"Av_weighted"`, `"Av_err_weighted"`,
+`"individual"` (per-line A_V values), `"weights"`.
+
+---
+
 ## `jwspecabund.icf` — Ionisation correction factors
 
 All ICFs from Izotov et al. (2006, A&A, 448, 955).
@@ -1697,3 +1758,9 @@ ICF for sulfur (eq. 20).  S/O = ICF_S × (S+ + S++)/O.
 ### `icf_argon(O_plus, O_total)`
 
 ICF for argon (eqs. 22/23).  Ar/O = ICF_Ar × Ar++/O++.
+
+### `icf_carbon(O_plus, O_pp)`
+
+ICF for carbon (Garnett+1997).  Corrects (C2+ + C3+)/O2+ for missing C+
+in the low-ionisation zone: ICF_C = (O+ + O2+) / O2+.  Applied
+automatically when CII] 2326 is not detected.

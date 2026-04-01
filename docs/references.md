@@ -926,6 +926,7 @@ sample-by-sample to preserve correlations.
 - Amayo, A. et al. 2021, MNRAS, 505, 2361 — N/O = N<sup>+</sup>/O<sup>+</sup> justification
 - Asplund, M. et al. 2009, ARA&A, 47, 481 — Solar abundances
 - Berg, D. A. et al. 2021, ApJ, 922, 170 — O<sup>3+</sup> contribution negligible
+- Garnett, D. R. et al. 1997, ApJ, 489, 63 — C/O ionisation correction factor
 - Izotov, Y. I. et al. 2006, A&A, 448, 955 — ICFs (N, Ne, S, Ar)
 - Nava, A. et al. 2006, ApJ, 645, 1076 — N/O = N<sup>+</sup>/O<sup>+</sup> justification
 

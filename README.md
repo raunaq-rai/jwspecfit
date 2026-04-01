@@ -125,6 +125,16 @@ Each `LineResult` contains:
 | `centroid_A` | Observed centroid wavelength (Angstroms) |
 | `sigma_A` | Gaussian sigma (Angstroms) |
 
+`FitResult` also provides noise-based flux upper limits for non-detected lines:
+
+```python
+# 3-sigma upper limit for a single line
+ul = result.flux_upper_limit("OIII_4363", n_sigma=3.0)
+
+# All non-detected lines at once
+uls = result.flux_upper_limits(n_sigma=3.0)
+```
+
 ### Broad Balmer components
 
 jwspecfit tests four models for the Balmer lines and selects via BIC:
@@ -180,12 +190,11 @@ jwspecmcmc replaces bootstrap resampling with full Bayesian posterior sampling,
 giving asymmetric uncertainties, parameter correlations, and flux ratio
 posteriors.
 
-### Recommended sampler: NUTS
+### Default sampler: NUTS
 
-The **NUTS** (No-U-Turn Sampler) via NumPyro is recommended for most use
-cases. It is a Hamiltonian Monte Carlo method that efficiently explores
-high-dimensional, correlated posteriors with adaptive step sizes and tree
-depth:
+The **NUTS** (No-U-Turn Sampler) via NumPyro is the default sampler. It is
+a Hamiltonian Monte Carlo method that efficiently explores high-dimensional,
+correlated posteriors with adaptive step sizes and tree depth:
 
 ```python
 import jwspecmcmc
@@ -317,6 +326,9 @@ available:
 | Mid-ionisation | CIII] 1907/1909 | -- |
 | High-ionisation | NIV] 1483/1486 | n_e(mid), then n_e(low) |
 
+All three zone densities can be overridden manually via `ne_low_override`,
+`ne_mid_override`, and `ne_high_override`.
+
 **Step 3: Method selection.**
 The method is chosen automatically based on available lines, or can be forced
 with `method=`:
@@ -324,20 +336,26 @@ with `method=`:
 | Method | When used | What it does |
 |--------|-----------|--------------|
 | `"direct"` | [OIII] 4363 detected (SNR >= 3) | Electron temperature from [OIII] 4363/(4959+5007); ionic abundances from PyNEB emissivities; ICFs for total abundances |
+| `"direct"` (1666 fallback) | [OIII] 4363 undetected but O III] 1666 available | T_e from the UV 1666/(5007+4959) ratio as an alternative auroral diagnostic |
 | `"strong_line"` | No auroral line detected | Simultaneous polynomial calibrations from Sanders+25 using O3, O2, R23, O32 ratios |
 | `"forward"` | Explicitly requested | Bayesian forward model (Cullen+25) sampling physical parameters to match observed line ratios |
 
 **Step 4 (direct method): Electron temperature.**
-T_e(O2+) is measured from the [OIII] auroral-to-nebular ratio. T_e for the
-low-ionisation zone is derived via a T_e-T_e relation:
+T_e(O2+) is measured from the [OIII] auroral-to-nebular ratio. When [OIII]
+4363 is unavailable, the O III] 1666 intercombination line is used as a
+UV fallback diagnostic (more temperature-sensitive due to the larger 7.5 eV
+energy gap). T_e for the low-ionisation zone is derived via a T_e-T_e
+relation:
 - `"desi"` (default): DESI DR2 calibration
 - `"classical"`: Garnett (1992)
 
 **Step 5 (direct method): Ionic and total abundances.**
-PyNEB computes ionic abundance ratios (O+/H+, O++/H+, N+/H+, C++/H+, etc.)
-from the dust-corrected fluxes, T_e, and n_e. Ionisation correction factors
-(Martinez+25 for N/O; Izotov+06 for S, Ne, Ar) convert ionic ratios to total
-element abundances: O/H, N/O, C/O, S/O, Ne/O, Ar/O.
+PyNEB computes ionic abundance ratios (O+/H+, O++/H+, N+/H+, C+/H+, C++/H+, etc.)
+from the dust-corrected fluxes, T_e, and n_e. C+/H+ is derived from the
+CII] 2326 multiplet when available. Ionisation correction factors (Martinez+25
+for N/O; Izotov+06 for S, Ne, Ar; Garnett+97 for C/O) convert ionic ratios
+to total element abundances: O/H, N/O, C/O, S/O, Ne/O, Ar/O. The ICF tier
+for N/O can be locked via the `icf_tier` parameter.
 
 ### Key options
 
@@ -349,6 +367,10 @@ abund = jwspecabund.compute_abundances(
     Av=None,                # None = derive from Balmer decrement
     Te_relation="desi",     # "desi" or "classical"
     n_mc=1000,              # MC iterations for error propagation
+    icf_tier=None,          # Lock N/O ICF tier (e.g. "NppNppp_Opp")
+    ne_low_override=None,   # Override n_e(low) in cm^-3
+    ne_mid_override=None,   # Override n_e(mid)
+    ne_high_override=None,  # Override n_e(high)
 )
 ```
 
@@ -360,11 +382,13 @@ abund = jwspecabund.compute_abundances(
 | `OH_err` | Uncertainty (symmetric or asymmetric) |
 | `NO` | log(N/O) |
 | `CO` | log(C/O) |
-| `SO`, `NeO`, `ArO` | Other element ratios |
-| `Te_high`, `Te_low` | Electron temperatures (K) |
+| `SO`, `NeO`, `ArO` | Other element ratios (with `_err` counterparts) |
+| `Te_high`, `Te_low` | Electron temperatures (K) (with `_err` counterparts) |
 | `ne`, `ne_low`, `ne_mid`, `ne_high` | Electron densities (cm^-3) |
-| `Av` | Dust attenuation |
-| `ionic` | Dict of ionic abundance ratios (O+/H+, O++/H+, ...) |
+| `Av`, `Av_err` | Dust attenuation and uncertainty |
+| `logU`, `logU_err` | Ionisation parameter and uncertainty |
+| `ionic` | Dict of ionic abundance ratios (O+/H+, O++/H+, C+/H+, ...) |
+| `icf_method`, `NO_icf_name` | ICF scheme and specific tier used for N/O |
 | `OH_posterior`, `NO_posterior` | Full posterior arrays (MC/MCMC) |
 | `method` | Method used (`"direct"`, `"strong_line"`, or `"forward"`) |
 
@@ -396,9 +420,10 @@ Two attenuation/extinction curves are available:
 - **Cardelli+89**: Milky Way extinction curve
 
 A_V is derived from the Balmer decrement. When Halpha is unavailable (e.g. at
-high redshift), the Hgamma/Hbeta ratio is used (intrinsic ratio 0.468). A
-multi-Balmer average (Hgamma through H10) weights by SNR when multiple lines
-are available.
+high redshift), the Hgamma/Hbeta ratio is used (intrinsic ratio 0.468). When
+multiple Balmer lines are detected, a multi-Balmer SNR-weighted average is
+computed using Hgamma through H10 (excluding Hepsilon and H8, which are
+blended with [NeIII] 3968 and HeI 3889 respectively).
 
 ---
 
@@ -416,6 +441,7 @@ Worked examples in [`docs/notebooks/`](docs/notebooks/):
 | `06_mcmc_stack` | MCMC fitting for stacked spectra |
 | `07_abundances` | Chemical abundances: direct, forward, strong-line |
 | `08_nitrogen` | Nitrogen abundance diagnostics |
+| `08b_nitrogen_combined` | Combined nitrogen analysis with ICF tiers |
 | `09_uv_abundances` | UV line fitting with absorption lines |
 
 ---

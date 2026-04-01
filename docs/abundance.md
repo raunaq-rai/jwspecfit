@@ -110,8 +110,9 @@ are gated by their own dedicated checks (auroral SNR, nitrogen gating, logU doub
 
 | `method=` | Condition | Path |
 |-----------|-----------|------|
-| `"auto"` | OIII_4363 SNR >= `snr_auroral` | Direct Te |
-| `"auto"` | OIII_4363 SNR < `snr_auroral` or absent | Strong-line |
+| `"auto"` | OIII_4363 SNR >= `snr_auroral` | Direct Te (4363) |
+| `"auto"` | OIII_4363 absent but O III] 1666 available | Direct Te (1666 fallback) |
+| `"auto"` | No auroral line detected | Strong-line |
 | `"direct"` | Always | Direct Te |
 | `"forward"` | Always | Bayesian forward model |
 | `"strong_line"` | Always | Sanders+25 calibrations |
@@ -143,15 +144,28 @@ ne_high: NIV] 1483/1486  -->  compute_ne_NIV()
 **SNR gate:** Each doublet requires both members to have `flux/error >= snr_ne`
 (default 3.0), checked by `_doublet_snr_ok()`.
 
+### Step 1b — Density overrides
+
+When `ne_low_override`, `ne_mid_override`, or `ne_high_override` are set,
+the corresponding diagnostic computation is bypassed and the user-supplied
+value is used directly.
+
 ### Step 2 — Electron temperature
 
 ```python
+# Primary: [OIII] 4363
 Te_high = compute_Te_OIII(flux_4363, flux_5007, flux_4959, ne_high)
+
+# Fallback: O III] 1666 (when 4363 is unavailable)
+Te_high = compute_Te_OIII_1666(flux_1666, flux_5007, flux_4959, ne_high)
+
 Te_low  = Te_low_from_high(Te_high, relation=Te_relation)
 ```
 
 - `compute_Te_OIII()` uses PyNEB with `log=True, start_x=3.0, end_x=5.0` for
   convergence at Te > 25,000 K.
+- `compute_Te_OIII_1666()` uses the UV 1666/(5007+4959) ratio with solver
+  range extended to 250,000 K (`end_x=5.4`).
 - `Te_low_from_high()`: DESI relation `0.648 * Te_high + 3270` or classical
   `0.7 * Te_high + 3000`.
 
@@ -260,8 +274,13 @@ Simple: `N/O = ICF_N(Izotov+06) * N+/O+`. Requires N+ and O+ only.
 - **S/O:** `ICF_S(Izotov+06) * (S+ + S2+) / O/H`
 - **Ne/O:** `ICF_Ne(Izotov+06) * Ne2+/O2+`
 - **Ar/O:** `ICF_Ar(Izotov+06) * Ar2+/O2+`
-- **C/O:** `(C2+ + C3+) / O2+` (direct sum, no ICF)
+- **C/O:** `ICF_C(Garnett+97) × (C2+ + C3+) / O2+` when CII] 2326 absent;
+  `(C+ + C2+ + C3+) / (O+ + O2+)` when CII] 2326 detected
 - **N/O_UV_raw:** `(N2+ + N3+ + N4+) / O2+` (for comparison, no ICF)
+
+**ICF tier locking:** When `icf_tier` is set (e.g. `"NppNppp_Opp"`), the
+specified Martinez+25 ICF tier is used for both the point estimate and all
+MC iterations, preventing tier switching across iterations.
 
 ### Upper Limits for Non-Detected Ions
 
@@ -321,10 +340,15 @@ for i in range(n_mc):
     accumulate OH, NO, CO posteriors
 ```
 - ne is held fixed (varying it adds noise without improving accuracy)
+- Te_high and Te_low are re-derived per iteration → `Te_high_err`, `Te_low_err`
+- logU is re-derived per iteration → `logU_err`
 - logU diagnostic choice is locked to point estimate (prevents switching between
   N43 and O32 across iterations)
 - logU value is clamped to [-3.5, -1.0] validity range per iteration
+- A_V uncertainty is propagated from the Balmer decrement → `Av_err`
+- S/O, Ne/O, Ar/O uncertainties are propagated → `SO_err`, `NeO_err`, `ArO_err`
 - Nitrogen gating uses **original** errors (same ions included/excluded as point estimate)
+- ICF tier is locked to match the point estimate (no tier switching in MC loop)
 
 **`_run_direct_mcmc()` (MCMC input):**
 - Draws from actual posterior chains instead of Gaussian perturbation
@@ -407,7 +431,8 @@ compute_abundances(result, z, ...)
   │           │     ├── compute_ne_NIV()      [NIV] 1483/1486]
   │           │     └── compute_ne_CIII()     [CIII] 1907/1909]
   │           │
-  │           ├── Step 2: compute_Te_OIII()
+  │           ├── Step 2: compute_Te_OIII()       [primary: 4363]
+  │           │           compute_Te_OIII_1666()  [fallback: 1666]
   │           │           Te_low_from_high()
   │           │
   │           ├── Step 3: compute_ionic_abundances()
@@ -468,15 +493,23 @@ compute_abundances(result, z, ...)
 | `CO` | float or None | direct, forward | log(C/O) |
 | `CO_err` | float or (lo, hi) or None | direct, forward | |
 | `SO` | float or None | direct | log(S/O) |
+| `SO_err` | float or None | direct | Uncertainty on log(S/O) |
 | `NeO` | float or None | direct | log(Ne/O) |
+| `NeO_err` | float or None | direct | Uncertainty on log(Ne/O) |
 | `ArO` | float or None | direct | log(Ar/O) |
+| `ArO_err` | float or None | direct | Uncertainty on log(Ar/O) |
 | `Te_high` | float or None | direct, forward | T_e(O2+) in K |
+| `Te_high_err` | float or None | direct | Uncertainty on T_e(high) |
 | `Te_low` | float or None | direct | T_e(O+/N+) in K |
+| `Te_low_err` | float or None | direct | Uncertainty on T_e(low) |
 | `ne` | float or None | direct, forward | n_e (low-ionisation zone) |
 | `ne_low` | float or None | direct | n_e from [SII]/[OII] |
+| `ne_mid` | float or None | direct | n_e from CIII]/SiIII] |
 | `ne_high` | float or None | direct | n_e from NIV]/CIII] |
 | `logU` | float or None | direct | Ionisation parameter log(U) |
+| `logU_err` | float or None | direct | Uncertainty on log(U) |
 | `Av` | float or None | all | V-band attenuation |
+| `Av_err` | float or None | all | Uncertainty on A_V |
 | `ionic` | dict or None | direct, forward | Ionic abundances |
 | `icf_method` | str or None | direct | `"martinez25"`, `"direct_sum"`, `"izotov06"` |
 | `NO_icf_name` | str or None | direct | ICF identifier (e.g. `"NppNppp_Opp"`) |
