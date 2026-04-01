@@ -878,6 +878,7 @@ def compute_total_abundances(
             # If locked to a specific ICF tier, use it directly.
             # When locked, do NOT fall back — return no N/O so the MC
             # iteration gets NaN rather than mixing tiers.
+            ionic_with_ul = ionic  # default; overwritten if ULs used
             if _lock_NO_icf is not None:
                 NO_val = compute_NO_martinez25_locked(ionic, logU, Z_Zsun, ne_icf, _lock_NO_icf)
                 NO_icf_name = _lock_NO_icf
@@ -885,6 +886,22 @@ def compute_total_abundances(
                     totals["N/O"] = NO_val
                     totals["NO_icf_name"] = NO_icf_name
                     totals["icf_method"] = "martinez25"
+                elif ionic_upper_limits:
+                    # Ions not detected — try with 3σ upper-limit ionic
+                    # abundances to produce an N/O upper limit.
+                    ionic_with_ul = dict(ionic)
+                    for ul_key, ul_val in ionic_upper_limits.items():
+                        if ionic_with_ul.get(ul_key, 0.0) <= 0:
+                            ionic_with_ul[ul_key] = ul_val
+                    NO_ul_val = compute_NO_martinez25_locked(
+                        ionic_with_ul, logU, Z_Zsun, ne_icf, _lock_NO_icf,
+                    )
+                    if NO_ul_val is not None:
+                        NO_val = NO_ul_val  # so ICF dict block below fires
+                        totals["N/O"] = NO_ul_val
+                        totals["NO_icf_name"] = NO_icf_name
+                        totals["icf_method"] = "martinez25"
+                        totals["NO_is_upper_limit"] = True
                 # else: N/O stays unset → NaN in MC loop
             else:
                 NO_val, NO_icf_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)
@@ -901,19 +918,18 @@ def compute_total_abundances(
                     "NppOpp": "_icf2_value",
                     "NpOp": "_icf1_value",
                 }
+                # Use UL-augmented ionic dict if upper limits were used.
+                _ion = ionic_with_ul if totals.get("NO_is_upper_limit") else ionic
                 # Compute raw ionic ratio (without ICF)
-                _raw_NO = NO_val  # NO_val already = raw * icf
-                # Get the ICF value from the tiers if available later,
-                # or compute it now from the ICF functions.
                 _no_icf_funcs = {
                     "NppNppp_Opp": lambda: (
-                        (ionic.get("N++/H+", 0) + ionic.get("N+++/H+", 0)) / O_pp if O_pp > 0 else 0
+                        (_ion.get("N++/H+", 0) + _ion.get("N+++/H+", 0)) / O_pp if O_pp > 0 else 0
                     ),
-                    "NpOp": lambda: ionic.get("N+/H+", 0) / O_plus if O_plus > 0 else 0,
-                    "NppOpp": lambda: ionic.get("N++/H+", 0) / O_pp if O_pp > 0 else 0,
-                    "NpppOpp": lambda: ionic.get("N+++/H+", 0) / O_pp if O_pp > 0 else 0,
+                    "NpOp": lambda: _ion.get("N+/H+", 0) / O_plus if O_plus > 0 else 0,
+                    "NppOpp": lambda: _ion.get("N++/H+", 0) / O_pp if O_pp > 0 else 0,
+                    "NpppOpp": lambda: _ion.get("N+++/H+", 0) / O_pp if O_pp > 0 else 0,
                     "NpNpp_OpOpp": lambda: (
-                        (ionic.get("N+/H+", 0) + ionic.get("N++/H+", 0)) / (O_plus + O_pp)
+                        (_ion.get("N+/H+", 0) + _ion.get("N++/H+", 0)) / (O_plus + O_pp)
                         if (O_plus + O_pp) > 0 else 0
                     ),
                 }

@@ -1213,6 +1213,7 @@ def _run_direct(
         ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
         icf_method=icf_method,
         ionic_upper_limits=ionic_upper_limits,
+        _lock_NO_icf=icf_tier,
     )
 
     NO = totals.get("N/O")
@@ -1232,10 +1233,7 @@ def _run_direct(
 
     icf_method = totals.get("icf_method")
     NO_icf_name = totals.get("NO_icf_name")
-    # User-requested ICF tier override.
-    if icf_tier is not None:
-        NO_icf_name = icf_tier
-        logger.info("ICF tier overridden to %s.", icf_tier)
+    NO_is_upper_limit = totals.pop("NO_is_upper_limit", False)
     failures = totals.pop("_failures", {})
     failures.update(ne_failures)
     NO_tiers = totals.pop("_NO_tiers", None)
@@ -1501,6 +1499,7 @@ def _run_direct(
         "failures": failures if failures else None,
         "NO_tiers": NO_tiers,
         "icf_values": icf_values,
+        "NO_is_upper_limit": NO_is_upper_limit,
     }
 
 
@@ -1663,13 +1662,11 @@ def _run_direct_mcmc(
         ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
         icf_method=icf_method,
         ionic_upper_limits=ionic_upper_limits,
+        _lock_NO_icf=icf_tier,
     ) if ionic_pt else {}
     icf_method = totals_pt.get("icf_method")
     NO_icf_name = totals_pt.get("NO_icf_name")
-    # User-requested ICF tier override.
-    if icf_tier is not None:
-        NO_icf_name = icf_tier
-        logger.info("ICF tier overridden to %s.", icf_tier)
+    NO_is_upper_limit = totals_pt.pop("NO_is_upper_limit", False)
     failures = totals_pt.pop("_failures", {})
     failures.update(ne_failures)
     NO_tiers = totals_pt.pop("_NO_tiers", None)
@@ -1914,6 +1911,7 @@ def _run_direct_mcmc(
         "failures": failures if failures else None,
         "NO_tiers": NO_tiers,
         "icf_values": icf_values,
+        "NO_is_upper_limit": NO_is_upper_limit,
     }
 
 
