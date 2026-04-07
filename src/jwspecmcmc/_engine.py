@@ -585,9 +585,11 @@ def _fit_lines_mcmc(
         right = edges[1:]
         _centres = 0.5 * (left + right)
         def _lya_model_fn(p_lya):
-            return asymmetric_gaussian(
+            prof = asymmetric_gaussian(
                 _centres, p_lya[0], p_lya[1], p_lya[2], p_lya[3],
             )
+            prof[_centres < lya_obs_A] = 0.0  # no flux blueward of Lyα
+            return prof
 
     # Cap inflated errors near the Lyα peak (same logic as fitter.py).
     if _n_lya > 0:

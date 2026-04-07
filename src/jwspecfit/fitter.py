@@ -780,8 +780,12 @@ def fit_lines(
         """Evaluate the asymmetric Gaussian Lyα model.
 
         p_lya = [A_peak, mu, sigma, alpha].
+        Zero blueward of Lyα rest — no physical flux there (IGM).
         """
-        return asymmetric_gaussian(_centres, p_lya[0], p_lya[1], p_lya[2], p_lya[3])
+        prof = asymmetric_gaussian(_centres, p_lya[0], p_lya[1], p_lya[2], p_lya[3])
+        if _n_lya > 0:
+            prof[_centres < lya_obs_A] = 0.0
+        return prof
 
     def residual_fn(p_combined: np.ndarray) -> np.ndarray:
         """Weighted residuals for least_squares."""
