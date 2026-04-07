@@ -189,6 +189,7 @@ class MCMCResult:
             line_names=self.line_names,
             constraints=self.constraints,
             success=True,
+            lya_params=self.lya_params,
         )
 
     def doublet_flux_posterior(
