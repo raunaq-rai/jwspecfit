@@ -278,6 +278,7 @@ def plot_fit(
             centres_s = 0.5 * (edges[:-1] + edges[1:])
             broad_flam_s = _lya_p_s[3] * _skewnorm_s.pdf(
                 centres_s, _lya_p_s[6], loc=_lya_p_s[4], scale=_lya_p_s[5])
+            broad_flam_s[centres_s < 1215.67] = 0.0
 
             for comp_f, comp_col, comp_lbl in [
                 (narrow_flam_s, "C0", "Lyα narrow"),
@@ -678,6 +679,7 @@ def plot_fit_interactive(
                     # Broad: skewed Gaussian.
                     prof_flam = amp_c * _skewnorm.pdf(
                         wave_fine_c, skew_c, loc=mu_c, scale=sig_c)
+                    prof_flam[wave_fine_c < 1215.67] = 0.0
 
                 # Continuum at fine grid.
                 cont_fine_c_ujy = np.interp(wave_fine_c_um, spec.wave_um, result.continuum)

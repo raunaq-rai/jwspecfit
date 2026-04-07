@@ -570,9 +570,11 @@ def _fit_lines_mcmc(
         from jwspecfit.models import gaussian_binned
         left = edges[:-1]
         right = edges[1:]
+        _centres = 0.5 * (left + right)
         def _lya_model_fn(p_lya):
             narrow = gaussian_binned(left, right, p_lya[1], p_lya[2]) * p_lya[0]
             broad = skewed_gaussian_binned(left, right, p_lya[3], p_lya[4], p_lya[5], p_lya[6])
+            broad[_centres < lya_obs_A] = 0.0
             return narrow + broad
 
     like_spec = LikelihoodSpec(

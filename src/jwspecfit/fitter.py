@@ -755,10 +755,15 @@ def fit_lines(
     #                    A_broad, mu_broad, sig_broad, skew_broad]
     _n_lya = 7 if _lya_params is not None else 0
 
+    # Pixel centres for truncation mask.
+    _centres = 0.5 * (left + right)
+
     def _lya_component(p_lya: np.ndarray) -> np.ndarray:
         """Evaluate the two-component Lyα model (narrow + broad skewed)."""
         narrow = gaussian_binned(left, right, p_lya[1], p_lya[2]) * p_lya[0]
         broad = skewed_gaussian_binned(left, right, p_lya[3], p_lya[4], p_lya[5], p_lya[6])
+        # Zero the broad component blueward of Lyα — no physical flux there.
+        broad[_centres < lya_obs_A] = 0.0
         return narrow + broad
 
     def residual_fn(p_combined: np.ndarray) -> np.ndarray:

@@ -264,6 +264,9 @@ def make_jax_log_likelihood(
             big_phi = 0.5 * (1.0 + jax.lax.erf(p_lya[6] * t / _SQRT2))
             broad = p_lya[3] * 2.0 * phi * big_phi
 
+            # Zero broad component blueward of Lyα rest (1215.67 Å).
+            # For de-redshifted stacks (z=0), this is just the rest wavelength.
+            broad = jnp.where(centres >= 1215.67, broad, 0.0)
             model = model + narrow + broad
 
         # Weighted residual.
