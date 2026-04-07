@@ -22,7 +22,7 @@ from .constraints import ConstraintSet
 from .continuum import fit_continuum
 from .io import Spectrum
 from .lines import REST_LINES_A, get_line_list, observable_lines
-from .models import build_model, gaussian_binned, pixel_weight
+from .models import build_model, gaussian_binned, pixel_weight, skewed_gaussian_binned
 from .resolution import resolve_R, sigma_inst_A
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,7 @@ class FitResult:
     line_names: list[str] = field(default_factory=list)
     constraints: ConstraintSet | None = None
     success: bool = True
+    lya_params: np.ndarray | None = None  # [A_narrow, mu_n, sig_n, A_broad, mu_b, sig_b, skew_b]
 
     def flux_upper_limit(
         self,
@@ -277,6 +278,7 @@ def fit_lines(
     tie_uv_widths: bool = True,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
+    lya_break: bool = False,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -424,6 +426,10 @@ def fit_lines(
             print(f"Resolving power: R ≈ {R_med:.0f} (range {R_lo:.0f}–{R_hi:.0f})")
 
     # Continuum subtraction.
+    # Auto-enable lya_break when Lya is in the line list.
+    _lya_in_lines = "Lya" in line_names
+    _lya_break = lya_break or _lya_in_lines
+
     continuum = fit_continuum(
         spec.wave_um,
         spec.flux_ujy,
@@ -435,6 +441,7 @@ def fit_lines(
         deg=deg,
         clip_sigma=clip_sigma,
         moving_average=moving_average,
+        lya_break=_lya_break,
     )
     flux_sub = spec.flux_ujy - continuum
 
@@ -447,8 +454,13 @@ def fit_lines(
     valid = np.isfinite(flam) & np.isfinite(flam_err) & (flam_err > 0)
 
     # Exclude pixels blueward of NV (IGM-absorbed / Lyman-break region).
-    nv_obs_A = REST_LINES_A["NV_1"] * (1.0 + z)
-    valid &= spec.wave_A >= nv_obs_A
+    # When fitting Lyα, extend to cover the Lyα region (down to ~1150 Å rest).
+    if _lya_in_lines:
+        _blue_cutoff_A = 1150.0 * (1.0 + z)
+        valid &= spec.wave_A >= _blue_cutoff_A
+    else:
+        nv_obs_A = REST_LINES_A["NV_1"] * (1.0 + z)
+        valid &= spec.wave_A >= nv_obs_A
 
     # Drop lines that fall in detector gaps (< 50% valid pixels within ±5σ).
     _kept: list[str] = []
@@ -520,6 +532,55 @@ def fit_lines(
                         f"{_BLEND_THRESHOLD * sig_at_line:.1f} Å) "
                         f"→ fixing ratio"
                     )
+
+    # --- Separate Lyα from regular Gaussian lines ---
+    # Two-component model: narrow Gaussian + broad skewed Gaussian.
+    # Parameters: [A_narrow, mu_narrow, sig_narrow,
+    #              A_broad, mu_broad, sig_broad, skew_broad]
+    _lya_params = None  # (p0, lb, ub) for 7-element vector
+    if _lya_in_lines:
+        line_names = [n for n in line_names if n != "Lya"]
+        lya_obs_A = REST_LINES_A["Lya"] * (1.0 + z)
+
+        idx_lya = np.argmin(np.abs(spec.wave_A - lya_obs_A))
+        local_sig = sig_inst[idx_lya]
+        near_lya = np.abs(spec.wave_A - lya_obs_A) < 10 * local_sig
+        peak_lya = np.nanmax(flam[near_lya]) if np.any(near_lya & valid) else 1.0
+        if not np.isfinite(peak_lya) or peak_lya <= 0:
+            peak_lya = 1.0
+
+        _C_KMS = 299792.458
+        cent_margin = max(centroid_vmax / _C_KMS * lya_obs_A, 5.0)
+
+        # Narrow component: captures the sharp spike just redward of 1216 Å.
+        sig_narrow_seed = max(local_sig, 1.0)
+        sig_narrow_lo = 0.3
+        sig_narrow_hi = 5.0 * sigma_factor  # up to ~5 Å (~1200 km/s)
+        A_narrow_seed = peak_lya * _SQRT2PI * sig_narrow_seed
+
+        # Broad component: captures the extended red scattering tail.
+        sig_broad_seed = 5.0
+        sig_broad_lo = 2.0
+        sig_broad_hi = 1500.0 / _C_KMS * lya_obs_A * sigma_factor
+        A_broad_seed = 0.3 * A_narrow_seed  # start at 30% of narrow
+
+        lya_p0 = np.array([
+            A_narrow_seed, lya_obs_A + 1.0, sig_narrow_seed,  # narrow
+            A_broad_seed, lya_obs_A + 2.0, sig_broad_seed, 5.0,  # broad + skew
+        ])
+        lya_lb = np.array([
+            0.0, lya_obs_A - cent_margin, sig_narrow_lo,
+            0.0, lya_obs_A - cent_margin, sig_broad_lo, -2.0,
+        ])
+        lya_ub = np.array([
+            150.0 * A_narrow_seed, lya_obs_A + cent_margin, sig_narrow_hi,
+            150.0 * A_broad_seed, lya_obs_A + cent_margin, sig_broad_hi, 30.0,
+        ])
+        _lya_params = (lya_p0, lya_lb, lya_ub)
+        logger.info(
+            "Lyα: narrow (σ [%.1f, %.1f] Å) + broad skewed (σ [%.1f, %.1f] Å)",
+            sig_narrow_lo, sig_narrow_hi, sig_broad_lo, sig_broad_hi,
+        )
 
     # Setup constraints.
     constraints = ConstraintSet(
@@ -687,10 +748,24 @@ def fit_lines(
     # Mask constrained parameters: only optimise free ones.
     free_mask = constraints.free_mask()
 
-    def residual_fn(p_free: np.ndarray) -> np.ndarray:
+    # Build combined parameter vector:
+    # [gaussian_free..., A_narrow, mu_narrow, sig_narrow,
+    #                    A_broad, mu_broad, sig_broad, skew_broad]
+    _n_lya = 7 if _lya_params is not None else 0
+
+    def _lya_component(p_lya: np.ndarray) -> np.ndarray:
+        """Evaluate the two-component Lyα model (narrow + broad skewed)."""
+        narrow = gaussian_binned(left, right, p_lya[1], p_lya[2]) * p_lya[0]
+        broad = skewed_gaussian_binned(left, right, p_lya[3], p_lya[4], p_lya[5], p_lya[6])
+        return narrow + broad
+
+    def residual_fn(p_combined: np.ndarray) -> np.ndarray:
         """Weighted residuals for least_squares."""
+        p_free = p_combined[:len(p_combined) - _n_lya]
         p_full = constraints.expand_free_to_full(p_free)
         model = build_model(p_full, edges, nL)
+        if _n_lya > 0:
+            model = model + _lya_component(p_combined[-_n_lya:])
         resid = (flam - model) / flam_err
         resid *= w_pix
         resid[~valid] = 0.0
@@ -699,6 +774,13 @@ def fit_lines(
     p0_free = p0[free_mask]
     lb_free = lb[free_mask]
     ub_free = ub[free_mask]
+
+    # Append Lyα parameters if present.
+    if _lya_params is not None:
+        lya_p0, lya_lb, lya_ub = _lya_params
+        p0_free = np.concatenate([p0_free, lya_p0])
+        lb_free = np.concatenate([lb_free, lya_lb])
+        ub_free = np.concatenate([ub_free, lya_ub])
 
     # Clip seeds to bounds.
     p0_free = np.clip(p0_free, lb_free + 1e-30, ub_free - 1e-30)
@@ -713,8 +795,16 @@ def fit_lines(
         x_scale="jac",
     )
 
-    p_best = constraints.expand_free_to_full(result.x)
+    # Unpack results.
+    p_gauss_free = result.x[:len(result.x) - _n_lya]
+    p_best = constraints.expand_free_to_full(p_gauss_free)
     model_flam = build_model(p_best, edges, nL)
+
+    _lya_best = None
+    if _n_lya > 0:
+        _lya_best = result.x[-_n_lya:]
+        model_flam = model_flam + _lya_component(_lya_best)
+
     model_ujy = _flam_to_ujy(model_flam, spec.wave_um)
     resid_ujy = flux_sub - model_ujy
 
@@ -817,6 +907,63 @@ def fit_lines(
             snr_peak_cont=snr_peak_cont,
         )
 
+    # Add Lyα result if fitted.
+    if _lya_best is not None:
+        # Narrow component.
+        A_narrow = _lya_best[0]
+        mu_narrow = _lya_best[1]
+        sig_narrow = _lya_best[2]
+        # Broad component.
+        A_broad = _lya_best[3]
+        mu_broad = _lya_best[4]
+        sig_broad = _lya_best[5]
+        skew_broad = _lya_best[6]
+
+        # Total Lyα flux = narrow + broad amplitudes.
+        flux_lya = A_narrow + A_broad
+
+        # Use the narrow component centroid as the representative centroid.
+        mu_lya = mu_narrow
+        # Effective sigma: use the narrower component for line identification.
+        sig_lya = sig_narrow
+
+        # Bootstrap Lyα uncertainty: use the local continuum RMS method.
+        f_err_lya = _analytic_flux_err(
+            flux_lya, sig_narrow, flam_err, spec.wave_A, mu_narrow, valid,
+        )
+
+        snr_lya = flux_lya / f_err_lya if f_err_lya > 0 else 0.0
+
+        # EW from total flux.
+        idx_cont_lya = np.argmin(np.abs(spec.wave_A - mu_lya))
+        cont_at_lya = cont_flam[idx_cont_lya] if cont_flam[idx_cont_lya] > 0 else np.nan
+        ew_lya = flux_lya / cont_at_lya / (1.0 + z) if np.isfinite(cont_at_lya) and cont_at_lya > 0 else np.nan
+
+        line_results["Lya"] = LineResult(
+            name="Lya",
+            rest_wave_A=REST_LINES_A["Lya"],
+            amplitude=flux_lya,
+            centroid_A=mu_lya,
+            sigma_A=sig_lya,
+            flux=flux_lya,
+            flux_err=f_err_lya,
+            ew_A=ew_lya,
+            snr_int_err=snr_lya,
+            snr_int_cont=snr_lya,
+            snr_peak_err=snr_lya,
+            snr_peak_cont=snr_lya,
+        )
+        line_names = ["Lya"] + line_names
+
+        logger.info(
+            "Lyα fit: narrow flux=%.3e (σ=%.1f Å, μ=%.1f Å), "
+            "broad flux=%.3e (σ=%.1f Å, μ=%.1f Å, skew=%.1f), "
+            "total=%.3e",
+            A_narrow, sig_narrow, mu_narrow,
+            A_broad, sig_broad, mu_broad, skew_broad,
+            flux_lya,
+        )
+
     fit_result = FitResult(
         lines=line_results,
         params=p_best,
@@ -828,6 +975,7 @@ def fit_lines(
         line_names=line_names,
         constraints=constraints,
         success=bool(result.success),
+        lya_params=_lya_best,
     )
 
     if save_path is not None:

@@ -56,6 +56,47 @@ def gaussian_binned(
     return mean
 
 
+def skewed_gaussian_binned(
+    lam_left_A: np.ndarray,
+    lam_right_A: np.ndarray,
+    amplitude: float,
+    mu_A: float,
+    sigma_A: float,
+    skew: float,
+) -> np.ndarray:
+    """Bin-averaged skewed Gaussian profile for Lyman-alpha.
+
+    Uses ``scipy.stats.skewnorm`` evaluated at bin centres.  The
+    *amplitude* parameter gives the integrated flux.
+
+    Parameters
+    ----------
+    lam_left_A, lam_right_A : np.ndarray
+        Bin edges (Å).
+    amplitude : float
+        Integrated flux (same units as flux × Å).
+    mu_A : float
+        Location parameter (Å).
+    sigma_A : float
+        Scale parameter (Å).
+    skew : float
+        Skewness parameter (positive = red tail, typical for Lyα).
+
+    Returns
+    -------
+    np.ndarray
+        Flux density per bin (Å⁻¹ × amplitude units).
+    """
+    if sigma_A <= 0 or not np.isfinite(sigma_A):
+        return np.zeros_like(lam_left_A)
+
+    from scipy.stats import skewnorm
+    centres = 0.5 * (lam_left_A + lam_right_A)
+    # skewnorm.pdf is normalised to unit area.
+    profile = skewnorm.pdf(centres, skew, loc=mu_A, scale=sigma_A)
+    return amplitude * profile
+
+
 def pixel_weight(dlam_A: np.ndarray, power: float = 0.35) -> np.ndarray:
     """Pixel-width weighting to down-weight overly narrow/wide pixels.
 

@@ -12,6 +12,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from typing import Callable
+
 from jwspecfit.constraints import ConstraintSet
 from jwspecfit.models import build_model
 
@@ -42,6 +44,12 @@ class LikelihoodSpec:
         Parameter constraints.
     w_pix : np.ndarray
         Pixel weights from :func:`jwspecfit.models.pixel_weight`.
+    n_lya : int
+        Number of extra Lyα parameters appended to the free vector
+        (4 when Lyα is being fit, 0 otherwise).
+    lya_model_fn : callable or None
+        Function ``(p_lya,) -> np.ndarray`` that evaluates the skewed
+        Gaussian Lyα model from a 4-element parameter vector.
     """
 
     flam: np.ndarray
@@ -51,6 +59,8 @@ class LikelihoodSpec:
     n_lines: int
     constraints: ConstraintSet
     w_pix: np.ndarray
+    n_lya: int = 0
+    lya_model_fn: Callable | None = None
 
 
 def log_likelihood(p_free: np.ndarray, spec: LikelihoodSpec) -> float:
@@ -62,7 +72,8 @@ def log_likelihood(p_free: np.ndarray, spec: LikelihoodSpec) -> float:
     Parameters
     ----------
     p_free : np.ndarray
-        Free parameter vector.
+        Free parameter vector.  When Lyα is being fit, the last
+        ``spec.n_lya`` elements are the Lyα parameters.
     spec : LikelihoodSpec
         Cached data for evaluation.
 
@@ -71,8 +82,13 @@ def log_likelihood(p_free: np.ndarray, spec: LikelihoodSpec) -> float:
     float
         Log-likelihood value.
     """
-    p_full = spec.constraints.expand_free_to_full(p_free)
+    n_gauss = len(p_free) - spec.n_lya
+    p_gauss = p_free[:n_gauss]
+    p_full = spec.constraints.expand_free_to_full(p_gauss)
     model = build_model(p_full, spec.edges, spec.n_lines)
+
+    if spec.n_lya > 0 and spec.lya_model_fn is not None:
+        model = model + spec.lya_model_fn(p_free[-spec.n_lya:])
 
     resid = np.zeros_like(spec.flam)
     v = spec.valid

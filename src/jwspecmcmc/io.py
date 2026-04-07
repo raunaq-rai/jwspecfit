@@ -131,6 +131,9 @@ def save_mcmc_result(
         "sampler_meta_json": np.array([json.dumps(_to_python(mcmc.sampler_meta))]),
         # Broad fit flag
         "is_broad_fit": np.array([is_broad]),
+        # Lyα two-component params (7 elements, or empty if no Lyα).
+        "lya_params": mcmc.lya_params if mcmc.lya_params is not None else np.array([]),
+        "has_lya_params": np.array([mcmc.lya_params is not None]),
     }
 
     # Per-line flux posteriors.
@@ -221,6 +224,10 @@ def load_mcmc_result(
     convergence = json.loads(str(data["convergence_json"][0]))
     sampler_meta = json.loads(str(data["sampler_meta_json"][0]))
 
+    # --- Lyα params ---
+    has_lya = bool(data["has_lya_params"][0]) if "has_lya_params" in data else False
+    lya_params = data["lya_params"] if has_lya else None
+
     mcmc = MCMCResult(
         lines=lines,
         flat_chains=data["flat_chains"],
@@ -236,6 +243,7 @@ def load_mcmc_result(
         convergence=convergence,
         sampler_name=str(data["sampler_name"][0]),
         sampler_meta=sampler_meta,
+        lya_params=lya_params,
     )
 
     # --- MCMCBroadFitResult wrapper ---

@@ -19,7 +19,7 @@ from jwspecfit.continuum import fit_continuum
 from jwspecfit.fitter import _grating_bounds
 from jwspecfit.io import Spectrum, _flam_to_ujy, _ujy_to_flam
 from jwspecfit.lines import REST_LINES_A, get_line_list, observable_lines
-from jwspecfit.models import build_model, pixel_weight
+from jwspecfit.models import build_model, pixel_weight, skewed_gaussian_binned
 from jwspecfit.resolution import resolve_R, sigma_inst_A
 
 from .diagnostics import summarise_convergence
@@ -214,10 +214,15 @@ def _fit_lines_mcmc(
     else:
         print(f"Resolving power: R ≈ {R_med:.0f} (range {R_lo:.0f}–{R_hi:.0f})")
 
+    # Auto-enable lya_break when Lya is in the line list.
+    _lya_in_lines = "Lya" in line_names
+    _lya_break = _lya_in_lines
+
     continuum = fit_continuum(
         spec.wave_um, spec.flux_ujy, spec.err_ujy, z, line_names,
         grating=grating, R=R, deg=deg, clip_sigma=clip_sigma,
         moving_average=moving_average,
+        lya_break=_lya_break,
     )
     flux_sub = spec.flux_ujy - continuum
 
@@ -225,8 +230,12 @@ def _fit_lines_mcmc(
     flam_err = _ujy_to_flam(spec.err_ujy, spec.wave_um)
 
     valid = np.isfinite(flam) & np.isfinite(flam_err) & (flam_err > 0)
-    nv_obs_A = REST_LINES_A["NV_1"] * (1.0 + z)
-    valid &= spec.wave_A >= nv_obs_A
+    if _lya_in_lines:
+        _blue_cutoff_A = 1150.0 * (1.0 + z)
+        valid &= spec.wave_A >= _blue_cutoff_A
+    else:
+        nv_obs_A = REST_LINES_A["NV_1"] * (1.0 + z)
+        valid &= spec.wave_A >= nv_obs_A
 
     edges = spec.wave_edges_A
     dlam = spec.dlam_A
@@ -257,6 +266,57 @@ def _fit_lines_mcmc(
 
     if nL == 0:
         raise ValueError("All lines fall in detector gaps — nothing to fit.")
+
+    # ------------------------------------------------------------------
+    # 3c. Separate Lyα from regular Gaussian lines
+    # ------------------------------------------------------------------
+    _lya_params = None  # (p0, lb, ub) for 7-element vector
+    _n_lya = 0
+    if _lya_in_lines:
+        line_names = [n for n in line_names if n != "Lya"]
+        nL = len(line_names)
+        lya_obs_A = REST_LINES_A["Lya"] * (1.0 + z)
+
+        idx_lya = np.argmin(np.abs(spec.wave_A - lya_obs_A))
+        local_sig = sig_inst[idx_lya]
+        near_lya = np.abs(spec.wave_A - lya_obs_A) < 10 * local_sig
+        peak_lya = np.nanmax(flam[near_lya]) if np.any(near_lya & valid) else 1.0
+        if not np.isfinite(peak_lya) or peak_lya <= 0:
+            peak_lya = 1.0
+
+        _C_KMS = 299792.458
+        cent_margin = max(500.0 / _C_KMS * lya_obs_A, 5.0)
+
+        # Narrow component.
+        sig_narrow_seed = max(local_sig, 1.0)
+        sig_narrow_lo = 0.3
+        sig_narrow_hi = 5.0 * sigma_factor
+        A_narrow_seed = peak_lya * _SQRT2PI * sig_narrow_seed
+
+        # Broad skewed component.
+        sig_broad_seed = 5.0
+        sig_broad_lo = 2.0
+        sig_broad_hi = 1500.0 / _C_KMS * lya_obs_A * sigma_factor
+        A_broad_seed = 0.3 * A_narrow_seed
+
+        lya_p0 = np.array([
+            A_narrow_seed, lya_obs_A + 1.0, sig_narrow_seed,
+            A_broad_seed, lya_obs_A + 2.0, sig_broad_seed, 5.0,
+        ])
+        lya_lb = np.array([
+            0.0, lya_obs_A - cent_margin, sig_narrow_lo,
+            0.0, lya_obs_A - cent_margin, sig_broad_lo, -2.0,
+        ])
+        lya_ub = np.array([
+            150.0 * A_narrow_seed, lya_obs_A + cent_margin, sig_narrow_hi,
+            150.0 * A_broad_seed, lya_obs_A + cent_margin, sig_broad_hi, 30.0,
+        ])
+        _lya_params = (lya_p0, lya_lb, lya_ub)
+        _n_lya = 7
+        logger.info(
+            "Lyα: narrow (σ [%.1f, %.1f] Å) + broad skewed (σ [%.1f, %.1f] Å)",
+            sig_narrow_lo, sig_narrow_hi, sig_broad_lo, sig_broad_hi,
+        )
 
     # ------------------------------------------------------------------
     # 4. Constraints and bounds (mirrors fitter.py lines 300-398)
@@ -386,31 +446,47 @@ def _fit_lines_mcmc(
     p0_free = p0[free_mask]
     lb_free = lb[free_mask]
     ub_free = ub[free_mask]
+
+    # Append Lyα parameters if present.
+    if _lya_params is not None:
+        lya_p0, lya_lb, lya_ub = _lya_params
+        p0_free = np.concatenate([p0_free, lya_p0])
+        lb_free = np.concatenate([lb_free, lya_lb])
+        ub_free = np.concatenate([ub_free, lya_ub])
+
     p0_free = np.clip(p0_free, lb_free + 1e-30, ub_free - 1e-30)
 
     # ------------------------------------------------------------------
     # 5. Optional MLE initialisation
     # ------------------------------------------------------------------
+    # Include Lya in the MLE line list so it gets initialised too.
+    _mle_lines = (["Lya"] + line_names) if _lya_in_lines else line_names
+
     if init_from_mle:
         logger.info("Running quick MLE fit for MCMC initialisation...")
         from jwspecfit.fitter import fit_lines as _fit_lines_mle
 
         mle_result = _fit_lines_mle(
             spec, z,
-            grating=grating, R=R, lines=line_names,
+            grating=grating, R=R, lines=_mle_lines,
             deg=deg, n_boot=0, clip_sigma=clip_sigma,
             tie_uv_doublets=tie_uv_doublets,
             tie_uv_centroids=tie_uv_centroids,
             tie_uv_widths=tie_uv_widths,
             sigma_overrides=sigma_overrides,
             centroid_overrides=centroid_overrides,
-
+            lya_break=_lya_break,
+            moving_average=moving_average,
+            sigma_factor=sigma_factor,
         )
         if mle_result.success:
             # Map MLE params back by line name — the MLE fit may have
             # fewer lines (e.g. detector-gap filtering drops some).
-            nL_mle = len(mle_result.line_names)
-            mle_idx = {n: j for j, n in enumerate(mle_result.line_names)}
+            # Lya is handled separately (not in the Gaussian params),
+            # so exclude it from the Gaussian param index.
+            _mle_gauss_names = [n for n in mle_result.line_names if n != "Lya"]
+            nL_mle = len(_mle_gauss_names)
+            mle_idx = {n: j for j, n in enumerate(_mle_gauss_names)}
             for i, name in enumerate(line_names):
                 if name in mle_idx:
                     j = mle_idx[name]
@@ -418,6 +494,18 @@ def _fit_lines_mcmc(
                     p0[nL + i] = mle_result.params[nL_mle + j]         # centroid
                     p0[2 * nL + i] = mle_result.params[2 * nL_mle + j] # sigma
             p0_free = p0[free_mask]
+            # Re-append Lyα with MLE values if available.
+            if _lya_params is not None:
+                if "Lya" in mle_result.lines:
+                    lr = mle_result.lines["Lya"]
+                    # The MLE fit now returns total flux and narrow centroid/sigma.
+                    # Split flux 70/30 narrow/broad as initial guess.
+                    lya_p0 = np.array([
+                        0.7 * lr.flux, lr.centroid_A, lr.sigma_A,  # narrow
+                        0.3 * lr.flux, lr.centroid_A + 2.0, 5.0, 5.0,  # broad
+                    ])
+                    lya_p0 = np.clip(lya_p0, lya_lb + 1e-30, lya_ub - 1e-30)
+                p0_free = np.concatenate([p0_free, lya_p0])
             p0_free = np.clip(p0_free, lb_free + 1e-30, ub_free - 1e-30)
             logger.info(
                 "MLE initialisation successful (chi2=%.2f, %d/%d lines matched).",
@@ -475,6 +563,17 @@ def _fit_lines_mcmc(
     # ------------------------------------------------------------------
     # 7. Build likelihood spec
     # ------------------------------------------------------------------
+    # Build Lyα model function if needed.
+    _lya_model_fn = None
+    if _n_lya > 0:
+        from jwspecfit.models import gaussian_binned
+        left = edges[:-1]
+        right = edges[1:]
+        def _lya_model_fn(p_lya):
+            narrow = gaussian_binned(left, right, p_lya[1], p_lya[2]) * p_lya[0]
+            broad = skewed_gaussian_binned(left, right, p_lya[3], p_lya[4], p_lya[5], p_lya[6])
+            return narrow + broad
+
     like_spec = LikelihoodSpec(
         flam=flam,
         flam_err=flam_err,
@@ -483,6 +582,8 @@ def _fit_lines_mcmc(
         n_lines=nL,
         constraints=constraints,
         w_pix=w_pix,
+        n_lya=_n_lya,
+        lya_model_fn=_lya_model_fn,
     )
 
     # ------------------------------------------------------------------
@@ -519,14 +620,29 @@ def _fit_lines_mcmc(
     flat_log_prob = sampler_result["flat_log_prob"]
     n_samples = len(flat_chains_free)
 
+    # Split off Lyα chains if present.
+    _lya_chains = None
+    if _n_lya > 0:
+        _lya_chains = flat_chains_free[:, -_n_lya:]  # (n_samples, 4)
+        flat_chains_free_gauss = flat_chains_free[:, :-_n_lya]
+    else:
+        flat_chains_free_gauss = flat_chains_free
+
     # Expand each sample to the full parameter space.
     flat_chains_full = np.zeros((n_samples, 3 * nL))
     for s in range(n_samples):
-        flat_chains_full[s] = constraints.expand_free_to_full(flat_chains_free[s])
+        flat_chains_full[s] = constraints.expand_free_to_full(flat_chains_free_gauss[s])
 
     # Median posterior.
     p_median = np.median(flat_chains_full, axis=0)
     model_flam_median = build_model(p_median, edges, nL)
+
+    # Add Lyα model to the median model.
+    _lya_best = None
+    if _lya_chains is not None and _lya_model_fn is not None:
+        _lya_best = np.median(_lya_chains, axis=0)
+        model_flam_median = model_flam_median + _lya_model_fn(_lya_best)
+
     model_ujy_median = _flam_to_ujy(model_flam_median, spec.wave_um)
 
     # ------------------------------------------------------------------
@@ -593,6 +709,65 @@ def _fit_lines_mcmc(
         )
 
     # ------------------------------------------------------------------
+    # 10b. Lyα MCMCLineResult
+    # ------------------------------------------------------------------
+    if _lya_chains is not None:
+        # 7 params: [A_narrow, mu_narrow, sig_narrow,
+        #            A_broad, mu_broad, sig_broad, skew_broad]
+        A_narrow_samples = _lya_chains[:, 0]
+        mu_narrow_samples = _lya_chains[:, 1]
+        sig_narrow_samples = _lya_chains[:, 2]
+        A_broad_samples = _lya_chains[:, 3]
+
+        # Total flux posterior = narrow + broad.
+        flux_total_samples = A_narrow_samples + A_broad_samples
+
+        flux_med = float(np.median(flux_total_samples))
+        flux_lo = flux_med - float(np.percentile(flux_total_samples, 16))
+        flux_hi = float(np.percentile(flux_total_samples, 84)) - flux_med
+
+        # Use narrow component centroid and sigma as representative.
+        mu_med = float(np.median(mu_narrow_samples))
+        mu_lo = mu_med - float(np.percentile(mu_narrow_samples, 16))
+        mu_hi = float(np.percentile(mu_narrow_samples, 84)) - mu_med
+
+        sig_med = float(np.median(sig_narrow_samples))
+        sig_lo = sig_med - float(np.percentile(sig_narrow_samples, 16))
+        sig_hi = float(np.percentile(sig_narrow_samples, 84)) - sig_med
+
+        mean_err = 0.5 * (flux_lo + flux_hi)
+        snr_lya = flux_med / mean_err if mean_err > 0 else 0.0
+
+        idx_cont_lya = np.argmin(np.abs(spec.wave_A - mu_med))
+        cont_at_lya = cont_flam[idx_cont_lya]
+        ew_lya = flux_med / cont_at_lya / (1.0 + z) if cont_at_lya > 0 else np.nan
+
+        line_results["Lya"] = MCMCLineResult(
+            name="Lya",
+            rest_wave_A=REST_LINES_A["Lya"],
+            amplitude=flux_med,
+            amplitude_err=(flux_lo, flux_hi),
+            centroid_A=mu_med,
+            centroid_err=(mu_lo, mu_hi),
+            sigma_A=sig_med,
+            sigma_err=(sig_lo, sig_hi),
+            flux=flux_med,
+            flux_err=(flux_lo, flux_hi),
+            flux_posterior=flux_total_samples,
+            ew_A=ew_lya,
+            snr=snr_lya,
+        )
+        line_names = ["Lya"] + line_names
+
+        A_narrow_med = float(np.median(A_narrow_samples))
+        A_broad_med = float(np.median(A_broad_samples))
+        logger.info(
+            "Lyα MCMC: narrow=%.3e, broad=%.3e, total=%.3e (+%.3e/-%.3e), "
+            "centroid=%.1f Å, σ_narrow=%.1f Å",
+            A_narrow_med, A_broad_med, flux_med, flux_hi, flux_lo, mu_med, sig_med,
+        )
+
+    # ------------------------------------------------------------------
     # 11. Convergence diagnostics (emcee only)
     # ------------------------------------------------------------------
     convergence: dict[str, Any] = {}
@@ -618,6 +793,7 @@ def _fit_lines_mcmc(
         convergence=convergence,
         sampler_name=sampler_result["sampler_name"],
         sampler_meta=sampler_result["sampler_meta"],
+        lya_params=_lya_best,
     )
 
 

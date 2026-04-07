@@ -29,6 +29,7 @@ def fit_continuum(
     n_iter: int = 5,
     line_mask_nsigma: float = 6.0,
     moving_average: bool | int = False,
+    lya_break: bool = False,
 ) -> np.ndarray:
     """Fit a continuum with emission-line masking.
 
@@ -84,7 +85,9 @@ def fit_continuum(
     # unreliable there.
     _LYA_REST_A = 1215.670
     lya_obs_A = _LYA_REST_A * (1.0 + z)
-    valid &= wave_A >= lya_obs_A
+    # When fitting Lyα, extend the continuum to cover the blue side.
+    if not lya_break:
+        valid &= wave_A >= lya_obs_A
 
     # Resolve moving_average window size.
     if moving_average is True:
@@ -154,6 +157,8 @@ def fit_continuum(
         else:
             continuum = cont
 
+        if lya_break:
+            continuum = _apply_lya_break(wave_A, continuum, lya_obs_A)
         return continuum
 
     # ---- Polynomial path (default) ----
@@ -198,4 +203,37 @@ def fit_continuum(
         coeffs = np.polyfit(w_norm[mask], flux_ujy[mask], deg, w=weights[mask])
 
     continuum = np.polyval(coeffs, w_norm)
+    if lya_break:
+        continuum = _apply_lya_break(wave_A, continuum, lya_obs_A)
     return continuum
+
+
+def _apply_lya_break(
+    wave_A: np.ndarray,
+    continuum: np.ndarray,
+    lya_obs_A: float,
+) -> np.ndarray:
+    """Set continuum blueward of Lyα to zero.
+
+    At z > 5, the mean IGM transmission blueward of Lyα is < 5%,
+    so the intrinsic continuum is effectively extinguished.  For
+    de-redshifted stacks of high-z galaxies, the blue-side flux is
+    consistent with zero.
+
+    Parameters
+    ----------
+    wave_A : np.ndarray
+        Observed wavelength in Angstroms.
+    continuum : np.ndarray
+        Continuum array to modify.
+    lya_obs_A : float
+        Observed Lyα wavelength (Å).
+
+    Returns
+    -------
+    np.ndarray
+        Continuum with blue side set to zero.
+    """
+    out = continuum.copy()
+    out[wave_A < lya_obs_A] = 0.0
+    return out

@@ -207,12 +207,25 @@ def make_jax_log_likelihood(
     inv_err_w = jnp.where(valid, w_pix / flam_err, 0.0)
 
     n_full = 3 * nL
+    _n_lya = spec.n_lya
+    _has_lya = _n_lya > 0
+
+    # Pre-compute bin centres for the skewed Gaussian (used only for Lyα).
+    if _has_lya:
+        centres = 0.5 * (left + right)
 
     @jax.jit
     def log_likelihood_jax(p_free: jnp.ndarray) -> float:
+        # Split off Lyα parameters if present.
+        if _has_lya:
+            p_gauss = p_free[:-_n_lya]
+            p_lya = p_free[-_n_lya:]
+        else:
+            p_gauss = p_free
+
         # Expand free → full parameter vector.
         full = jnp.zeros(n_full, dtype=jnp.float64)
-        full = full.at[free_idx_jax].set(p_free)
+        full = full.at[free_idx_jax].set(p_gauss)
 
         # Apply tying ops (loop unrolled at trace time).
         for d, s, r in ops_tuples:
@@ -235,6 +248,24 @@ def make_jax_log_likelihood(
         profiles = area / widths[:, None]  # (n_pix, nL)
         model = profiles @ amps  # (n_pix,)
 
+        # Add two-component Lyα if present:
+        # p_lya = [A_narrow, mu_narrow, sig_narrow,
+        #          A_broad, mu_broad, sig_broad, skew_broad]
+        if _has_lya:
+            # Narrow component: bin-averaged Gaussian via erf.
+            inv_n = 1.0 / (_SQRT2 * p_lya[2])
+            cdf_r_n = 0.5 * (1.0 + jax.lax.erf((right - p_lya[1]) * inv_n))
+            cdf_l_n = 0.5 * (1.0 + jax.lax.erf((left - p_lya[1]) * inv_n))
+            narrow = p_lya[0] * (cdf_r_n - cdf_l_n) / widths
+
+            # Broad component: skewed Gaussian at bin centres.
+            t = (centres - p_lya[4]) / p_lya[5]
+            phi = jnp.exp(-0.5 * t**2) / (_SQRT2 * jnp.sqrt(jnp.pi) * p_lya[5])
+            big_phi = 0.5 * (1.0 + jax.lax.erf(p_lya[6] * t / _SQRT2))
+            broad = p_lya[3] * 2.0 * phi * big_phi
+
+            model = model + narrow + broad
+
         # Weighted residual.
         resid = (flam - model) * inv_err_w
         return -0.5 * jnp.dot(resid, resid)
@@ -248,7 +279,8 @@ def make_jax_log_likelihood(
         "free_idx": free_idx,
         "ops": ops_tuples,
         "n_lines": nL,
-        "n_free": len(free_idx),
+        "n_free": len(free_idx) + _n_lya,
+        "n_lya": _n_lya,
     }
 
     return log_likelihood_jax, static_data
