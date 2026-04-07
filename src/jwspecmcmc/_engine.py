@@ -296,7 +296,7 @@ def _fit_lines_mcmc(
         # Broad skewed component: extended scattering tail.
         # Lower bound above narrow upper bound to prevent degeneracy.
         sig_broad_seed = 5.0
-        sig_broad_lo = 2.0
+        sig_broad_lo = 4.0
         sig_broad_hi = 1500.0 / _C_KMS * lya_obs_A * sigma_factor
         A_broad_seed = 0.3 * A_narrow_seed
 
