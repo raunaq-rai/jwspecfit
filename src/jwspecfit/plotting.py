@@ -273,7 +273,6 @@ def plot_fit(
 
             centres_s = 0.5 * (edges[:-1] + edges[1:])
             lya_flam_s = _ag(centres_s, _lya_p_s[0], _lya_p_s[1], _lya_p_s[2], _lya_p_s[3])
-            lya_flam_s[centres_s < 1215.67] = 0.0
 
             if use_flam:
                 comp_s = lya_flam_s + _ujy_to_flam(result.continuum, spec.wave_um)
@@ -652,7 +651,6 @@ def plot_fit_interactive(
             wave_fine_c_um = wave_fine_c * 1e-4
 
             prof_flam = _ag(wave_fine_c, _A_pk, _mu_lya, _sig_lya, _alpha_lya)
-            prof_flam[wave_fine_c < 1215.67] = 0.0
 
             cont_fine_c_ujy = np.interp(wave_fine_c_um, spec.wave_um, result.continuum)
             if use_flam:

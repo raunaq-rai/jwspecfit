@@ -250,13 +250,11 @@ def make_jax_log_likelihood(
 
         # Lyα: single asymmetric Gaussian (Bolan+2025 parameterisation).
         # p_lya = [A_peak, mu, sigma, alpha]
-        # Zero blueward of Lyα rest (1215.67 Å) — IGM absorption.
         if _has_lya:
             t = (centres - p_lya[1]) / p_lya[2]
             gauss = p_lya[0] * jnp.exp(-0.5 * t**2)
             skew_term = 1.0 + jax.lax.erf(p_lya[3] * t / _SQRT2)
-            lya_prof = jnp.where(centres >= 1215.67, gauss * skew_term, 0.0)
-            model = model + lya_prof
+            model = model + gauss * skew_term
 
         # Weighted residual.
         resid = (flam - model) * inv_err_w
