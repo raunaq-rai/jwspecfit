@@ -867,8 +867,8 @@ def fit_lines(
         lya_ub[2] = min(sig_narrow_hi, 1.3 * _prefit_sig)
         # Also tighten the centroid around the pre-fit peak.
         _prefit_mu = _narrow_result.x[1]
-        lya_lb[1] = max(lya_lb[1], _prefit_mu - 1.0)
-        lya_ub[1] = min(lya_ub[1], _prefit_mu + 1.0)
+        lya_lb[1] = max(lya_lb[1], _prefit_mu - 0.5)
+        lya_ub[1] = min(lya_ub[1], _prefit_mu + 0.5)
         logger.info(
             "Lyα pass-1 (narrow only): A=%.3e, μ=%.1f Å, σ=%.2f Å "
             "→ σ bounds [%.2f, %.2f]",

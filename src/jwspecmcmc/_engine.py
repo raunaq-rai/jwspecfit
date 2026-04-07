@@ -529,8 +529,8 @@ def _fit_lines_mcmc(
                     lya_ub[2] = min(lya_ub[2], 1.3 * _mle_sig_n)
                     # Also tighten narrow centroid.
                     _mle_mu_n = _mle_lya[1]
-                    lya_lb[1] = max(lya_lb[1], _mle_mu_n - 1.0)
-                    lya_ub[1] = min(lya_ub[1], _mle_mu_n + 1.0)
+                    lya_lb[1] = max(lya_lb[1], _mle_mu_n - 0.5)
+                    lya_ub[1] = min(lya_ub[1], _mle_mu_n + 0.5)
                     # Update the master bounds arrays (Lyα is at the end).
                     _lya_start = len(lb_free) - _n_lya
                     lb_free[_lya_start:] = lya_lb
