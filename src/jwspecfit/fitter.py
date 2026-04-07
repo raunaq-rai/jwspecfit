@@ -545,7 +545,15 @@ def fit_lines(
         idx_lya = np.argmin(np.abs(spec.wave_A - lya_obs_A))
         local_sig = sig_inst[idx_lya]
         near_lya = np.abs(spec.wave_A - lya_obs_A) < 10 * local_sig
-        peak_lya = np.nanmax(flam[near_lya]) if np.any(near_lya & valid) else 1.0
+        # Find the actual peak pixel location, not just the peak value.
+        _near_idx = np.where(near_lya & valid)[0]
+        if len(_near_idx) > 0:
+            _peak_idx = _near_idx[np.argmax(flam[_near_idx])]
+            peak_lya = flam[_peak_idx]
+            peak_wave_A = spec.wave_A[_peak_idx]
+        else:
+            peak_lya = 1.0
+            peak_wave_A = lya_obs_A + 1.0
         if not np.isfinite(peak_lya) or peak_lya <= 0:
             peak_lya = 1.0
 
@@ -553,22 +561,35 @@ def fit_lines(
         cent_margin = max(centroid_vmax / _C_KMS * lya_obs_A, 5.0)
 
         # Narrow component: captures the sharp spike just redward of 1216 Å.
-        # Must stay truly narrow — the spike is typically 1-3 pixels wide.
-        sig_narrow_seed = max(local_sig, 0.7)
+        # Must stay truly narrow — the spike is typically 1-2 pixels wide.
+        # Seed σ at the pixel half-width for stacked spectra (0.5 Å grid).
+        _pixel_scale = np.median(np.diff(spec.wave_A))
+        sig_narrow_seed = max(local_sig, _pixel_scale)
         sig_narrow_lo = 0.2
         sig_narrow_hi = 1.5  # cap at 1.5 Å (~370 km/s) — spike only
-        A_narrow_seed = peak_lya * _SQRT2PI * sig_narrow_seed
+
+        # Amplitude seed: for a bin-averaged Gaussian, the peak pixel
+        # value ≈ A × erf(Δλ/(2√2 σ)) / Δλ.  Invert to get A from the
+        # observed peak.
+        from scipy.special import erf as _erf
+        _sqrt2 = sqrt(2.0)
+        _bin_frac = float(_erf(_pixel_scale / (2.0 * _sqrt2 * sig_narrow_seed)))
+        if _bin_frac > 0:
+            A_narrow_seed = peak_lya * _pixel_scale / _bin_frac
+        else:
+            A_narrow_seed = peak_lya * _SQRT2PI * sig_narrow_seed
 
         # Broad component: captures the extended red scattering tail.
-        # Lower bound above the narrow upper bound to prevent degeneracy.
-        sig_broad_seed = 5.0
-        sig_broad_lo = 4.0
+        # Lower bound at the narrow upper bound — the skew parameter
+        # differentiates the two components (narrow is symmetric).
+        sig_broad_seed = 2.5
+        sig_broad_lo = sig_narrow_hi  # 1.5 Å — continuous with narrow range
         sig_broad_hi = 1500.0 / _C_KMS * lya_obs_A * sigma_factor
         A_broad_seed = 0.3 * A_narrow_seed  # start at 30% of narrow
 
         lya_p0 = np.array([
-            A_narrow_seed, lya_obs_A + 1.0, sig_narrow_seed,  # narrow
-            A_broad_seed, lya_obs_A + 2.0, sig_broad_seed, 5.0,  # broad + skew
+            A_narrow_seed, peak_wave_A, sig_narrow_seed,  # narrow at peak
+            A_broad_seed, peak_wave_A, sig_broad_seed, 3.0,  # broad + skew
         ])
         lya_lb = np.array([
             0.0, lya_obs_A - cent_margin, sig_narrow_lo,
@@ -580,8 +601,10 @@ def fit_lines(
         ])
         _lya_params = (lya_p0, lya_lb, lya_ub)
         logger.info(
-            "Lyα: narrow (σ [%.1f, %.1f] Å) + broad skewed (σ [%.1f, %.1f] Å)",
-            sig_narrow_lo, sig_narrow_hi, sig_broad_lo, sig_broad_hi,
+            "Lyα: narrow (σ [%.1f, %.1f] Å, seed=%.2f) + "
+            "broad skewed (σ [%.1f, %.1f] Å), peak at %.1f Å",
+            sig_narrow_lo, sig_narrow_hi, sig_narrow_seed,
+            sig_broad_lo, sig_broad_hi, peak_wave_A,
         )
 
     # Setup constraints.
@@ -785,6 +808,57 @@ def fit_lines(
     # Append Lyα parameters if present.
     if _lya_params is not None:
         lya_p0, lya_lb, lya_ub = _lya_params
+
+        # --- Two-pass Lyα: fit narrow alone first to lock onto peak ---
+        # Restrict to ±3 Å of the data peak so the narrow locks onto the
+        # sharp spike, not the broader extended profile.
+        _lya_region = np.abs(spec.wave_A - peak_wave_A) < 3.0
+        _lya_mask = _lya_region & valid
+        _left_lya = left[_lya_region]
+        _right_lya = right[_lya_region]
+        _flam_lya = flam[_lya_region]
+        _err_lya = flam_err[_lya_region]
+        _valid_lya = valid[_lya_region]
+        _wpix_lya = w_pix[_lya_region]
+
+        def _narrow_only_resid(p_narrow: np.ndarray) -> np.ndarray:
+            """Residuals for narrow-only Lyα fit near the line.
+
+            Uses unweighted residuals so the sharp peak pixel (which
+            typically has large error from stacking variance) gets
+            proper weight instead of being downweighted.
+            """
+            narrow_model = gaussian_binned(
+                _left_lya, _right_lya, p_narrow[1], p_narrow[2],
+            ) * p_narrow[0]
+            resid = _flam_lya - narrow_model
+            resid[~_valid_lya] = 0.0
+            return resid
+
+        _narrow_p0 = np.clip(lya_p0[:3], lya_lb[:3] + 1e-30, lya_ub[:3] - 1e-30)
+        _narrow_result = least_squares(
+            _narrow_only_resid, _narrow_p0,
+            bounds=(lya_lb[:3], lya_ub[:3]),
+            max_nfev=10000, xtol=1e-8, ftol=1e-8, x_scale="jac",
+        )
+        # Use the narrow-only fit to seed the full 7-parameter model.
+        # Tighten narrow bounds around the pre-fit so the joint
+        # (error-weighted) fit can't wander back to a wider solution
+        # that ignores the high-error peak pixel.
+        lya_p0[:3] = _narrow_result.x
+        _prefit_sig = _narrow_result.x[2]
+        lya_lb[2] = max(sig_narrow_lo, 0.8 * _prefit_sig)
+        lya_ub[2] = min(sig_narrow_hi, 1.3 * _prefit_sig)
+        # Also tighten the centroid around the pre-fit peak.
+        _prefit_mu = _narrow_result.x[1]
+        lya_lb[1] = max(lya_lb[1], _prefit_mu - 1.0)
+        lya_ub[1] = min(lya_ub[1], _prefit_mu + 1.0)
+        logger.info(
+            "Lyα pass-1 (narrow only): A=%.3e, μ=%.1f Å, σ=%.2f Å "
+            "→ σ bounds [%.2f, %.2f]",
+            *_narrow_result.x, lya_lb[2], lya_ub[2],
+        )
+
         p0_free = np.concatenate([p0_free, lya_p0])
         lb_free = np.concatenate([lb_free, lya_lb])
         ub_free = np.concatenate([ub_free, lya_ub])

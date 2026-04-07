@@ -280,7 +280,15 @@ def _fit_lines_mcmc(
         idx_lya = np.argmin(np.abs(spec.wave_A - lya_obs_A))
         local_sig = sig_inst[idx_lya]
         near_lya = np.abs(spec.wave_A - lya_obs_A) < 10 * local_sig
-        peak_lya = np.nanmax(flam[near_lya]) if np.any(near_lya & valid) else 1.0
+        # Find the actual peak pixel location.
+        _near_idx = np.where(near_lya & valid)[0]
+        if len(_near_idx) > 0:
+            _peak_idx = _near_idx[np.argmax(flam[_near_idx])]
+            peak_lya = flam[_peak_idx]
+            peak_wave_A = spec.wave_A[_peak_idx]
+        else:
+            peak_lya = 1.0
+            peak_wave_A = lya_obs_A + 1.0
         if not np.isfinite(peak_lya) or peak_lya <= 0:
             peak_lya = 1.0
 
@@ -288,21 +296,32 @@ def _fit_lines_mcmc(
         cent_margin = max(500.0 / _C_KMS * lya_obs_A, 5.0)
 
         # Narrow component: sharp spike, must stay truly narrow.
-        sig_narrow_seed = max(local_sig, 0.7)
+        # Seed σ at the pixel half-width for stacked spectra.
+        _pixel_scale = np.median(np.diff(spec.wave_A))
+        sig_narrow_seed = max(local_sig, _pixel_scale)
         sig_narrow_lo = 0.2
         sig_narrow_hi = 1.5  # cap at 1.5 Å — spike only
-        A_narrow_seed = peak_lya * _SQRT2PI * sig_narrow_seed
+
+        # Amplitude seed via bin-averaged Gaussian inversion.
+        from scipy.special import erf as _erf
+        _sqrt2 = sqrt(2.0)
+        _bin_frac = float(_erf(_pixel_scale / (2.0 * _sqrt2 * sig_narrow_seed)))
+        if _bin_frac > 0:
+            A_narrow_seed = peak_lya * _pixel_scale / _bin_frac
+        else:
+            A_narrow_seed = peak_lya * _SQRT2PI * sig_narrow_seed
 
         # Broad skewed component: extended scattering tail.
-        # Lower bound above narrow upper bound to prevent degeneracy.
-        sig_broad_seed = 5.0
-        sig_broad_lo = 4.0
+        # Lower bound at the narrow upper bound — the skew parameter
+        # differentiates the two components (narrow is symmetric).
+        sig_broad_seed = 2.5
+        sig_broad_lo = sig_narrow_hi  # 1.5 Å — continuous with narrow range
         sig_broad_hi = 1500.0 / _C_KMS * lya_obs_A * sigma_factor
         A_broad_seed = 0.3 * A_narrow_seed
 
         lya_p0 = np.array([
-            A_narrow_seed, lya_obs_A + 1.0, sig_narrow_seed,
-            A_broad_seed, lya_obs_A + 2.0, sig_broad_seed, 5.0,
+            A_narrow_seed, peak_wave_A, sig_narrow_seed,
+            A_broad_seed, peak_wave_A, sig_broad_seed, 3.0,
         ])
         lya_lb = np.array([
             0.0, lya_obs_A - cent_margin, sig_narrow_lo,
@@ -315,8 +334,10 @@ def _fit_lines_mcmc(
         _lya_params = (lya_p0, lya_lb, lya_ub)
         _n_lya = 7
         logger.info(
-            "Lyα: narrow (σ [%.1f, %.1f] Å) + broad skewed (σ [%.1f, %.1f] Å)",
-            sig_narrow_lo, sig_narrow_hi, sig_broad_lo, sig_broad_hi,
+            "Lyα: narrow (σ [%.1f, %.1f] Å, seed=%.2f) + "
+            "broad skewed (σ [%.1f, %.1f] Å), peak at %.1f Å",
+            sig_narrow_lo, sig_narrow_hi, sig_narrow_seed,
+            sig_broad_lo, sig_broad_hi, peak_wave_A,
         )
 
     # ------------------------------------------------------------------
@@ -497,13 +518,33 @@ def _fit_lines_mcmc(
             p0_free = p0[free_mask]
             # Re-append Lyα with MLE values if available.
             if _lya_params is not None:
-                if "Lya" in mle_result.lines:
+                _mle_lya = getattr(mle_result, "lya_params", None)
+                if _mle_lya is not None and len(_mle_lya) == 7:
+                    # Use the full 7-parameter decomposition from MLE.
+                    lya_p0 = np.array(_mle_lya, dtype=np.float64)
+                    # Tighten narrow σ bounds around MLE value so
+                    # the MCMC posterior can't drift to a wider solution.
+                    _mle_sig_n = _mle_lya[2]
+                    lya_lb[2] = max(lya_lb[2], 0.8 * _mle_sig_n)
+                    lya_ub[2] = min(lya_ub[2], 1.3 * _mle_sig_n)
+                    # Also tighten narrow centroid.
+                    _mle_mu_n = _mle_lya[1]
+                    lya_lb[1] = max(lya_lb[1], _mle_mu_n - 1.0)
+                    lya_ub[1] = min(lya_ub[1], _mle_mu_n + 1.0)
+                    # Update the master bounds arrays (Lyα is at the end).
+                    _lya_start = len(lb_free) - _n_lya
+                    lb_free[_lya_start:] = lya_lb
+                    ub_free[_lya_start:] = lya_ub
+                    lya_p0 = np.clip(lya_p0, lya_lb + 1e-30, lya_ub - 1e-30)
+                    logger.info(
+                        "Lyα MCMC bounds tightened: narrow σ [%.2f, %.2f], μ [%.1f, %.1f]",
+                        lya_lb[2], lya_ub[2], lya_lb[1], lya_ub[1],
+                    )
+                elif "Lya" in mle_result.lines:
                     lr = mle_result.lines["Lya"]
-                    # The MLE fit now returns total flux and narrow centroid/sigma.
-                    # Split flux 70/30 narrow/broad as initial guess.
                     lya_p0 = np.array([
-                        0.7 * lr.flux, lr.centroid_A, lr.sigma_A,  # narrow
-                        0.3 * lr.flux, lr.centroid_A + 2.0, 5.0, 5.0,  # broad
+                        0.7 * lr.flux, lr.centroid_A, lr.sigma_A,
+                        0.3 * lr.flux, lr.centroid_A + 2.0, 5.0, 5.0,
                     ])
                     lya_p0 = np.clip(lya_p0, lya_lb + 1e-30, lya_ub - 1e-30)
                 p0_free = np.concatenate([p0_free, lya_p0])
