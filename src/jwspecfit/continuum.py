@@ -235,4 +235,21 @@ def _apply_lya_break(
     """
     out = continuum.copy()
     out[wave_A < lya_obs_A] = 0.0
+
+    # Linear ramp from zero at Lyα to the moving-average value at
+    # Lyα + ramp_width.  The moving average overestimates the continuum
+    # near the break because it smooths over the Lyα emission; the ramp
+    # corrects this by forcing the continuum to rise linearly from the
+    # break rather than following the biased moving average.
+    _ramp_width_A = 5.0  # Å — ramp from 1216 to 1221
+    ramp_hi = lya_obs_A + _ramp_width_A
+    ramp_mask = (wave_A >= lya_obs_A) & (wave_A < ramp_hi)
+    if np.any(ramp_mask):
+        # Value the continuum should reach at the end of the ramp.
+        idx_ramp_end = np.argmin(np.abs(wave_A - ramp_hi))
+        cont_at_ramp_end = continuum[idx_ramp_end]
+        # Linear interpolation from 0 at lya_obs to cont_at_ramp_end.
+        frac = (wave_A[ramp_mask] - lya_obs_A) / _ramp_width_A
+        out[ramp_mask] = cont_at_ramp_end * frac
+
     return out
