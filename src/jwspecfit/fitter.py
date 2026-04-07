@@ -560,18 +560,25 @@ def fit_lines(
         _C_KMS = 299792.458
         cent_margin = max(centroid_vmax / _C_KMS * lya_obs_A, 5.0)
 
-        # σ bounds: instrumental resolution to ~15 Å.
-        sig_seed = max(local_sig, 1.0)
-        sig_lo = 0.3
-        sig_hi = max(15.0, 1500.0 / _C_KMS * lya_obs_A * sigma_factor)
+        # σ controls the blue-side sharpness of the profile; the red
+        # tail width comes from α (the skewness).  For stacked spectra
+        # the Lyα peak is resolution-limited, so σ should be tight.
+        sig_seed = max(local_sig, 0.5)
+        sig_lo = 0.2
+        sig_hi = 3.0 * sigma_factor  # keep narrow — asymmetry handles the tail
 
-        # A_peak seed: the observed peak flux density.
-        A_peak_seed = peak_lya
+        # A_peak seed: with α>0 the actual peak exceeds A_peak, so
+        # seed below the observed peak to leave room.
+        A_peak_seed = 0.5 * peak_lya
 
-        lya_p0 = np.array([A_peak_seed, peak_wave_A, sig_seed, 3.0])
+        # α seed: Lyα is generically red-asymmetric; start with
+        # moderate skewness.
+        alpha_seed = 5.0
+
+        lya_p0 = np.array([A_peak_seed, peak_wave_A, sig_seed, alpha_seed])
         lya_lb = np.array([0.0, lya_obs_A - cent_margin, sig_lo, 0.0])
         lya_ub = np.array([
-            150.0 * A_peak_seed, lya_obs_A + cent_margin, sig_hi, 30.0,
+            150.0 * peak_lya, lya_obs_A + cent_margin, sig_hi, 30.0,
         ])
         _lya_params = (lya_p0, lya_lb, lya_ub)
         logger.info(

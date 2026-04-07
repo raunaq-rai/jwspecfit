@@ -296,15 +296,17 @@ def _fit_lines_mcmc(
         cent_margin = max(500.0 / _C_KMS * lya_obs_A, 5.0)
 
         # Single asymmetric Gaussian: [A_peak, mu, sigma, alpha].
-        sig_seed = max(local_sig, 1.0)
-        sig_lo = 0.3
-        sig_hi = max(15.0, 1500.0 / _C_KMS * lya_obs_A * sigma_factor)
+        # σ controls blue-side sharpness; α handles the red tail.
+        sig_seed = max(local_sig, 0.5)
+        sig_lo = 0.2
+        sig_hi = 3.0 * sigma_factor
 
-        A_peak_seed = peak_lya
+        A_peak_seed = 0.5 * peak_lya
+        alpha_seed = 5.0
 
-        lya_p0 = np.array([A_peak_seed, peak_wave_A, sig_seed, 3.0])
+        lya_p0 = np.array([A_peak_seed, peak_wave_A, sig_seed, alpha_seed])
         lya_lb = np.array([0.0, lya_obs_A - cent_margin, sig_lo, 0.0])
-        lya_ub = np.array([150.0 * A_peak_seed, lya_obs_A + cent_margin, sig_hi, 30.0])
+        lya_ub = np.array([150.0 * peak_lya, lya_obs_A + cent_margin, sig_hi, 30.0])
         _lya_params = (lya_p0, lya_lb, lya_ub)
         _n_lya = 4
         logger.info(
