@@ -265,52 +265,43 @@ def plot_fit(
                     rotation=45,
                 )
 
-    # Lyα two-component overlay for static plot.
+    # Lyα asymmetric Gaussian overlay for static plot.
     if show_components:
         _lya_p_s = getattr(result, "lya_params", None)
-        if _lya_p_s is not None and len(_lya_p_s) == 7:
-            from scipy.stats import skewnorm as _skewnorm_s
-            from .models import gaussian_binned as _gb
+        if _lya_p_s is not None and len(_lya_p_s) == 4:
+            from .models import asymmetric_gaussian as _ag
 
-            # Narrow: evaluate on pixel grid via bin-averaged Gaussian.
-            narrow_flam_s = _gb(edges[:-1], edges[1:], _lya_p_s[1], _lya_p_s[2]) * _lya_p_s[0]
-            # Broad: skewed Gaussian.
             centres_s = 0.5 * (edges[:-1] + edges[1:])
-            broad_flam_s = _lya_p_s[3] * _skewnorm_s.pdf(
-                centres_s, _lya_p_s[6], loc=_lya_p_s[4], scale=_lya_p_s[5])
-            broad_flam_s[centres_s < 1215.67] = 0.0
+            lya_flam_s = _ag(centres_s, _lya_p_s[0], _lya_p_s[1], _lya_p_s[2], _lya_p_s[3])
 
-            for comp_f, comp_col, comp_lbl in [
-                (narrow_flam_s, "C0", "Lyα narrow"),
-                (broad_flam_s, "C0", "Lyα broad"),
-            ]:
-                if use_flam:
-                    comp_s = comp_f + _ujy_to_flam(result.continuum, spec.wave_um)
-                else:
-                    comp_s = _flam_to_ujy(comp_f, spec.wave_um) + cont
-                comp_s_m = comp_s.copy()
-                comp_s_m[~keep] = np.nan
-                cont_m = cont.copy()
-                cont_m[~keep] = np.nan
-                is_broad_comp = "broad" in comp_lbl
-                ax_main.fill_between(
-                    wave_plot, cont_m, comp_s_m,
-                    alpha=0.15 if is_broad_comp else 0.25, color=comp_col, linewidth=0,
-                )
-                ax_main.plot(
-                    wave_plot, comp_s_m, "-" if not is_broad_comp else ":",
-                    color=comp_col, lw=0.8, alpha=0.7,
-                )
+            if use_flam:
+                comp_s = lya_flam_s + _ujy_to_flam(result.continuum, spec.wave_um)
+            else:
+                comp_s = _flam_to_ujy(lya_flam_s, spec.wave_um) + cont
+            comp_s_m = comp_s.copy()
+            comp_s_m[~keep] = np.nan
+            cont_m = cont.copy()
+            cont_m[~keep] = np.nan
+            ax_main.fill_between(
+                wave_plot, cont_m, comp_s_m,
+                alpha=0.25, color="C0", linewidth=0,
+            )
+            ax_main.plot(
+                wave_plot, comp_s_m, "-",
+                color="C0", lw=0.8, alpha=0.7,
+            )
 
             if label_lines:
-                mu_n_s = _lya_p_s[1]
-                x_lbl = mu_n_s / zp1 if wave_unit == "A" else mu_n_s * 1e-4 / zp1
-                peak_n = _lya_p_s[0] / (sqrt(2 * pi) * _lya_p_s[2])
-                cont_at = np.interp(mu_n_s * 1e-4, spec.wave_um, result.continuum)
+                # Peak of the asymmetric Gaussian (find numerically).
+                _peak_idx_s = np.argmax(lya_flam_s)
+                mu_s = centres_s[_peak_idx_s]
+                x_lbl = mu_s / zp1 if wave_unit == "A" else mu_s * 1e-4 / zp1
+                peak_flam = lya_flam_s[_peak_idx_s]
+                cont_at = np.interp(mu_s * 1e-4, spec.wave_um, result.continuum)
                 if use_flam:
-                    y_lbl = peak_n + _ujy_to_flam(np.array([cont_at]), np.array([mu_n_s * 1e-4]))[0]
+                    y_lbl = peak_flam + _ujy_to_flam(np.array([cont_at]), np.array([mu_s * 1e-4]))[0]
                 else:
-                    y_lbl = _flam_to_ujy(np.array([peak_n]), np.array([mu_n_s * 1e-4]))[0] + cont_at
+                    y_lbl = _flam_to_ujy(np.array([peak_flam]), np.array([mu_s * 1e-4]))[0] + cont_at
                 ax_main.annotate(
                     "Lyα", xy=(x_lbl, y_lbl), xytext=(0, 8),
                     textcoords="offset points", fontsize=7, ha="center",
@@ -644,105 +635,80 @@ def plot_fit_interactive(
             x_peak = mu_A / zp1 if wave_unit == "A" else mu_A * 1e-4 / zp1
             peak_info.append((name, x_peak, float(y_peak), colour, is_abs))
 
-        # Lyα two-component overlay — same style as regular emission lines.
+        # Lyα asymmetric Gaussian overlay.
         _lya_p = getattr(result, "lya_params", None)
-        if _lya_p is not None and len(_lya_p) == 7:
-            from scipy.stats import skewnorm as _skewnorm
+        if _lya_p is not None and len(_lya_p) == 4:
+            from .models import asymmetric_gaussian as _ag
 
-            mu_n, sig_n = _lya_p[1], _lya_p[2]
-            mu_b, sig_b = _lya_p[4], _lya_p[5]
+            _A_pk, _mu_lya, _sig_lya, _alpha_lya = _lya_p
+            comp_col = palette[0]
 
-            # Each component gets its own fine grid, uncertainty shading,
-            # smooth curve, and annotation — identical to regular Gaussians.
-            _lya_components = [
-                # (amp, mu, sig, skew_or_None, name, colour, dash)
-                (_lya_p[0], mu_n, sig_n, None,      "Lyα narrow", palette[0], "solid"),
-                (_lya_p[3], mu_b, sig_b, _lya_p[6], "Lyα broad",  palette[1], "dot"),
-            ]
-            for amp_c, mu_c, sig_c, skew_c, comp_name, comp_col, comp_dash in _lya_components:
-                if amp_c == 0 or sig_c <= 0:
-                    continue
+            # Fine wavelength grid around the line.
+            w_lo_c = max(_mu_lya - 8 * _sig_lya, spec.wave_A.min())
+            w_hi_c = min(_mu_lya + 12 * _sig_lya, spec.wave_A.max())
+            n_fine_c = max(int((w_hi_c - w_lo_c) / (_sig_lya / 5)), 200)
+            wave_fine_c = np.linspace(w_lo_c, w_hi_c, n_fine_c)
+            wave_fine_c_um = wave_fine_c * 1e-4
 
-                # Fine wavelength grid around the component.
-                w_lo_c = max(mu_c - 8 * sig_c, spec.wave_A.min())
-                w_hi_c = min(mu_c + 8 * sig_c, spec.wave_A.max())
-                n_fine_c = max(int((w_hi_c - w_lo_c) / (sig_c / 5)), 200)
-                wave_fine_c = np.linspace(w_lo_c, w_hi_c, n_fine_c)
-                wave_fine_c_um = wave_fine_c * 1e-4
+            prof_flam = _ag(wave_fine_c, _A_pk, _mu_lya, _sig_lya, _alpha_lya)
 
-                # Profile in F_λ.
-                if skew_c is None:
-                    # Narrow: symmetric Gaussian.
-                    prof_flam = (amp_c / (sqrt(2 * pi) * sig_c)) * np.exp(
-                        -0.5 * ((wave_fine_c - mu_c) / sig_c) ** 2)
-                else:
-                    # Broad: skewed Gaussian.
-                    prof_flam = amp_c * _skewnorm.pdf(
-                        wave_fine_c, skew_c, loc=mu_c, scale=sig_c)
-                    prof_flam[wave_fine_c < 1215.67] = 0.0
+            cont_fine_c_ujy = np.interp(wave_fine_c_um, spec.wave_um, result.continuum)
+            if use_flam:
+                prof_plot = prof_flam + _ujy_to_flam(cont_fine_c_ujy, wave_fine_c_um)
+                cont_fine_c = _ujy_to_flam(cont_fine_c_ujy, wave_fine_c_um)
+            else:
+                prof_plot = _flam_to_ujy(prof_flam, wave_fine_c_um) + cont_fine_c_ujy
+                cont_fine_c = cont_fine_c_ujy
 
-                # Continuum at fine grid.
-                cont_fine_c_ujy = np.interp(wave_fine_c_um, spec.wave_um, result.continuum)
-                if use_flam:
-                    prof_plot = prof_flam + _ujy_to_flam(cont_fine_c_ujy, wave_fine_c_um)
-                    cont_fine_c = _ujy_to_flam(cont_fine_c_ujy, wave_fine_c_um)
-                else:
-                    prof_plot = _flam_to_ujy(prof_flam, wave_fine_c_um) + cont_fine_c_ujy
-                    cont_fine_c = cont_fine_c_ujy
+            wave_fine_c_plot = wave_fine_c / zp1 if wave_unit == "A" else wave_fine_c_um / zp1
+            keep_c = _build_exclude_mask(wave_fine_c, exclude_wave_A)
+            prof_masked = prof_plot.copy()
+            prof_masked[~keep_c] = np.nan
+            cont_fine_c_masked = cont_fine_c.copy()
+            cont_fine_c_masked[~keep_c] = np.nan
 
-                wave_fine_c_plot = wave_fine_c / zp1 if wave_unit == "A" else wave_fine_c_um / zp1
-                keep_c = _build_exclude_mask(wave_fine_c, exclude_wave_A)
-                prof_masked = prof_plot.copy()
-                prof_masked[~keep_c] = np.nan
-                cont_fine_c_masked = cont_fine_c.copy()
-                cont_fine_c_masked[~keep_c] = np.nan
+            # Uncertainty shading.
+            lr_lya = result.lines.get("Lya")
+            frac_err_c = 0.0
+            if lr_lya is not None and abs(lr_lya.flux) > 0:
+                fe = lr_lya.flux_err
+                fe_val = 0.5 * (fe[0] + fe[1]) if isinstance(fe, tuple) else fe
+                if fe_val > 0:
+                    frac_err_c = fe_val / abs(lr_lya.flux)
 
-                # Uncertainty shading (±1σ) — same as regular emission lines.
-                lr_lya = result.lines.get("Lya")
-                frac_err_c = 0.0
-                if lr_lya is not None and abs(lr_lya.flux) > 0:
-                    fe = lr_lya.flux_err
-                    fe_val = 0.5 * (fe[0] + fe[1]) if isinstance(fe, tuple) else fe
-                    if fe_val > 0:
-                        frac_err_c = fe_val / abs(lr_lya.flux)
-
-                if frac_err_c > 0:
-                    line_only = prof_masked - cont_fine_c_masked
-                    comp_hi = cont_fine_c_masked + line_only * (1.0 + frac_err_c)
-                    comp_lo = cont_fine_c_masked + line_only * max(1.0 - frac_err_c, 0.0)
-                    fill_c = _to_rgba(comp_col, 0.12)
-                    _add(go.Scatter(
-                        x=np.concatenate([wave_fine_c_plot, wave_fine_c_plot[::-1]]),
-                        y=np.concatenate([comp_hi, comp_lo[::-1]]),
-                        fill="toself", fillcolor=fill_c,
-                        line=dict(width=0), showlegend=False, hoverinfo="skip",
-                    ), row=1)
-
-                # Smooth curve.
+            if frac_err_c > 0:
+                line_only = prof_masked - cont_fine_c_masked
+                comp_hi = cont_fine_c_masked + line_only * (1.0 + frac_err_c)
+                comp_lo = cont_fine_c_masked + line_only * max(1.0 - frac_err_c, 0.0)
+                fill_c = _to_rgba(comp_col, 0.12)
                 _add(go.Scatter(
-                    x=wave_fine_c_plot, y=prof_masked,
-                    mode="lines", name=comp_name,
-                    line=dict(color=comp_col, width=1.5, dash=comp_dash),
-                    hovertemplate=f"{comp_name}<br>λ=%{{x:.1f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
-                    showlegend=False,
+                    x=np.concatenate([wave_fine_c_plot, wave_fine_c_plot[::-1]]),
+                    y=np.concatenate([comp_hi, comp_lo[::-1]]),
+                    fill="toself", fillcolor=fill_c,
+                    line=dict(width=0), showlegend=False, hoverinfo="skip",
                 ), row=1)
 
-                # Peak position for annotation.
-                if skew_c is None:
-                    peak_flam_c = amp_c / (sqrt(2 * pi) * sig_c)
-                else:
-                    peak_flam_c = amp_c * _skewnorm.pdf(
-                        mu_c + sig_c * skew_c / np.sqrt(1 + skew_c**2) * np.sqrt(2 / np.pi),
-                        skew_c, loc=mu_c, scale=sig_c)
-                cont_at_peak_c = np.interp(mu_c * 1e-4, spec.wave_um, result.continuum)
-                if use_flam:
-                    y_peak_c = peak_flam_c + _ujy_to_flam(
-                        np.array([cont_at_peak_c]), np.array([mu_c * 1e-4]))[0]
-                else:
-                    y_peak_c = _flam_to_ujy(
-                        np.array([peak_flam_c]), np.array([mu_c * 1e-4]))[0] + cont_at_peak_c
-                x_peak_c = mu_c / zp1 if wave_unit == "A" else mu_c * 1e-4 / zp1
-                peak_info.append((comp_name, x_peak_c, float(y_peak_c), comp_col, False))
+            _add(go.Scatter(
+                x=wave_fine_c_plot, y=prof_masked,
+                mode="lines", name="Lyα",
+                line=dict(color=comp_col, width=1.5, dash="solid"),
+                hovertemplate="Lyα<br>λ=%{x:.1f}<br>flux=%{y:.4e} " + flux_label + "<extra></extra>",
+                showlegend=False,
+            ), row=1)
+
+            # Peak annotation.
+            _pk_idx = np.argmax(prof_flam)
+            peak_flam_c = prof_flam[_pk_idx]
+            mu_pk = wave_fine_c[_pk_idx]
+            cont_at_peak_c = np.interp(mu_pk * 1e-4, spec.wave_um, result.continuum)
+            if use_flam:
+                y_peak_c = peak_flam_c + _ujy_to_flam(
+                    np.array([cont_at_peak_c]), np.array([mu_pk * 1e-4]))[0]
+            else:
+                y_peak_c = _flam_to_ujy(
+                    np.array([peak_flam_c]), np.array([mu_pk * 1e-4]))[0] + cont_at_peak_c
+            x_peak_c = mu_pk / zp1 if wave_unit == "A" else mu_pk * 1e-4 / zp1
+            peak_info.append(("Lyα", x_peak_c, float(y_peak_c), comp_col, False))
 
         # Line name annotations.
         for name, x_peak, y_peak, colour, is_abs in peak_info:

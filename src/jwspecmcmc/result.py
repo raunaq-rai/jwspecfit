@@ -131,7 +131,7 @@ class MCMCResult:
     convergence: dict[str, Any] = field(default_factory=dict)
     sampler_name: str = ""
     sampler_meta: dict[str, Any] = field(default_factory=dict)
-    lya_params: np.ndarray | None = None  # median [A_n, mu_n, sig_n, A_b, mu_b, sig_b, skew_b]
+    lya_params: np.ndarray | None = None  # [A_peak, mu, sigma, alpha]
 
     def to_fit_result(self) -> FitResult:
         """Convert to a :class:`jwspecfit.fitter.FitResult`.

@@ -248,26 +248,13 @@ def make_jax_log_likelihood(
         profiles = area / widths[:, None]  # (n_pix, nL)
         model = profiles @ amps  # (n_pix,)
 
-        # Add two-component Lyα if present:
-        # p_lya = [A_narrow, mu_narrow, sig_narrow,
-        #          A_broad, mu_broad, sig_broad, skew_broad]
+        # Lyα: single asymmetric Gaussian (Bolan+2025 parameterisation).
+        # p_lya = [A_peak, mu, sigma, alpha]
         if _has_lya:
-            # Narrow component: bin-averaged Gaussian via erf.
-            inv_n = 1.0 / (_SQRT2 * p_lya[2])
-            cdf_r_n = 0.5 * (1.0 + jax.lax.erf((right - p_lya[1]) * inv_n))
-            cdf_l_n = 0.5 * (1.0 + jax.lax.erf((left - p_lya[1]) * inv_n))
-            narrow = p_lya[0] * (cdf_r_n - cdf_l_n) / widths
-
-            # Broad component: skewed Gaussian at bin centres.
-            t = (centres - p_lya[4]) / p_lya[5]
-            phi = jnp.exp(-0.5 * t**2) / (_SQRT2 * jnp.sqrt(jnp.pi) * p_lya[5])
-            big_phi = 0.5 * (1.0 + jax.lax.erf(p_lya[6] * t / _SQRT2))
-            broad = p_lya[3] * 2.0 * phi * big_phi
-
-            # Zero broad component blueward of Lyα rest (1215.67 Å).
-            # For de-redshifted stacks (z=0), this is just the rest wavelength.
-            broad = jnp.where(centres >= 1215.67, broad, 0.0)
-            model = model + narrow + broad
+            t = (centres - p_lya[1]) / p_lya[2]
+            gauss = p_lya[0] * jnp.exp(-0.5 * t**2)
+            skew_term = 1.0 + jax.lax.erf(p_lya[3] * t / _SQRT2)
+            model = model + gauss * skew_term
 
         # Weighted residual.
         resid = (flam - model) * inv_err_w

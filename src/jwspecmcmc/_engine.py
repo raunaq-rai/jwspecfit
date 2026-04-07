@@ -19,7 +19,7 @@ from jwspecfit.continuum import fit_continuum
 from jwspecfit.fitter import _grating_bounds
 from jwspecfit.io import Spectrum, _flam_to_ujy, _ujy_to_flam
 from jwspecfit.lines import REST_LINES_A, get_line_list, observable_lines
-from jwspecfit.models import build_model, pixel_weight, skewed_gaussian_binned
+from jwspecfit.models import asymmetric_gaussian, build_model, pixel_weight
 from jwspecfit.resolution import resolve_R, sigma_inst_A
 
 from .diagnostics import summarise_convergence
@@ -270,7 +270,7 @@ def _fit_lines_mcmc(
     # ------------------------------------------------------------------
     # 3c. Separate Lyα from regular Gaussian lines
     # ------------------------------------------------------------------
-    _lya_params = None  # (p0, lb, ub) for 7-element vector
+    _lya_params = None  # (p0, lb, ub) for 4-element vector
     _n_lya = 0
     if _lya_in_lines:
         line_names = [n for n in line_names if n != "Lya"]
@@ -295,49 +295,22 @@ def _fit_lines_mcmc(
         _C_KMS = 299792.458
         cent_margin = max(500.0 / _C_KMS * lya_obs_A, 5.0)
 
-        # Narrow component: sharp spike, must stay truly narrow.
-        # Seed σ at the pixel half-width for stacked spectra.
-        _pixel_scale = np.median(np.diff(spec.wave_A))
-        sig_narrow_seed = max(local_sig, _pixel_scale)
-        sig_narrow_lo = 0.2
-        sig_narrow_hi = 1.5  # cap at 1.5 Å — spike only
+        # Single asymmetric Gaussian: [A_peak, mu, sigma, alpha].
+        sig_seed = max(local_sig, 1.0)
+        sig_lo = 0.3
+        sig_hi = max(15.0, 1500.0 / _C_KMS * lya_obs_A * sigma_factor)
 
-        # Amplitude seed via bin-averaged Gaussian inversion.
-        from scipy.special import erf as _erf
-        _sqrt2 = sqrt(2.0)
-        _bin_frac = float(_erf(_pixel_scale / (2.0 * _sqrt2 * sig_narrow_seed)))
-        if _bin_frac > 0:
-            A_narrow_seed = peak_lya * _pixel_scale / _bin_frac
-        else:
-            A_narrow_seed = peak_lya * _SQRT2PI * sig_narrow_seed
+        A_peak_seed = peak_lya
 
-        # Broad skewed component: extended scattering tail.
-        # Lower bound at the narrow upper bound — the skew parameter
-        # differentiates the two components (narrow is symmetric).
-        sig_broad_seed = 2.5
-        sig_broad_lo = sig_narrow_hi  # 1.5 Å — continuous with narrow range
-        sig_broad_hi = 1500.0 / _C_KMS * lya_obs_A * sigma_factor
-        A_broad_seed = 0.3 * A_narrow_seed
-
-        lya_p0 = np.array([
-            A_narrow_seed, peak_wave_A, sig_narrow_seed,
-            A_broad_seed, peak_wave_A, sig_broad_seed, 3.0,
-        ])
-        lya_lb = np.array([
-            0.0, lya_obs_A - cent_margin, sig_narrow_lo,
-            0.0, lya_obs_A, sig_broad_lo, 0.0,
-        ])
-        lya_ub = np.array([
-            150.0 * A_narrow_seed, lya_obs_A + cent_margin, sig_narrow_hi,
-            150.0 * A_broad_seed, lya_obs_A + cent_margin, sig_broad_hi, 30.0,
-        ])
+        lya_p0 = np.array([A_peak_seed, peak_wave_A, sig_seed, 3.0])
+        lya_lb = np.array([0.0, lya_obs_A - cent_margin, sig_lo, 0.0])
+        lya_ub = np.array([150.0 * A_peak_seed, lya_obs_A + cent_margin, sig_hi, 30.0])
         _lya_params = (lya_p0, lya_lb, lya_ub)
-        _n_lya = 7
+        _n_lya = 4
         logger.info(
-            "Lyα: narrow (σ [%.1f, %.1f] Å, seed=%.2f) + "
-            "broad skewed (σ [%.1f, %.1f] Å), peak at %.1f Å",
-            sig_narrow_lo, sig_narrow_hi, sig_narrow_seed,
-            sig_broad_lo, sig_broad_hi, peak_wave_A,
+            "Lyα: asymmetric Gaussian (σ [%.1f, %.1f] Å, seed=%.2f, "
+            "α [0, 30]), peak at %.1f Å",
+            sig_lo, sig_hi, sig_seed, peak_wave_A,
         )
 
     # ------------------------------------------------------------------
@@ -519,15 +492,14 @@ def _fit_lines_mcmc(
             # Re-append Lyα with MLE values if available.
             if _lya_params is not None:
                 _mle_lya = getattr(mle_result, "lya_params", None)
-                if _mle_lya is not None and len(_mle_lya) == 7:
-                    # Use the full 7-parameter decomposition from MLE.
+                if _mle_lya is not None and len(_mle_lya) == 4:
+                    # Use the 4-parameter asymmetric Gaussian from MLE.
                     lya_p0 = np.array(_mle_lya, dtype=np.float64)
-                    # Tighten narrow σ bounds around MLE value so
-                    # the MCMC posterior can't drift to a wider solution.
+                    # Tighten σ bounds around MLE value.
                     _mle_sig_n = _mle_lya[2]
                     lya_lb[2] = max(lya_lb[2], 0.8 * _mle_sig_n)
                     lya_ub[2] = min(lya_ub[2], 1.3 * _mle_sig_n)
-                    # Also tighten narrow centroid.
+                    # Also tighten centroid.
                     _mle_mu_n = _mle_lya[1]
                     lya_lb[1] = max(lya_lb[1], _mle_mu_n - 0.5)
                     lya_ub[1] = min(lya_ub[1], _mle_mu_n + 0.5)
@@ -537,14 +509,13 @@ def _fit_lines_mcmc(
                     ub_free[_lya_start:] = lya_ub
                     lya_p0 = np.clip(lya_p0, lya_lb + 1e-30, lya_ub - 1e-30)
                     logger.info(
-                        "Lyα MCMC bounds tightened: narrow σ [%.2f, %.2f], μ [%.1f, %.1f]",
+                        "Lyα MCMC bounds tightened: σ [%.2f, %.2f], μ [%.1f, %.1f]",
                         lya_lb[2], lya_ub[2], lya_lb[1], lya_ub[1],
                     )
                 elif "Lya" in mle_result.lines:
                     lr = mle_result.lines["Lya"]
                     lya_p0 = np.array([
-                        0.7 * lr.flux, lr.centroid_A, lr.sigma_A,
-                        0.3 * lr.flux, lr.centroid_A + 2.0, 5.0, 5.0,
+                        peak_lya, lr.centroid_A, lr.sigma_A, 3.0,
                     ])
                     lya_p0 = np.clip(lya_p0, lya_lb + 1e-30, lya_ub - 1e-30)
                 p0_free = np.concatenate([p0_free, lya_p0])
@@ -608,15 +579,13 @@ def _fit_lines_mcmc(
     # Build Lyα model function if needed.
     _lya_model_fn = None
     if _n_lya > 0:
-        from jwspecfit.models import gaussian_binned
         left = edges[:-1]
         right = edges[1:]
         _centres = 0.5 * (left + right)
         def _lya_model_fn(p_lya):
-            narrow = gaussian_binned(left, right, p_lya[1], p_lya[2]) * p_lya[0]
-            broad = skewed_gaussian_binned(left, right, p_lya[3], p_lya[4], p_lya[5], p_lya[6])
-            broad[_centres < lya_obs_A] = 0.0
-            return narrow + broad
+            return asymmetric_gaussian(
+                _centres, p_lya[0], p_lya[1], p_lya[2], p_lya[3],
+            )
 
     # Cap inflated errors near the Lyα peak (same logic as fitter.py).
     if _n_lya > 0:
@@ -765,28 +734,33 @@ def _fit_lines_mcmc(
     # 10b. Lyα MCMCLineResult
     # ------------------------------------------------------------------
     if _lya_chains is not None:
-        # 7 params: [A_narrow, mu_narrow, sig_narrow,
-        #            A_broad, mu_broad, sig_broad, skew_broad]
-        A_narrow_samples = _lya_chains[:, 0]
-        mu_narrow_samples = _lya_chains[:, 1]
-        sig_narrow_samples = _lya_chains[:, 2]
-        A_broad_samples = _lya_chains[:, 3]
+        # 4 params: [A_peak, mu, sigma, alpha]
+        A_peak_samples = _lya_chains[:, 0]
+        mu_samples_lya = _lya_chains[:, 1]
+        sig_samples_lya = _lya_chains[:, 2]
+        alpha_samples = _lya_chains[:, 3]
 
-        # Total flux posterior = narrow + broad.
-        flux_total_samples = A_narrow_samples + A_broad_samples
+        # Numerical flux integration for each sample via the median model.
+        _lya_best = np.median(_lya_chains, axis=0)
+        _lya_median_model = _lya_model_fn(_lya_best)
+        _dwave = np.diff(edges)
+        flux_med_numerical = float(np.sum(_lya_median_model * _dwave))
 
-        flux_med = float(np.median(flux_total_samples))
-        flux_lo = flux_med - float(np.percentile(flux_total_samples, 16))
-        flux_hi = float(np.percentile(flux_total_samples, 84)) - flux_med
+        # Per-sample flux posterior via analytical approximation:
+        # flux ≈ A_peak × sigma × sqrt(2π).
+        flux_samples = A_peak_samples * sig_samples_lya * _SQRT2PI
 
-        # Use narrow component centroid and sigma as representative.
-        mu_med = float(np.median(mu_narrow_samples))
-        mu_lo = mu_med - float(np.percentile(mu_narrow_samples, 16))
-        mu_hi = float(np.percentile(mu_narrow_samples, 84)) - mu_med
+        flux_med = float(np.median(flux_samples))
+        flux_lo = flux_med - float(np.percentile(flux_samples, 16))
+        flux_hi = float(np.percentile(flux_samples, 84)) - flux_med
 
-        sig_med = float(np.median(sig_narrow_samples))
-        sig_lo = sig_med - float(np.percentile(sig_narrow_samples, 16))
-        sig_hi = float(np.percentile(sig_narrow_samples, 84)) - sig_med
+        mu_med = float(np.median(mu_samples_lya))
+        mu_lo = mu_med - float(np.percentile(mu_samples_lya, 16))
+        mu_hi = float(np.percentile(mu_samples_lya, 84)) - mu_med
+
+        sig_med = float(np.median(sig_samples_lya))
+        sig_lo = sig_med - float(np.percentile(sig_samples_lya, 16))
+        sig_hi = float(np.percentile(sig_samples_lya, 84)) - sig_med
 
         mean_err = 0.5 * (flux_lo + flux_hi)
         snr_lya = flux_med / mean_err if mean_err > 0 else 0.0
@@ -798,26 +772,29 @@ def _fit_lines_mcmc(
         line_results["Lya"] = MCMCLineResult(
             name="Lya",
             rest_wave_A=REST_LINES_A["Lya"],
-            amplitude=flux_med,
-            amplitude_err=(flux_lo, flux_hi),
+            amplitude=float(np.median(A_peak_samples)),
+            amplitude_err=(
+                float(np.median(A_peak_samples)) - float(np.percentile(A_peak_samples, 16)),
+                float(np.percentile(A_peak_samples, 84)) - float(np.median(A_peak_samples)),
+            ),
             centroid_A=mu_med,
             centroid_err=(mu_lo, mu_hi),
             sigma_A=sig_med,
             sigma_err=(sig_lo, sig_hi),
             flux=flux_med,
             flux_err=(flux_lo, flux_hi),
-            flux_posterior=flux_total_samples,
+            flux_posterior=flux_samples,
             ew_A=ew_lya,
             snr=snr_lya,
         )
         line_names = ["Lya"] + line_names
 
-        A_narrow_med = float(np.median(A_narrow_samples))
-        A_broad_med = float(np.median(A_broad_samples))
         logger.info(
-            "Lyα MCMC: narrow=%.3e, broad=%.3e, total=%.3e (+%.3e/-%.3e), "
-            "centroid=%.1f Å, σ_narrow=%.1f Å",
-            A_narrow_med, A_broad_med, flux_med, flux_hi, flux_lo, mu_med, sig_med,
+            "Lyα MCMC: A_peak=%.3e, μ=%.1f Å, σ=%.2f Å, α=%.2f, "
+            "flux=%.3e (+%.3e/-%.3e)",
+            float(np.median(A_peak_samples)), mu_med, sig_med,
+            float(np.median(alpha_samples)),
+            flux_med, flux_hi, flux_lo,
         )
 
     # ------------------------------------------------------------------

@@ -97,6 +97,51 @@ def skewed_gaussian_binned(
     return amplitude * profile
 
 
+def asymmetric_gaussian(
+    wave_A: np.ndarray,
+    A_peak: float,
+    mu_A: float,
+    sigma_A: float,
+    alpha: float,
+) -> np.ndarray:
+    """Asymmetric (skewed-normal) Gaussian profile.
+
+    Follows the Owen/Bolan+2025 parameterisation used in Lyα fitting::
+
+        f(λ) = A_peak × exp(-(λ-μ)²/(2σ²)) × [1 + erf(α(λ-μ)/(√2 σ))]
+
+    When α=0 this reduces to a symmetric Gaussian with peak ``A_peak``.
+    Positive α produces a red-asymmetric tail (standard for Lyα).
+
+    Parameters
+    ----------
+    wave_A : np.ndarray
+        Wavelength grid (Å) — typically bin centres.
+    A_peak : float
+        Peak amplitude of the underlying Gaussian (before the erf
+        modulation).  Units match the flux-density units of the spectrum.
+    mu_A : float
+        Location parameter (Å).  Note: the observed peak shifts redward
+        of μ when α > 0.
+    sigma_A : float
+        Width parameter (Å).
+    alpha : float
+        Skewness parameter.  α = 0 → symmetric; α > 0 → red tail.
+
+    Returns
+    -------
+    np.ndarray
+        Profile evaluated at each wavelength (same units as *A_peak*).
+    """
+    if sigma_A <= 0 or not np.isfinite(sigma_A):
+        return np.zeros_like(wave_A)
+    from scipy.special import erf
+    t = (wave_A - mu_A) / sigma_A
+    gauss = A_peak * np.exp(-0.5 * t**2)
+    skew_term = 1.0 + erf(alpha * t / np.sqrt(2.0))
+    return gauss * skew_term
+
+
 def pixel_weight(dlam_A: np.ndarray, power: float = 0.35) -> np.ndarray:
     """Pixel-width weighting to down-weight overly narrow/wide pixels.
 

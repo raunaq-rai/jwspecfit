@@ -131,7 +131,7 @@ def save_mcmc_result(
         "sampler_meta_json": np.array([json.dumps(_to_python(mcmc.sampler_meta))]),
         # Broad fit flag
         "is_broad_fit": np.array([is_broad]),
-        # Lyα two-component params (7 elements, or empty if no Lyα).
+        # Lyα asymmetric Gaussian params (4 elements, or empty if no Lyα).
         "lya_params": mcmc.lya_params if mcmc.lya_params is not None else np.array([]),
         "has_lya_params": np.array([mcmc.lya_params is not None]),
     }

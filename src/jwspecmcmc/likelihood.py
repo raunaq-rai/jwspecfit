@@ -48,8 +48,9 @@ class LikelihoodSpec:
         Number of extra Lyα parameters appended to the free vector
         (4 when Lyα is being fit, 0 otherwise).
     lya_model_fn : callable or None
-        Function ``(p_lya,) -> np.ndarray`` that evaluates the skewed
-        Gaussian Lyα model from a 4-element parameter vector.
+        Function ``(p_lya,) -> np.ndarray`` that evaluates the asymmetric
+        Gaussian Lyα model from a 4-element parameter vector
+        ``[A_peak, mu, sigma, alpha]``.
     """
 
     flam: np.ndarray
