@@ -618,6 +618,15 @@ def _fit_lines_mcmc(
             broad[_centres < lya_obs_A] = 0.0
             return narrow + broad
 
+    # Cap inflated errors near the Lyα peak (same logic as fitter.py).
+    if _n_lya > 0:
+        _lya_vicinity = np.abs(spec.wave_A - lya_obs_A) < 15.0
+        _med_err = np.nanmedian(flam_err[_lya_vicinity & valid])
+        if np.isfinite(_med_err) and _med_err > 0:
+            _peak_region = np.abs(spec.wave_A - peak_wave_A) < 3.0
+            flam_err = flam_err.copy()
+            flam_err[_peak_region] = np.minimum(flam_err[_peak_region], _med_err)
+
     like_spec = LikelihoodSpec(
         flam=flam,
         flam_err=flam_err,

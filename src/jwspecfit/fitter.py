@@ -781,6 +781,22 @@ def fit_lines(
     # Pixel centres for truncation mask.
     _centres = 0.5 * (left + right)
 
+    # Cap inflated errors near the Lyα peak.  In stacked spectra the
+    # galaxy-to-galaxy Lyα scatter inflates the error at the peak to
+    # 2-3× the wing error, making the peak invisible to chi-squared.
+    # Capping at the local median gives the peak proper weight.
+    if _n_lya > 0:
+        _lya_vicinity = np.abs(spec.wave_A - lya_obs_A) < 15.0
+        _med_err = np.nanmedian(flam_err[_lya_vicinity & valid])
+        if np.isfinite(_med_err) and _med_err > 0:
+            _peak_region = np.abs(spec.wave_A - peak_wave_A) < 3.0
+            flam_err = flam_err.copy()  # don't mutate the original
+            flam_err[_peak_region] = np.minimum(flam_err[_peak_region], _med_err)
+            logger.debug(
+                "Lyα error cap: median=%.3e, capped %d pixels",
+                _med_err, int(np.sum(_peak_region)),
+            )
+
     def _lya_component(p_lya: np.ndarray) -> np.ndarray:
         """Evaluate the two-component Lyα model (narrow + broad skewed)."""
         narrow = gaussian_binned(left, right, p_lya[1], p_lya[2]) * p_lya[0]
