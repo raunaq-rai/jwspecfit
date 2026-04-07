@@ -554,15 +554,15 @@ def fit_lines(
 
         # Narrow component: captures the sharp spike just redward of 1216 Å.
         # Must stay truly narrow — the spike is typically 1-3 pixels wide.
-        sig_narrow_seed = max(local_sig, 0.8)
+        sig_narrow_seed = max(local_sig, 0.7)
         sig_narrow_lo = 0.2
-        sig_narrow_hi = 1.5  # hard cap at 1.5 Å (~370 km/s) — spike only
+        sig_narrow_hi = 2.5  # cap at 2.5 Å (~615 km/s) — spike only
         A_narrow_seed = peak_lya * _SQRT2PI * sig_narrow_seed
 
         # Broad component: captures the extended red scattering tail.
         # Lower bound above the narrow upper bound to prevent degeneracy.
         sig_broad_seed = 5.0
-        sig_broad_lo = 1.5
+        sig_broad_lo = 2.0
         sig_broad_hi = 1500.0 / _C_KMS * lya_obs_A * sigma_factor
         A_broad_seed = 0.3 * A_narrow_seed  # start at 30% of narrow
 
