@@ -572,7 +572,7 @@ def fit_lines(
         ])
         lya_lb = np.array([
             0.0, lya_obs_A - cent_margin, sig_narrow_lo,
-            0.0, lya_obs_A, sig_broad_lo, 0.0,
+            0.0, lya_obs_A + 1.0, sig_broad_lo, 0.0,
         ])
         lya_ub = np.array([
             150.0 * A_narrow_seed, lya_obs_A + cent_margin, sig_narrow_hi,
