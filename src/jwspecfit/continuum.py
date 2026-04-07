@@ -85,7 +85,6 @@ def fit_continuum(
     # unreliable there.
     _LYA_REST_A = 1215.670
     lya_obs_A = _LYA_REST_A * (1.0 + z)
-    # When fitting Lyα, extend the continuum to cover the blue side.
     if not lya_break:
         valid &= wave_A >= lya_obs_A
 
