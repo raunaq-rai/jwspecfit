@@ -290,7 +290,7 @@ def _fit_lines_mcmc(
         # Narrow component: sharp spike, must stay truly narrow.
         sig_narrow_seed = max(local_sig, 0.7)
         sig_narrow_lo = 0.2
-        sig_narrow_hi = 2.5  # cap at 2.5 Å — spike only
+        sig_narrow_hi = 1.5  # cap at 1.5 Å — spike only
         A_narrow_seed = peak_lya * _SQRT2PI * sig_narrow_seed
 
         # Broad skewed component: extended scattering tail.
