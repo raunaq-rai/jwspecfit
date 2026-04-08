@@ -1423,8 +1423,8 @@ class TestLyaEscapeFraction:
         """With no dust and full Case B Lyα, f_esc should be ~1."""
         from jwspecabund.dust import compute_lya_escape_fraction
 
-        # Hβ flux = 1.0, intrinsic Lyα/Hβ = 23.547, so intrinsic Lyα = 23.547.
-        lya_flux = 23.547
+        # Hβ flux = 1.0, intrinsic Lyα/Hβ = 26.071, so intrinsic Lyα = 26.071.
+        lya_flux = 26.071
         lya_err = 0.1
         fluxes_corr = {"HBETA": 1.0}
         errors_corr = {"HBETA": 0.01}
@@ -1437,7 +1437,7 @@ class TestLyaEscapeFraction:
         """If observed Lyα is half the intrinsic, f_esc ~0.5."""
         from jwspecabund.dust import compute_lya_escape_fraction
 
-        lya_flux = 23.547 * 0.5
+        lya_flux = 26.071 * 0.5
         lya_err = 0.1
         fluxes_corr = {"HBETA": 1.0}
         errors_corr = {"HBETA": 0.01}
@@ -1474,7 +1474,7 @@ class TestLyaEscapeFraction:
         errors_corr = {"HBETA": 0.01, "HGAMMA": 0.1}  # Hγ SNR=0.1
 
         out = compute_lya_escape_fraction(
-            23.547, 0.1, fluxes_corr, errors_corr, snr_min=3.0
+            26.071, 0.1, fluxes_corr, errors_corr, snr_min=3.0
         )
         assert out["n_lines"] == 1
         assert out["individual"][0]["line"] == "HBETA"
@@ -1503,7 +1503,7 @@ class TestLyaEscapeFraction:
         )
         assert len(out["individual"]) == 1
         r = out["individual"][0]
-        assert abs(r["lya_intrinsic"] - 23.547) < 0.01
+        assert abs(r["lya_intrinsic"] - 26.071) < 0.01
         assert r["lya_intrinsic_err"] > 0
 
     def test_case_b_ratios_from_pyneb(self):
@@ -1511,9 +1511,9 @@ class TestLyaEscapeFraction:
         from jwspecabund.dust import LYA_CASE_B_RATIOS
 
         # Direct PyNEB values at T=1e4K, ne=100 cm^-3.
-        assert abs(LYA_CASE_B_RATIOS["HBETA"][0] - 23.547) < 0.01
-        assert abs(LYA_CASE_B_RATIOS["HGAMMA"][0] - 50.277) < 0.01
-        assert abs(LYA_CASE_B_RATIOS["HDELTA"][0] - 90.932) < 0.01
+        assert abs(LYA_CASE_B_RATIOS["HBETA"][0] - 26.071) < 0.01
+        assert abs(LYA_CASE_B_RATIOS["HGAMMA"][0] - 55.642) < 0.01
+        assert abs(LYA_CASE_B_RATIOS["HDELTA"][0] - 100.593) < 0.01
         assert "Ha" not in LYA_CASE_B_RATIOS
 
 
@@ -1527,7 +1527,7 @@ class TestLyaEscapeFractionMC:
             compute_lya_escape_fraction_mc,
         )
 
-        lya_flux = 11.65  # ~50% escape
+        lya_flux = 13.036  # ~50% escape
         lya_err = 0.5
         fluxes_corr = {"HBETA": 1.0}
         errors_corr = {"HBETA": 0.05}
@@ -1690,8 +1690,8 @@ class TestLyaEscapeInAbundances:
         assert abund.lya_f_esc is not None
         assert np.isfinite(abund.lya_f_esc)
         assert abund.lya_f_esc > 0
-        # f_esc = 10.0 / (1.0 * 23.547) ≈ 0.429
-        assert abs(abund.lya_f_esc - 10.0 / 23.547) < 0.01
+        # f_esc = 10.0 / (1.0 * 26.071) ≈ 0.429
+        assert abs(abund.lya_f_esc - 10.0 / 26.071) < 0.01
 
     def test_f_esc_none_without_lya(self):
         """Without Lyα, lya_f_esc should be None."""
