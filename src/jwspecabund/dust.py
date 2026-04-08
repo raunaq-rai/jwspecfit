@@ -432,17 +432,14 @@ def compute_Av_multi_balmer(
 # ---------------------------------------------------------------------------
 
 # Case B intrinsic Lyα/Hx ratios at T=10^4 K, n_e=100 cm^-3.
-# Lyα/Hβ = 23.55 (Storey & Hummer 1995, MNRAS 272, 41;
-# confirmed via PyNEB RecAtom('H',1) at T=1e4, ne=100).
-# Balmer decrements from Osterbrock & Ferland (2006), Table 4.2.
-# Other ratios derived via Lyα/Hx = (Lyα/Hβ) / (Hx/Hβ).
-_LYA_HB = 23.55
+# Computed directly from PyNEB RecAtom('H',1) emissivities using
+# Storey & Hummer (1995, MNRAS 272, 41) recombination tables.
 LYA_CASE_B_RATIOS: dict[str, tuple[float, float]] = {
     # line_name: (Lyα/Hx ratio, rest wavelength of Hx in Å)
-    "Ha":      (_LYA_HB / 2.86,   6564.61),
-    "HBETA":   (_LYA_HB,          4862.68),
-    "HGAMMA":  (_LYA_HB / 0.468,  4341.68),
-    "HDELTA":  (_LYA_HB / 0.259,  4102.89),
+    "Ha":      (8.224,   6564.61),
+    "HBETA":   (23.547,  4862.68),
+    "HGAMMA":  (50.277,  4341.68),
+    "HDELTA":  (90.932,  4102.89),
 }
 
 
