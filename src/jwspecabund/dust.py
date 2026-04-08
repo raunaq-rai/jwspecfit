@@ -436,7 +436,8 @@ def compute_Av_multi_balmer(
 # Storey & Hummer (1995, MNRAS 272, 41) recombination tables.
 LYA_CASE_B_RATIOS: dict[str, tuple[float, float]] = {
     # line_name: (Lyα/Hx ratio, rest wavelength of Hx in Å)
-    "Ha":      (8.224,   6564.61),
+    # Hα excluded: at high-z it falls in a different grating and is not
+    # used for the Balmer decrement dust correction either.
     "HBETA":   (23.547,  4862.68),
     "HGAMMA":  (50.277,  4341.68),
     "HDELTA":  (90.932,  4102.89),

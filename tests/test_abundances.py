@@ -1512,9 +1512,9 @@ class TestLyaEscapeFraction:
 
         # Direct PyNEB values at T=1e4K, ne=100 cm^-3.
         assert abs(LYA_CASE_B_RATIOS["HBETA"][0] - 23.547) < 0.01
-        assert abs(LYA_CASE_B_RATIOS["Ha"][0] - 8.224) < 0.01
         assert abs(LYA_CASE_B_RATIOS["HGAMMA"][0] - 50.277) < 0.01
         assert abs(LYA_CASE_B_RATIOS["HDELTA"][0] - 90.932) < 0.01
+        assert "Ha" not in LYA_CASE_B_RATIOS
 
 
 class TestLyaEscapeFractionMC:
@@ -1551,8 +1551,8 @@ class TestLyaEscapeFractionMC:
 
         lya_flux = 5.0
         lya_err = 0.2
-        fluxes_corr = {"HBETA": 1.0, "Ha": 2.86}
-        errors_corr = {"HBETA": 0.05, "Ha": 0.1}
+        fluxes_corr = {"HBETA": 1.0, "HGAMMA": 0.468}
+        errors_corr = {"HBETA": 0.05, "HGAMMA": 0.02}
 
         mc_tight = compute_lya_escape_fraction_mc(
             lya_flux, lya_err, fluxes_corr, errors_corr,
