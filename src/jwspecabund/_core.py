@@ -1509,6 +1509,47 @@ def _run_direct(
     }
 
 
+def _dust_correct_sample(
+    sample: dict[str, float],
+    Av: float,
+    dust_law: str,
+    dust_kwargs: dict,
+) -> dict[str, float]:
+    """Dust-correct a single flux sample in-place.
+
+    Parameters
+    ----------
+    sample : dict
+        ``{line_name: flux}`` — modified in place and returned.
+    Av : float
+        V-band attenuation for this draw.
+    dust_law : str
+        ``"salim"`` or ``"cardelli"``.
+    dust_kwargs : dict
+        Extra keyword arguments for the dust law.
+
+    Returns
+    -------
+    dict
+        The same dict with fluxes multiplied by dust correction factors.
+    """
+    from .dust import salim_attenuation, cardelli_extinction
+
+    if Av <= 0:
+        return sample
+    for name in list(sample.keys()):
+        wave = _LINE_WAVES.get(name)
+        if wave is None:
+            continue
+        wave_arr = np.array([wave])
+        if dust_law == "salim":
+            A_lam = salim_attenuation(wave_arr, Av, **dust_kwargs)[0]
+        else:
+            A_lam = cardelli_extinction(wave_arr, Av)[0]
+        sample[name] = sample[name] * 10.0 ** (0.4 * A_lam)
+    return sample
+
+
 def _run_direct_mcmc(
     posteriors: dict[str, np.ndarray],
     Te_relation: str,
@@ -1526,6 +1567,12 @@ def _run_direct_mcmc(
     ne_low_override: float | None = None,
     ne_mid_override: float | None = None,
     ne_high_override: float | None = None,
+    # Per-draw dust resampling (when Av_err is set).
+    Av: float | None = None,
+    Av_err: float | None = None,
+    Av_prior: str = "gaussian",
+    dust_law: str = "salim",
+    dust_kwargs: dict | None = None,
 ) -> dict[str, Any]:
     """Run the direct T_e method on MCMC posterior samples.
 
@@ -1534,7 +1581,11 @@ def _run_direct_mcmc(
     Parameters
     ----------
     posteriors : dict
-        ``{line_name: flux_posterior_array}``.
+        ``{line_name: flux_posterior_array}``.  When *Av_err* is set
+        these must be **observed** (un-dust-corrected) fluxes; the
+        function draws A_V per iteration and applies dust correction
+        internally.  When *Av_err* is ``None``, posteriors are assumed
+        to be already dust-corrected (legacy behaviour).
     Te_relation : str
         T_e-T_e relation.
     n_posterior : int
@@ -1556,6 +1607,16 @@ def _run_direct_mcmc(
     snr_NO : float
         Minimum total-line SNR for each nitrogen ion when using
         ``icf_method="direct_sum"`` (default 2.0).
+    Av : float or None
+        Central A_V value for per-draw resampling.
+    Av_err : float or None
+        A_V uncertainty; triggers per-draw dust resampling when set.
+    Av_prior : str
+        ``"gaussian"`` or ``"uniform"``.
+    dust_law : str
+        ``"salim"`` or ``"cardelli"``.
+    dust_kwargs : dict or None
+        Extra keyword arguments for the dust law.
 
     Returns
     -------
@@ -1572,6 +1633,11 @@ def _run_direct_mcmc(
     )
     from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
 
+    from .dust import _draw_Av
+
+    _resample_dust = (Av_err is not None and Av_err > 0 and Av is not None)
+    _dk = dust_kwargs or {}
+
     # Determine number of samples; thin if larger than n_posterior.
     n_total = min(len(v) for v in posteriors.values())
     if n_posterior > 0 and n_total > n_posterior:
@@ -1582,6 +1648,7 @@ def _run_direct_mcmc(
         n_samples = n_posterior
     else:
         n_samples = n_total
+        rng = np.random.default_rng(seed)
 
     OH_post = np.full(n_samples, np.nan)
     NO_post = np.full(n_samples, np.nan)
@@ -1592,10 +1659,15 @@ def _run_direct_mcmc(
     Te_high_post = np.full(n_samples, np.nan)
     Te_low_post = np.full(n_samples, np.nan)
     logU_post = np.full(n_samples, np.nan)
+    Av_post = np.full(n_samples, np.nan) if _resample_dust else None
 
     # Compute medians and errors for the point estimate and multi-phase ne.
+    # When resampling dust, posteriors are raw (observed); dust-correct
+    # the medians with the central A_V for the point estimate.
     med_fluxes = {name: float(np.median(post)) for name, post in posteriors.items()}
     med_errors = {name: float(np.std(post)) for name, post in posteriors.items()}
+    if _resample_dust:
+        med_fluxes = _dust_correct_sample(dict(med_fluxes), Av, dust_law, _dk)
     ne_low, ne_mid, ne_high, ne_failures = _compute_multi_ne(
         med_fluxes, errors=med_errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
     )
@@ -1683,6 +1755,13 @@ def _run_direct_mcmc(
 
     for i in tqdm(range(n_samples), desc="Direct Te (posterior)", disable=not progress):
         sample = {name: max(float(post[i]), 1e-50) for name, post in posteriors.items()}
+
+        # Per-draw dust correction: draw A_V and correct this sample.
+        if _resample_dust:
+            Av_draw = _draw_Av(rng, Av, Av_err, prior=Av_prior)
+            Av_post[i] = Av_draw
+            sample = _dust_correct_sample(sample, Av_draw, dust_law, _dk)
+
         try:
             if _Te_diagnostic == "4363":
                 Te_h = compute_Te_OIII(
@@ -1918,6 +1997,7 @@ def _run_direct_mcmc(
         "NO_tiers": NO_tiers,
         "icf_values": icf_values,
         "NO_is_upper_limit": NO_is_upper_limit,
+        "Av_posterior": Av_post,
     }
 
 
@@ -2228,7 +2308,9 @@ def compute_abundances(
                 fluxes, errors, Av_derived, dust_law, **dust_kwargs
             )
             # Also correct posteriors if available.
-            if posteriors:
+            # When Av_err is set, posteriors are kept raw (observed) so
+            # that _run_direct_mcmc can resample A_V per draw.
+            if posteriors and not (Av_err is not None and Av_err > 0):
                 for name in list(posteriors.keys()):
                     wave = _LINE_WAVES.get(name)
                     if wave is None:
@@ -2381,6 +2463,9 @@ def compute_abundances(
                 ne_low_override=ne_low_override,
                 ne_mid_override=ne_mid_override,
                 ne_high_override=ne_high_override,
+                Av=Av_derived, Av_err=Av_err,
+                Av_prior=Av_prior, dust_law=dust_law,
+                dust_kwargs=dust_kwargs,
             )
         else:
             direct_out = _run_direct(
@@ -2410,6 +2495,7 @@ def compute_abundances(
             ne=direct_out.get("ne"),
             Av=Av_derived,
             Av_err=Av_err_derived,
+            Av_posterior=direct_out.get("Av_posterior"),
             ionic=direct_out.get("ionic"),
             ionic_upper_limits=direct_out.get("ionic_upper_limits"),
             ionic_ul_details=direct_out.get("ionic_ul_details"),
@@ -2490,6 +2576,9 @@ def compute_abundances(
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
+                            Av=Av_derived, Av_err=Av_err,
+                            Av_prior=Av_prior, dust_law=dust_law,
+                            dust_kwargs=dust_kwargs,
                         )
                     else:
                         # No 1666 posterior — use MC on point-estimate fluxes.
@@ -2571,6 +2660,9 @@ def compute_abundances(
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
+                            Av=Av_derived, Av_err=Av_err,
+                            Av_prior=Av_prior, dust_law=dust_law,
+                            dust_kwargs=dust_kwargs,
                         )
                     else:
                         d_out = _run_direct(

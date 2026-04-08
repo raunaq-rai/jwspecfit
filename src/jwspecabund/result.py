@@ -79,6 +79,7 @@ class AbundanceResult:
     ne: float | None = None
     Av: float | None = None
     Av_err: float | None = None
+    Av_posterior: np.ndarray | None = field(default=None, repr=False)
     ionic: dict[str, float] | None = None
     OH_posterior: np.ndarray | None = None
     NO_posterior: np.ndarray | None = None
