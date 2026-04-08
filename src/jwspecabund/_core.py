@@ -2028,6 +2028,8 @@ def compute_abundances(
     dust_correct: bool = True,
     dust_law: str = "salim",
     Av: float | None = None,
+    Av_err: float | None = None,
+    Av_prior: str = "gaussian",
     method: str = "auto",
     snr_auroral: float = 3.0,
     snr_line: float = 2.0,
@@ -2071,6 +2073,16 @@ def compute_abundances(
         ``"salim"`` (default) or ``"cardelli"``.
     Av : float or None
         V-band attenuation. If ``None``, derived from Balmer decrement.
+    Av_err : float or None
+        1σ error on A_V when *Av* is supplied.  If ``None`` (default),
+        A_V is treated as fixed (no MC sampling of dust).  Ignored when
+        *Av* is ``None`` (A_V derived from Balmer decrement carries its
+        own error).
+    Av_prior : str
+        Prior shape for A_V sampling: ``"gaussian"`` (default) draws
+        from N(*Av*, *Av_err*) clipped at 0; ``"uniform"`` draws from
+        U(max(*Av* − *Av_err*, 0), *Av* + *Av_err*).  Only matters
+        when *Av_err* is set.
     method : str
         ``"auto"`` (default), ``"direct"``, ``"forward"``, or
         ``"strong_line"``.  ``"auto"`` uses direct if [OIII] 4363
@@ -2208,6 +2220,8 @@ def compute_abundances(
                 logger.info("No Balmer pair available for A_V; assuming A_V=0.")
         else:
             Av_derived = Av
+            if Av_err is not None:
+                Av_err_derived = Av_err
 
         if Av_derived > 0:
             fluxes, errors = _apply_dust_correction(
@@ -2600,6 +2614,7 @@ def compute_abundances(
                 _lya_obs_flux, _lya_obs_err,
                 fluxes, errors,
                 Av=_Av_for_esc, Av_err=_Av_err_for_esc,
+                Av_prior=Av_prior,
                 dust_law=dust_law, n_mc=n_mc,
                 **dust_kwargs,
             )

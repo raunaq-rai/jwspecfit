@@ -545,6 +545,40 @@ def compute_lya_escape_fraction(
     }
 
 
+def _draw_Av(
+    rng: np.random.Generator,
+    Av: float,
+    Av_err: float,
+    prior: str = "gaussian",
+) -> float:
+    """Draw a single A_V sample, clipped to >= 0.
+
+    Parameters
+    ----------
+    rng : np.random.Generator
+        Random number generator.
+    Av : float
+        Central A_V value.
+    Av_err : float
+        Uncertainty on A_V (1σ for Gaussian, half-width for uniform).
+    prior : str
+        ``"gaussian"`` or ``"uniform"``.
+
+    Returns
+    -------
+    float
+        Drawn A_V value, guaranteed >= 0.
+    """
+    if Av_err <= 0 or not np.isfinite(Av_err):
+        return max(Av, 0.0)
+    if prior == "uniform":
+        lo = max(Av - Av_err, 0.0)
+        hi = Av + Av_err
+        return rng.uniform(lo, hi)
+    # Default: Gaussian, clipped at 0.
+    return max(rng.normal(Av, Av_err), 0.0)
+
+
 def compute_lya_escape_fraction_mc(
     lya_flux: float,
     lya_flux_err: float,
@@ -552,6 +586,7 @@ def compute_lya_escape_fraction_mc(
     errors_corr: dict[str, float],
     Av: float,
     Av_err: float,
+    Av_prior: str = "gaussian",
     dust_law: str = "salim",
     snr_min: float = 3.0,
     n_mc: int = 1000,
@@ -560,10 +595,9 @@ def compute_lya_escape_fraction_mc(
 ) -> dict[str, object]:
     """Compute Lyα escape fraction with MC error propagation.
 
-    Draws ``n_mc`` samples from Gaussian distributions of the observed
-    Lyα flux, dust-corrected Balmer fluxes, and A_V, recomputing the
-    dust correction at each draw.  Returns the median and 16th/84th
-    percentile uncertainties.
+    Draws ``n_mc`` samples from the observed Lyα flux, dust-corrected
+    Balmer fluxes, and A_V, recomputing the dust correction at each
+    draw.  Returns the median and 16th/84th percentile uncertainties.
 
     Parameters
     ----------
@@ -579,7 +613,11 @@ def compute_lya_escape_fraction_mc(
     Av : float
         Central A_V value.
     Av_err : float
-        1σ error on A_V.
+        1σ error on A_V (Gaussian) or half-width (uniform).
+    Av_prior : str
+        Prior shape for A_V: ``"gaussian"`` (default, draws from
+        N(Av, Av_err) clipped at 0) or ``"uniform"`` (draws from
+        U(max(Av − Av_err, 0), Av + Av_err)).
     dust_law : str
         ``"salim"`` or ``"cardelli"``.
     snr_min : float
@@ -649,7 +687,7 @@ def compute_lya_escape_fraction_mc(
             continue
 
         # Draw A_V.
-        Av_draw = max(rng.normal(Av, Av_err if np.isfinite(Av_err) else 0.0), 0.0)
+        Av_draw = _draw_Av(rng, Av, Av_err, prior=Av_prior)
 
         # For each Balmer line, draw observed flux, dust-correct, predict Lyα.
         f_esc_per_line = []
