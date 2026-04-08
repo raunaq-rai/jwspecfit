@@ -98,6 +98,10 @@ class AbundanceResult:
     ne_high: float | None = None
     icf_method: str | None = None
     NO_icf_name: str | None = None
+    lya_f_esc: float | None = None
+    lya_f_esc_err: float | tuple[float, float] | None = None
+    lya_f_esc_posterior: np.ndarray | None = field(default=None, repr=False)
+    lya_f_esc_details: dict | None = field(default=None, repr=False)
     excluded_lines: list[str] | None = None
     ionic_upper_limits: dict[str, float] | None = field(default=None, repr=False)
     ionic_ul_details: dict[str, dict] | None = field(default=None, repr=False)
@@ -173,6 +177,36 @@ class AbundanceResult:
                 lines.append(f"  A_V         = {self.Av:.3f} +/- {self.Av_err:.3f}")
             else:
                 lines.append(f"  A_V         = {self.Av:.3f}")
+
+        # --- Lyα escape fraction ---
+        if self.lya_f_esc is not None and np.isfinite(self.lya_f_esc):
+            if self.lya_f_esc_err is not None:
+                if isinstance(self.lya_f_esc_err, tuple):
+                    lines.append(
+                        f"  f_esc(Lyα)  = {self.lya_f_esc:.3f}"
+                        f" (+{self.lya_f_esc_err[1]:.3f}/-{self.lya_f_esc_err[0]:.3f})"
+                    )
+                else:
+                    lines.append(
+                        f"  f_esc(Lyα)  = {self.lya_f_esc:.3f}"
+                        f" +/- {self.lya_f_esc_err:.3f}"
+                    )
+            else:
+                lines.append(f"  f_esc(Lyα)  = {self.lya_f_esc:.3f}")
+            if self.lya_f_esc_details:
+                for r in self.lya_f_esc_details.get("individual", []):
+                    name = r["line"]
+                    fe = r["f_esc"]
+                    if isinstance(r.get("f_esc_err"), tuple):
+                        lines.append(
+                            f"    via {name:8s}: f_esc = {fe:.3f}"
+                            f" (+{r['f_esc_err'][1]:.3f}/-{r['f_esc_err'][0]:.3f})"
+                        )
+                    else:
+                        fe_e = r.get("f_esc_err", np.nan)
+                        lines.append(
+                            f"    via {name:8s}: f_esc = {fe:.3f} +/- {fe_e:.3f}"
+                        )
 
         # --- Density solve failures ---
         _ne_keys = [k for k in _f if k.startswith("n_e(")]

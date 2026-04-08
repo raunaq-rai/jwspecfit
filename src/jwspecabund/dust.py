@@ -2,7 +2,7 @@
 
 Implements Salim+18/Noll+09 (Calzetti base + UV bump + slope deviation)
 and Cardelli+89 Milky Way extinction, plus A_V derivation from the
-Balmer decrement.
+Balmer decrement and Lyα escape fraction computation.
 """
 
 from __future__ import annotations
@@ -424,4 +424,307 @@ def compute_Av_multi_balmer(
         "Av_err": av_mean_err,
         "individual": results,
         "n_lines": len(results),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Lyα escape fraction
+# ---------------------------------------------------------------------------
+
+# Case B intrinsic Lyα/Hx ratios at T=10^4 K, n_e=100 cm^-3.
+# Lyα/Hβ = 23.3 (Osterbrock & Ferland 2006, Table 4.4).
+# Other ratios derived via Lyα/Hx = (Lyα/Hβ) / (Hx/Hβ).
+LYA_CASE_B_RATIOS: dict[str, tuple[float, float]] = {
+    # line_name: (Lyα/Hx ratio, rest wavelength of Hx in Å)
+    "Ha":      (23.3 / 2.86,   6564.61),
+    "HBETA":   (23.3,          4862.68),
+    "HGAMMA":  (23.3 / 0.468,  4341.68),
+    "HDELTA":  (23.3 / 0.259,  4102.89),
+}
+
+
+def compute_lya_escape_fraction(
+    lya_flux: float,
+    lya_flux_err: float,
+    fluxes_corr: dict[str, float],
+    errors_corr: dict[str, float],
+    snr_min: float = 3.0,
+) -> dict[str, object]:
+    """Compute Lyα escape fraction from dust-corrected Balmer lines.
+
+    Each available Balmer line predicts an intrinsic Lyα flux via
+    Case B recombination (T=10⁴ K, n_e=100 cm⁻³).  The escape
+    fraction is the ratio of observed Lyα to intrinsic Lyα.
+
+    When multiple Balmer lines are available, f_esc is computed as
+    the inverse-variance weighted mean of the individual estimates.
+
+    The observed Lyα flux should NOT be dust-corrected — the escape
+    fraction encapsulates both dust attenuation and resonant scattering.
+
+    Parameters
+    ----------
+    lya_flux : float
+        Observed (not dust-corrected) Lyα flux.
+    lya_flux_err : float
+        1σ error on the observed Lyα flux.
+    fluxes_corr : dict
+        Dust-corrected emission-line fluxes keyed by line name.
+    errors_corr : dict
+        Dust-corrected 1σ errors keyed by line name.
+    snr_min : float
+        Minimum SNR for a Balmer line to be included (default 3.0).
+
+    Returns
+    -------
+    dict
+        Keys: ``"f_esc"`` (weighted mean), ``"f_esc_err"``,
+        ``"individual"`` (list of per-line dicts with ``line``,
+        ``f_esc``, ``f_esc_err``, ``lya_intrinsic``,
+        ``lya_intrinsic_err``), ``"n_lines"`` (number used).
+    """
+    if lya_flux <= 0:
+        return {"f_esc": np.nan, "f_esc_err": np.nan, "individual": [], "n_lines": 0}
+
+    results = []
+    for name, (ratio, _wave) in LYA_CASE_B_RATIOS.items():
+        if name not in fluxes_corr or fluxes_corr[name] <= 0:
+            continue
+        f_hx = fluxes_corr[name]
+        e_hx = errors_corr.get(name, 0.0)
+        if e_hx > 0 and f_hx / e_hx < snr_min:
+            continue
+
+        # Intrinsic Lyα predicted from this Balmer line.
+        lya_int = f_hx * ratio
+        lya_int_err = e_hx * ratio
+
+        # Escape fraction.
+        f_esc_i = lya_flux / lya_int
+
+        # Error propagation: f_esc = F_obs / F_int
+        # σ(f_esc) = f_esc × sqrt((σ_obs/F_obs)² + (σ_int/F_int)²)
+        frac_err = np.sqrt(
+            (lya_flux_err / lya_flux) ** 2
+            + (lya_int_err / lya_int) ** 2
+        )
+        f_esc_err_i = f_esc_i * frac_err
+
+        results.append({
+            "line": name,
+            "f_esc": f_esc_i,
+            "f_esc_err": f_esc_err_i,
+            "lya_intrinsic": lya_int,
+            "lya_intrinsic_err": lya_int_err,
+        })
+
+    if not results:
+        return {"f_esc": np.nan, "f_esc_err": np.nan, "individual": results, "n_lines": 0}
+
+    # Inverse-variance weighted mean.
+    fescs = np.array([r["f_esc"] for r in results])
+    errs = np.array([r["f_esc_err"] for r in results])
+    valid = np.isfinite(errs) & (errs > 0)
+    if valid.sum() >= 2:
+        w = 1.0 / errs[valid] ** 2
+        f_esc_mean = np.average(fescs[valid], weights=w)
+        f_esc_mean_err = 1.0 / np.sqrt(np.sum(w))
+    elif valid.sum() == 1:
+        f_esc_mean = fescs[valid][0]
+        f_esc_mean_err = errs[valid][0]
+    else:
+        f_esc_mean = np.median(fescs)
+        f_esc_mean_err = np.nan
+
+    return {
+        "f_esc": float(f_esc_mean),
+        "f_esc_err": float(f_esc_mean_err),
+        "individual": results,
+        "n_lines": len(results),
+    }
+
+
+def compute_lya_escape_fraction_mc(
+    lya_flux: float,
+    lya_flux_err: float,
+    fluxes_corr: dict[str, float],
+    errors_corr: dict[str, float],
+    Av: float,
+    Av_err: float,
+    dust_law: str = "salim",
+    snr_min: float = 3.0,
+    n_mc: int = 1000,
+    rng: np.random.Generator | None = None,
+    **dust_kwargs,
+) -> dict[str, object]:
+    """Compute Lyα escape fraction with MC error propagation.
+
+    Draws ``n_mc`` samples from Gaussian distributions of the observed
+    Lyα flux, dust-corrected Balmer fluxes, and A_V, recomputing the
+    dust correction at each draw.  Returns the median and 16th/84th
+    percentile uncertainties.
+
+    Parameters
+    ----------
+    lya_flux : float
+        Observed (not dust-corrected) Lyα flux.
+    lya_flux_err : float
+        1σ error on Lyα flux.
+    fluxes_corr : dict
+        Dust-corrected Balmer fluxes (used as central values; the MC
+        re-applies dust correction from observed fluxes internally).
+    errors_corr : dict
+        Dust-corrected 1σ errors.
+    Av : float
+        Central A_V value.
+    Av_err : float
+        1σ error on A_V.
+    dust_law : str
+        ``"salim"`` or ``"cardelli"``.
+    snr_min : float
+        Minimum SNR for a Balmer line to be included (default 3.0).
+    n_mc : int
+        Number of Monte Carlo draws (default 1000).
+    rng : np.random.Generator or None
+        Random number generator (for reproducibility).
+    **dust_kwargs
+        Extra arguments to the dust law (Rv, delta, B).
+
+    Returns
+    -------
+    dict
+        Keys: ``"f_esc"`` (median), ``"f_esc_err"`` (lo, hi) as
+        16th/84th percentile half-widths, ``"f_esc_posterior"``
+        (1D array of MC samples), ``"individual"`` (per-line results),
+        ``"n_lines"``.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
+
+    # Identify which Balmer lines to use (from the point-estimate result).
+    lines_used = []
+    for name, (ratio, wave) in LYA_CASE_B_RATIOS.items():
+        if name not in fluxes_corr or fluxes_corr[name] <= 0:
+            continue
+        e = errors_corr.get(name, 0.0)
+        if e > 0 and fluxes_corr[name] / e < snr_min:
+            continue
+        lines_used.append(name)
+
+    if not lines_used:
+        return {
+            "f_esc": np.nan,
+            "f_esc_err": (np.nan, np.nan),
+            "f_esc_posterior": np.array([]),
+            "individual": [],
+            "n_lines": 0,
+        }
+
+    # Pre-compute observed (un-dust-corrected) Balmer fluxes by inverting
+    # the dust correction on the central values.
+    obs_fluxes = {}
+    obs_errors = {}
+    for name in lines_used:
+        ratio_cb, wave = LYA_CASE_B_RATIOS[name]
+        wave_arr = np.array([wave])
+        if dust_law == "salim":
+            A_lam = salim_attenuation(wave_arr, Av, **dust_kwargs)[0]
+        else:
+            A_lam = cardelli_extinction(wave_arr, Av, **dust_kwargs)[0]
+        factor = 10.0 ** (0.4 * A_lam)
+        obs_fluxes[name] = fluxes_corr[name] / factor
+        obs_errors[name] = errors_corr.get(name, 0.0) / factor
+
+    # MC loop.
+    f_esc_samples = np.full(n_mc, np.nan)
+    per_line_samples: dict[str, np.ndarray] = {
+        name: np.full(n_mc, np.nan) for name in lines_used
+    }
+
+    for i in range(n_mc):
+        # Draw Lyα flux.
+        lya_draw = rng.normal(lya_flux, lya_flux_err)
+        if lya_draw <= 0:
+            continue
+
+        # Draw A_V.
+        Av_draw = max(rng.normal(Av, Av_err if np.isfinite(Av_err) else 0.0), 0.0)
+
+        # For each Balmer line, draw observed flux, dust-correct, predict Lyα.
+        f_esc_per_line = []
+        f_esc_err_per_line = []
+        for name in lines_used:
+            ratio_cb, wave = LYA_CASE_B_RATIOS[name]
+            # Draw observed flux.
+            f_draw = rng.normal(obs_fluxes[name], obs_errors[name])
+            if f_draw <= 0:
+                continue
+            # Dust-correct this draw.
+            wave_arr = np.array([wave])
+            if dust_law == "salim":
+                A_lam = salim_attenuation(wave_arr, Av_draw, **dust_kwargs)[0]
+            else:
+                A_lam = cardelli_extinction(wave_arr, Av_draw, **dust_kwargs)[0]
+            f_corr = f_draw * 10.0 ** (0.4 * A_lam)
+
+            # Intrinsic Lyα from this line.
+            lya_int = f_corr * ratio_cb
+            f_esc_i = lya_draw / lya_int
+            per_line_samples[name][i] = f_esc_i
+
+            # Use 1/variance weighting (variance from point estimate).
+            pt = fluxes_corr[name] * ratio_cb
+            e_pt = errors_corr.get(name, 0.0) * ratio_cb
+            if pt > 0 and e_pt > 0:
+                var_i = (lya_flux / pt) ** 2 * (
+                    (lya_flux_err / lya_flux) ** 2 + (e_pt / pt) ** 2
+                )
+                if var_i > 0:
+                    f_esc_per_line.append(f_esc_i)
+                    f_esc_err_per_line.append(np.sqrt(var_i))
+
+        if f_esc_per_line:
+            arr = np.array(f_esc_per_line)
+            earr = np.array(f_esc_err_per_line)
+            w = 1.0 / earr ** 2
+            f_esc_samples[i] = np.average(arr, weights=w)
+
+    # Summarise.
+    valid = np.isfinite(f_esc_samples)
+    if valid.sum() < 10:
+        return {
+            "f_esc": np.nan,
+            "f_esc_err": (np.nan, np.nan),
+            "f_esc_posterior": f_esc_samples[valid],
+            "individual": [],
+            "n_lines": len(lines_used),
+        }
+
+    posterior = f_esc_samples[valid]
+    med = float(np.median(posterior))
+    lo = med - float(np.percentile(posterior, 16))
+    hi = float(np.percentile(posterior, 84)) - med
+
+    # Per-line summaries.
+    individual = []
+    for name in lines_used:
+        pl = per_line_samples[name]
+        pl_valid = pl[np.isfinite(pl)]
+        if len(pl_valid) > 10:
+            individual.append({
+                "line": name,
+                "f_esc": float(np.median(pl_valid)),
+                "f_esc_err": (
+                    float(np.median(pl_valid) - np.percentile(pl_valid, 16)),
+                    float(np.percentile(pl_valid, 84) - np.median(pl_valid)),
+                ),
+                "lya_intrinsic": fluxes_corr[name] * LYA_CASE_B_RATIOS[name][0],
+            })
+
+    return {
+        "f_esc": med,
+        "f_esc_err": (lo, hi),
+        "f_esc_posterior": posterior,
+        "individual": individual,
+        "n_lines": len(lines_used),
     }

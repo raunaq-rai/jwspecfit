@@ -17,7 +17,13 @@ from tqdm import tqdm
 from jwspecfit.fitter import FitResult
 from jwspecfit.lines import REST_LINES_A
 
-from .dust import compute_Av_from_balmer, compute_Av_multi_balmer, dust_correct_fluxes
+from .dust import (
+    compute_Av_from_balmer,
+    compute_Av_multi_balmer,
+    compute_lya_escape_fraction,
+    compute_lya_escape_fraction_mc,
+    dust_correct_fluxes,
+)
 from .result import AbundanceResult
 
 logger = logging.getLogger(__name__)
@@ -2162,6 +2168,11 @@ def compute_abundances(
     fluxes, errors, is_mcmc = _extract_fluxes(result)
     posteriors = _extract_posteriors(result) if is_mcmc else {}
 
+    # --- Save observed Lyα flux before dust correction ---
+    # f_esc(Lyα) uses the observed flux (not dust-corrected).
+    _lya_obs_flux = fluxes.get("Lya", 0.0)
+    _lya_obs_err = errors.get("Lya", 0.0)
+
     # --- Dust correction ---
     dust_kwargs = {}
     if dust_law == "salim":
@@ -2578,5 +2589,46 @@ def compute_abundances(
                     logger.info("Alternative direct method failed; skipping.")
         if alt:
             primary_result.alt_results = alt
+
+    # --- Lyα escape fraction ---
+    if _lya_obs_flux > 0 and _lya_obs_err > 0:
+        _Av_for_esc = Av_derived if Av_derived is not None else 0.0
+        _Av_err_for_esc = Av_err_derived if Av_err_derived is not None and np.isfinite(Av_err_derived) else 0.0
+
+        if is_mcmc:
+            lya_esc_out = compute_lya_escape_fraction_mc(
+                _lya_obs_flux, _lya_obs_err,
+                fluxes, errors,
+                Av=_Av_for_esc, Av_err=_Av_err_for_esc,
+                dust_law=dust_law, n_mc=n_mc,
+                **dust_kwargs,
+            )
+            if lya_esc_out["n_lines"] > 0:
+                primary_result.lya_f_esc = lya_esc_out["f_esc"]
+                primary_result.lya_f_esc_err = lya_esc_out["f_esc_err"]
+                primary_result.lya_f_esc_posterior = lya_esc_out["f_esc_posterior"]
+                primary_result.lya_f_esc_details = lya_esc_out
+                logger.info(
+                    "Lyα f_esc = %.3f (+%.3f/-%.3f) from %d Balmer lines (MC).",
+                    lya_esc_out["f_esc"],
+                    lya_esc_out["f_esc_err"][1],
+                    lya_esc_out["f_esc_err"][0],
+                    lya_esc_out["n_lines"],
+                )
+        else:
+            lya_esc_out = compute_lya_escape_fraction(
+                _lya_obs_flux, _lya_obs_err,
+                fluxes, errors,
+            )
+            if lya_esc_out["n_lines"] > 0:
+                primary_result.lya_f_esc = lya_esc_out["f_esc"]
+                primary_result.lya_f_esc_err = lya_esc_out["f_esc_err"]
+                primary_result.lya_f_esc_details = lya_esc_out
+                logger.info(
+                    "Lyα f_esc = %.3f +/- %.3f from %d Balmer lines.",
+                    lya_esc_out["f_esc"],
+                    lya_esc_out["f_esc_err"],
+                    lya_esc_out["n_lines"],
+                )
 
     return primary_result

@@ -53,6 +53,8 @@ from .dust import (
     cardelli_extinction,
     compute_Av_from_balmer,
     compute_Av_multi_balmer,
+    compute_lya_escape_fraction,
+    compute_lya_escape_fraction_mc,
     dust_correct_fluxes,
     salim_attenuation,
 )
@@ -67,6 +69,8 @@ __all__ = [
     "compute_abundances",
     "compute_Av_from_balmer",
     "compute_Av_multi_balmer",
+    "compute_lya_escape_fraction",
+    "compute_lya_escape_fraction_mc",
     "compute_ionic_abundances",
     "compute_line_ratios",
     "compute_ne",

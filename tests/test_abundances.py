@@ -1410,3 +1410,347 @@ class TestDoubletCompletenessLogU:
                       "CIV_1", "CIV_2", "NV_1", "NV_2",
                       "CIII]_1907", "CIII]"):
             assert name in _SNR_PROTECTED, f"{name} not in _SNR_PROTECTED"
+
+
+# -----------------------------------------------------------------------
+# Lyα escape fraction tests
+# -----------------------------------------------------------------------
+
+class TestLyaEscapeFraction:
+    """Tests for Lyα escape fraction computation."""
+
+    def test_perfect_escape_no_dust(self):
+        """With no dust and full Case B Lyα, f_esc should be ~1."""
+        from jwspecabund.dust import compute_lya_escape_fraction
+
+        # Hβ flux = 1.0, intrinsic Lyα/Hβ = 23.3, so intrinsic Lyα = 23.3.
+        lya_flux = 23.3
+        lya_err = 0.1
+        fluxes_corr = {"HBETA": 1.0}
+        errors_corr = {"HBETA": 0.01}
+
+        out = compute_lya_escape_fraction(lya_flux, lya_err, fluxes_corr, errors_corr)
+        assert out["n_lines"] == 1
+        assert abs(out["f_esc"] - 1.0) < 0.01
+
+    def test_half_escape(self):
+        """If observed Lyα is half the intrinsic, f_esc ~0.5."""
+        from jwspecabund.dust import compute_lya_escape_fraction
+
+        lya_flux = 23.3 * 0.5
+        lya_err = 0.1
+        fluxes_corr = {"HBETA": 1.0}
+        errors_corr = {"HBETA": 0.01}
+
+        out = compute_lya_escape_fraction(lya_flux, lya_err, fluxes_corr, errors_corr)
+        assert abs(out["f_esc"] - 0.5) < 0.01
+
+    def test_multiple_balmer_lines(self):
+        """Using multiple Balmer lines gives consistent f_esc."""
+        from jwspecabund.dust import compute_lya_escape_fraction, LYA_CASE_B_RATIOS
+
+        # Set up so all Balmer lines predict the same intrinsic Lyα.
+        f_esc_true = 0.3
+        fluxes_corr = {}
+        errors_corr = {}
+        for name, (ratio, _wave) in LYA_CASE_B_RATIOS.items():
+            # Intrinsic Lyα = flux * ratio, so flux = Lyα_int / ratio.
+            lya_int = 100.0  # arbitrary intrinsic Lyα
+            fluxes_corr[name] = lya_int / ratio
+            errors_corr[name] = fluxes_corr[name] * 0.01  # 1% error
+
+        lya_flux = lya_int * f_esc_true
+        lya_err = lya_flux * 0.01
+
+        out = compute_lya_escape_fraction(lya_flux, lya_err, fluxes_corr, errors_corr)
+        assert out["n_lines"] == len(LYA_CASE_B_RATIOS)
+        assert abs(out["f_esc"] - f_esc_true) < 0.01
+
+    def test_snr_filtering(self):
+        """Lines below SNR threshold are excluded."""
+        from jwspecabund.dust import compute_lya_escape_fraction
+
+        fluxes_corr = {"HBETA": 1.0, "HGAMMA": 0.01}
+        errors_corr = {"HBETA": 0.01, "HGAMMA": 0.1}  # Hγ SNR=0.1
+
+        out = compute_lya_escape_fraction(
+            23.3, 0.1, fluxes_corr, errors_corr, snr_min=3.0
+        )
+        assert out["n_lines"] == 1
+        assert out["individual"][0]["line"] == "HBETA"
+
+    def test_no_balmer_lines(self):
+        """No Balmer lines → nan result."""
+        from jwspecabund.dust import compute_lya_escape_fraction
+
+        out = compute_lya_escape_fraction(10.0, 1.0, {}, {})
+        assert np.isnan(out["f_esc"])
+        assert out["n_lines"] == 0
+
+    def test_negative_lya_flux(self):
+        """Negative Lyα flux → nan."""
+        from jwspecabund.dust import compute_lya_escape_fraction
+
+        out = compute_lya_escape_fraction(-1.0, 0.1, {"HBETA": 1.0}, {"HBETA": 0.01})
+        assert np.isnan(out["f_esc"])
+
+    def test_individual_results_have_intrinsic(self):
+        """Each per-line result includes the predicted intrinsic Lyα."""
+        from jwspecabund.dust import compute_lya_escape_fraction
+
+        out = compute_lya_escape_fraction(
+            10.0, 0.5, {"HBETA": 1.0}, {"HBETA": 0.05}
+        )
+        assert len(out["individual"]) == 1
+        r = out["individual"][0]
+        assert abs(r["lya_intrinsic"] - 23.3) < 0.01
+        assert r["lya_intrinsic_err"] > 0
+
+    def test_case_b_ratios_consistent(self):
+        """Lyα/Hx ratios should be consistent with Lyα/Hβ and Hx/Hβ."""
+        from jwspecabund.dust import LYA_CASE_B_RATIOS, BALMER_RATIOS
+
+        lya_hb = LYA_CASE_B_RATIOS["HBETA"][0]
+        assert abs(lya_hb - 23.3) < 0.01
+
+        # Lyα/Hα = (Lyα/Hβ) / (Hα/Hβ) = 23.3 / 2.86
+        assert abs(LYA_CASE_B_RATIOS["Ha"][0] - 23.3 / 2.86) < 0.01
+
+        # Lyα/Hγ = (Lyα/Hβ) / (Hγ/Hβ) = 23.3 / 0.468
+        assert abs(LYA_CASE_B_RATIOS["HGAMMA"][0] - 23.3 / 0.468) < 0.01
+
+
+class TestLyaEscapeFractionMC:
+    """Tests for MC escape fraction computation."""
+
+    def test_mc_recovers_point_estimate(self):
+        """MC result should be consistent with the analytic estimate."""
+        from jwspecabund.dust import (
+            compute_lya_escape_fraction,
+            compute_lya_escape_fraction_mc,
+        )
+
+        lya_flux = 11.65  # ~50% escape
+        lya_err = 0.5
+        fluxes_corr = {"HBETA": 1.0}
+        errors_corr = {"HBETA": 0.05}
+
+        pt = compute_lya_escape_fraction(lya_flux, lya_err, fluxes_corr, errors_corr)
+        mc = compute_lya_escape_fraction_mc(
+            lya_flux, lya_err, fluxes_corr, errors_corr,
+            Av=0.0, Av_err=0.0, n_mc=5000,
+            rng=np.random.default_rng(42),
+        )
+
+        assert mc["n_lines"] == 1
+        # MC median should be close to analytic value.
+        assert abs(mc["f_esc"] - pt["f_esc"]) < 0.05
+        # Posterior should exist.
+        assert len(mc["f_esc_posterior"]) > 100
+
+    def test_mc_with_dust_uncertainty(self):
+        """Increasing A_V uncertainty should widen the posterior."""
+        from jwspecabund.dust import compute_lya_escape_fraction_mc
+
+        lya_flux = 5.0
+        lya_err = 0.2
+        fluxes_corr = {"HBETA": 1.0, "Ha": 2.86}
+        errors_corr = {"HBETA": 0.05, "Ha": 0.1}
+
+        mc_tight = compute_lya_escape_fraction_mc(
+            lya_flux, lya_err, fluxes_corr, errors_corr,
+            Av=0.5, Av_err=0.01, n_mc=3000,
+            rng=np.random.default_rng(42),
+        )
+        mc_wide = compute_lya_escape_fraction_mc(
+            lya_flux, lya_err, fluxes_corr, errors_corr,
+            Av=0.5, Av_err=0.5, n_mc=3000,
+            rng=np.random.default_rng(42),
+        )
+
+        # Wider A_V uncertainty → wider f_esc posterior.
+        spread_tight = mc_tight["f_esc_err"][0] + mc_tight["f_esc_err"][1]
+        spread_wide = mc_wide["f_esc_err"][0] + mc_wide["f_esc_err"][1]
+        assert spread_wide > spread_tight
+
+    def test_mc_returns_asymmetric_errors(self):
+        """MC errors should be (lo, hi) tuple."""
+        from jwspecabund.dust import compute_lya_escape_fraction_mc
+
+        mc = compute_lya_escape_fraction_mc(
+            10.0, 0.5, {"HBETA": 1.0}, {"HBETA": 0.05},
+            Av=0.0, Av_err=0.0, n_mc=2000,
+            rng=np.random.default_rng(42),
+        )
+        assert isinstance(mc["f_esc_err"], tuple)
+        assert len(mc["f_esc_err"]) == 2
+        assert mc["f_esc_err"][0] > 0
+        assert mc["f_esc_err"][1] > 0
+
+    def test_mc_multiple_lines_weighted(self):
+        """MC with multiple Balmer lines should use all of them."""
+        from jwspecabund.dust import compute_lya_escape_fraction_mc, LYA_CASE_B_RATIOS
+
+        f_esc_true = 0.2
+        lya_int = 50.0
+        fluxes_corr = {}
+        errors_corr = {}
+        for name, (ratio, _wave) in LYA_CASE_B_RATIOS.items():
+            fluxes_corr[name] = lya_int / ratio
+            errors_corr[name] = fluxes_corr[name] * 0.02
+
+        mc = compute_lya_escape_fraction_mc(
+            lya_int * f_esc_true, lya_int * f_esc_true * 0.05,
+            fluxes_corr, errors_corr,
+            Av=0.0, Av_err=0.0, n_mc=3000,
+            rng=np.random.default_rng(42),
+        )
+        assert mc["n_lines"] == len(LYA_CASE_B_RATIOS)
+        assert abs(mc["f_esc"] - f_esc_true) < 0.03
+
+    def test_mc_no_balmer_returns_nan(self):
+        """No Balmer lines → nan."""
+        from jwspecabund.dust import compute_lya_escape_fraction_mc
+
+        mc = compute_lya_escape_fraction_mc(
+            10.0, 0.5, {}, {},
+            Av=0.0, Av_err=0.0, n_mc=100,
+        )
+        assert np.isnan(mc["f_esc"])
+        assert mc["n_lines"] == 0
+
+
+class TestLyaEscapeInAbundances:
+    """Test f_esc integration in compute_abundances."""
+
+    def _make_result_with_lya(self, lya_flux=10.0, lya_err=0.5):
+        """Build a minimal FitResult with Lyα and Hβ."""
+        from jwspecfit.fitter import FitResult, LineResult
+        from jwspecfit.io import Spectrum
+
+        # Minimal spectrum.
+        wave_um = np.linspace(0.6, 5.3, 1000)
+        flux_ujy = np.ones(1000) * 0.1
+        err_ujy = np.ones(1000) * 0.01
+        spec = Spectrum(wave_um=wave_um, flux_ujy=flux_ujy, err_ujy=err_ujy, z=6.0)
+
+        lines = {
+            "Lya": LineResult(
+                name="Lya", rest_wave_A=1215.67,
+                amplitude=lya_flux, centroid_A=1216.0, sigma_A=1.5,
+                flux=lya_flux, flux_err=lya_err,
+                ew_A=50.0,
+                snr_int_err=lya_flux / lya_err,
+                snr_int_cont=lya_flux / lya_err,
+                snr_peak_err=lya_flux / lya_err,
+                snr_peak_cont=lya_flux / lya_err,
+            ),
+            "HBETA": LineResult(
+                name="HBETA", rest_wave_A=4862.68,
+                amplitude=1.0, centroid_A=4862.68, sigma_A=3.0,
+                flux=1.0, flux_err=0.05,
+                ew_A=100.0, snr_int_err=20.0,
+                snr_int_cont=20.0, snr_peak_err=20.0, snr_peak_cont=20.0,
+            ),
+            "OIII_5007": LineResult(
+                name="OIII_5007", rest_wave_A=5008.24,
+                amplitude=5.0, centroid_A=5008.24, sigma_A=3.0,
+                flux=5.0, flux_err=0.1,
+                ew_A=500.0, snr_int_err=50.0,
+                snr_int_cont=50.0, snr_peak_err=50.0, snr_peak_cont=50.0,
+            ),
+            "OIII_4959": LineResult(
+                name="OIII_4959", rest_wave_A=4960.295,
+                amplitude=1.67, centroid_A=4960.295, sigma_A=3.0,
+                flux=1.67, flux_err=0.05,
+                ew_A=167.0, snr_int_err=33.0,
+                snr_int_cont=33.0, snr_peak_err=33.0, snr_peak_cont=33.0,
+            ),
+        }
+
+        return FitResult(
+            lines=lines,
+            params=np.array([]),
+            model_flux=flux_ujy,
+            continuum=np.zeros(1000),
+            residuals=np.zeros(1000),
+            chi2=1.0,
+            spectrum=spec,
+            line_names=["Lya", "HBETA", "OIII_5007", "OIII_4959"],
+            constraints=None,
+            success=True,
+            lya_params=np.array([1.0, 1216.0, 1.5, 5.0]),
+        )
+
+    def test_f_esc_computed_when_lya_present(self):
+        """compute_abundances should populate lya_f_esc when Lyα is fitted."""
+        from jwspecabund import compute_abundances
+
+        result = self._make_result_with_lya(lya_flux=10.0, lya_err=0.5)
+        abund = compute_abundances(
+            result, z=6.0, dust_correct=False, method="strong_line",
+        )
+        assert abund.lya_f_esc is not None
+        assert np.isfinite(abund.lya_f_esc)
+        assert abund.lya_f_esc > 0
+        # f_esc = 10.0 / (1.0 * 23.3) ≈ 0.429
+        assert abs(abund.lya_f_esc - 10.0 / 23.3) < 0.01
+
+    def test_f_esc_none_without_lya(self):
+        """Without Lyα, lya_f_esc should be None."""
+        from jwspecabund import compute_abundances
+        from jwspecfit.fitter import FitResult, LineResult
+        from jwspecfit.io import Spectrum
+
+        wave_um = np.linspace(0.6, 5.3, 1000)
+        spec = Spectrum(
+            wave_um=wave_um,
+            flux_ujy=np.ones(1000) * 0.1,
+            err_ujy=np.ones(1000) * 0.01,
+            z=6.0,
+        )
+        lines = {
+            "HBETA": LineResult(
+                name="HBETA", rest_wave_A=4862.68,
+                amplitude=1.0, centroid_A=4862.68, sigma_A=3.0,
+                flux=1.0, flux_err=0.05,
+                ew_A=100.0, snr_int_err=20.0,
+                snr_int_cont=20.0, snr_peak_err=20.0, snr_peak_cont=20.0,
+            ),
+            "OIII_5007": LineResult(
+                name="OIII_5007", rest_wave_A=5008.24,
+                amplitude=5.0, centroid_A=5008.24, sigma_A=3.0,
+                flux=5.0, flux_err=0.1,
+                ew_A=500.0, snr_int_err=50.0,
+                snr_int_cont=50.0, snr_peak_err=50.0, snr_peak_cont=50.0,
+            ),
+            "OIII_4959": LineResult(
+                name="OIII_4959", rest_wave_A=4960.295,
+                amplitude=1.67, centroid_A=4960.295, sigma_A=3.0,
+                flux=1.67, flux_err=0.05,
+                ew_A=167.0, snr_int_err=33.0,
+                snr_int_cont=33.0, snr_peak_err=33.0, snr_peak_cont=33.0,
+            ),
+        }
+        result = FitResult(
+            lines=lines, params=np.array([]),
+            model_flux=np.ones(1000) * 0.1, continuum=np.zeros(1000),
+            residuals=np.zeros(1000), chi2=1.0, spectrum=spec,
+            line_names=["HBETA", "OIII_5007", "OIII_4959"],
+            constraints=None, success=True,
+        )
+        abund = compute_abundances(
+            result, z=6.0, dust_correct=False, method="strong_line",
+        )
+        assert abund.lya_f_esc is None
+
+    def test_f_esc_in_summary(self):
+        """f_esc should appear in the summary string."""
+        from jwspecabund import compute_abundances
+
+        result = self._make_result_with_lya(lya_flux=10.0, lya_err=0.5)
+        abund = compute_abundances(
+            result, z=6.0, dust_correct=False, method="strong_line",
+        )
+        summary = abund.summary()
+        assert "f_esc(Lyα)" in summary
