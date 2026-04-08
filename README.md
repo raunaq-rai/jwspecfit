@@ -431,6 +431,8 @@ blended with [NeIII] 3968 and HeI 3889 respectively).
 
 Worked examples in [`docs/notebooks/`](docs/notebooks/):
 
+Since these have been created, source code has been modified and the notebooks may not run successfully. These will be updated and checked in due course.
+
 | Notebook | Description |
 |----------|-------------|
 | `01_prism_fit` | Prism fitting, save/load, plotting |
