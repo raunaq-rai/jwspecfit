@@ -531,17 +531,22 @@ def fit_NHI(
     wave_rest = wave_A / (1.0 + z)
     in_range = (wave_rest >= fit_range_A[0]) & (wave_rest <= fit_range_A[1])
 
-    # --- Mask blueward of Lya (IGM-absorbed / zero flux) ---
+    # --- Mask blueward of Lya line centre (IGM-absorbed / zero flux) ---
     lya_obs = _LAMBDA_LYA_A * (1.0 + z)
+    # Keep everything redward of Lya centre — the damping wing
+    # signal is at 1216–1300 A rest, so we must include this region.
     red_of_lya = wave_A > lya_obs
 
     # --- Emission line masking ---
     if mask_lines:
         line_mask = _mask_emission_lines(wave_A, z=z, width_A=mask_width_A)
-        # Also mask Lya emission spike (±30 A rest-frame).
+        # Mask only the narrow Lya emission spike (±8 A rest-frame).
+        # The damping wing extends from ~1220 A outward and must not
+        # be masked.
+        lya_mask_width = 8.0 * (1.0 + z)
         lya_emission_mask = (
-            (wave_A < lya_obs - 30.0 * (1.0 + z))
-            | (wave_A > lya_obs + 30.0 * (1.0 + z))
+            (wave_A < lya_obs - lya_mask_width)
+            | (wave_A > lya_obs + lya_mask_width)
         )
         line_mask &= lya_emission_mask
     else:
