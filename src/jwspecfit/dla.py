@@ -47,6 +47,7 @@ _E_CGS = 4.8032e-10            # electron charge (esu)
 _ME_CGS = 9.1094e-28           # electron mass (g)
 _C_CGS = 2.9979e10             # speed of light (cm/s)
 _B_DEFAULT_KMS = 30.0          # default Doppler parameter (km/s)
+_LAMBDA_PIVOT_A = 1500.0       # pivot wavelength for power-law normalisation
 
 
 # --------------------------------------------------------------------------
@@ -375,7 +376,8 @@ class DLAResult:
         )
 
         # Intrinsic continuum (no DLA).
-        continuum = 10.0 ** self.log_F0 * self.wave_fit ** self.beta_UV
+        lam_pivot = _LAMBDA_PIVOT_A * (1.0 + self.z)
+        continuum = 10.0 ** self.log_F0 * (self.wave_fit / lam_pivot) ** self.beta_UV
         ax_main.plot(
             wave_rest, continuum,
             color="blue", lw=1, ls="--", alpha=0.5,
@@ -452,7 +454,10 @@ def _evaluate_model(
         Model flux at each wavelength.
     """
     F0 = 10.0 ** log_F0
-    continuum = F0 * wave_A ** beta_UV
+    # Normalise wavelengths to pivot (1500 A observed-frame equivalent)
+    # so F0 is the flux density at 1500 A and beta_UV is well-conditioned.
+    lam_pivot = _LAMBDA_PIVOT_A * (1.0 + z)
+    continuum = F0 * (wave_A / lam_pivot) ** beta_UV
     tau = tau_DLA(wave_A, log_NHI, z=z, b_kms=b_kms)
     return continuum * jnp.exp(-tau)
 
@@ -526,9 +531,19 @@ def fit_NHI(
     wave_rest = wave_A / (1.0 + z)
     in_range = (wave_rest >= fit_range_A[0]) & (wave_rest <= fit_range_A[1])
 
+    # --- Mask blueward of Lya (IGM-absorbed / zero flux) ---
+    lya_obs = _LAMBDA_LYA_A * (1.0 + z)
+    red_of_lya = wave_A > lya_obs
+
     # --- Emission line masking ---
     if mask_lines:
         line_mask = _mask_emission_lines(wave_A, z=z, width_A=mask_width_A)
+        # Also mask Lya emission spike (±30 A rest-frame).
+        lya_emission_mask = (
+            (wave_A < lya_obs - 30.0 * (1.0 + z))
+            | (wave_A > lya_obs + 30.0 * (1.0 + z))
+        )
+        line_mask &= lya_emission_mask
     else:
         line_mask = np.ones(len(wave_A), dtype=bool)
 
@@ -536,7 +551,7 @@ def fit_NHI(
     good_err = err_corr > 0
 
     # --- Combined mask ---
-    use = in_range & line_mask & good_err
+    use = in_range & line_mask & good_err & red_of_lya
     if use.sum() < 10:
         raise ValueError(
             f"Only {use.sum()} pixels remain after masking. "
@@ -553,12 +568,13 @@ def fit_NHI(
     )
 
     # --- Initial guess for F0 from data ---
-    # Use median flux in the red half of the range (less DLA affected).
+    # F0 is the flux at the pivot wavelength (1500 A rest).
+    # Use median flux near the pivot to estimate it.
+    pivot_obs = _LAMBDA_PIVOT_A * (1.0 + z)
     wave_rest_use = w / (1.0 + z)
-    mid_wave = 0.5 * (fit_range_A[0] + fit_range_A[1])
-    red_half = wave_rest_use > mid_wave
-    if red_half.sum() > 0:
-        log_F0_guess = float(np.log10(np.maximum(np.median(f[red_half]), 1e-30)))
+    near_pivot = np.abs(w - pivot_obs) < 200.0 * (1.0 + z)
+    if near_pivot.sum() > 5:
+        log_F0_guess = float(np.log10(np.maximum(np.median(f[near_pivot]), 1e-30)))
     else:
         log_F0_guess = float(np.log10(np.maximum(np.median(f), 1e-30)))
 
