@@ -691,7 +691,7 @@ def fit_NHI(
 
     # --- Prior bounds ---
     # [log_NHI, beta_UV, log_F0]
-    prior_lo = np.array([18.0, -4.0, log_F0_guess - 5.0])
+    prior_lo = np.array([0.0, -4.0, log_F0_guess - 5.0])
     prior_hi = np.array([24.0,  0.0, log_F0_guess + 5.0])
 
     # --- Precompute inverse variance ---
