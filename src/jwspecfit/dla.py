@@ -525,14 +525,14 @@ def _evaluate_model(
     z: float,
     R: float | None = None,
     b_kms: float = _B_DEFAULT_KMS,
-    emission_lines: list[dict] | None = None,
+    lya_ujy_func: object | None = None,
 ) -> np.ndarray:
     """Evaluate the DLA-attenuated power-law model.
 
     Following Pollock et al. (2026) Eq. 4, the intrinsic spectrum
     (continuum + emission lines) is multiplied by exp(-tau_DLA):
 
-        F = (F0*(lam/lam_pivot)^beta + SUM_i emission_i) * exp(-tau_DLA)
+        F = (F0*(lam/lam_pivot)^beta + Lya(lam)) * exp(-tau_DLA)
 
     Parameters
     ----------
@@ -551,15 +551,10 @@ def _evaluate_model(
         convolved with a Gaussian LSF of FWHM = lambda / R.
     b_kms : float
         Doppler parameter in km/s.
-    emission_lines : list of dict, optional
-        Fixed emission line profiles to include in the intrinsic
-        spectrum before DLA absorption.  Each dict must have keys:
-
-        - ``"type"``: ``"gaussian"`` or ``"asymmetric_gaussian"``
-        - ``"amplitude"``: peak amplitude
-        - ``"centroid_A"``: line centre in Angstrom (observed frame)
-        - ``"sigma_A"``: Gaussian width in Angstrom
-        - ``"alpha"``: skewness (only for ``"asymmetric_gaussian"``)
+    lya_ujy_func : callable or None
+        Function that takes wavelength array (Å) and returns the
+        fixed Lyα emission profile in µJy.  Added to the intrinsic
+        spectrum before DLA absorption.
 
     Returns
     -------
@@ -570,23 +565,9 @@ def _evaluate_model(
     lam_pivot = _LAMBDA_PIVOT_A * (1.0 + z)
     intrinsic = F0 * (wave_A / lam_pivot) ** beta_UV
 
-    # Add fixed emission lines to intrinsic spectrum.
-    if emission_lines:
-        for line in emission_lines:
-            amp = line["amplitude"]
-            mu = line["centroid_A"]
-            sig = line["sigma_A"]
-            ltype = line.get("type", "gaussian")
-
-            if ltype == "asymmetric_gaussian":
-                from scipy.special import erf
-                alpha = line.get("alpha", 0.0)
-                t = (wave_A - mu) / sig
-                profile = amp * np.exp(-0.5 * t ** 2) * (1.0 + erf(alpha * t / np.sqrt(2.0)))
-            else:
-                profile = amp * np.exp(-0.5 * ((wave_A - mu) / sig) ** 2)
-
-            intrinsic = intrinsic + profile
+    # Add fixed Lya emission to intrinsic spectrum.
+    if lya_ujy_func is not None:
+        intrinsic = intrinsic + lya_ujy_func(wave_A)
 
     tau = tau_DLA(wave_A, log_NHI, z=z, b_kms=b_kms)
     model = intrinsic * np.exp(-tau)
@@ -615,7 +596,6 @@ def fit_NHI(
     mask_width_A: float = 10.0,
     fit_range_A: tuple[float, float] = (1050.0, 2000.0),
     mask_regions_A: list[tuple[float, float]] | None = None,
-    emission_lines: list[dict] | None = None,
     lya_params: np.ndarray | list | None = None,
     n_live: int = 500,
     seed: int = 42,
@@ -660,16 +640,13 @@ def fit_NHI(
         Additional rest-frame wavelength regions to mask, e.g.
         ISM absorption features: ``[(1255, 1270), (1296, 1310)]``.
         Each tuple is ``(lo, hi)`` in rest-frame Angstrom.
-    emission_lines : list of dict, optional
-        Fixed emission line profiles to include in the intrinsic
-        spectrum before DLA absorption.  Each dict must have:
-        ``{"type": "gaussian"|"asymmetric_gaussian",
-        "amplitude": float, "centroid_A": float, "sigma_A": float}``
-        and optionally ``"alpha"`` for asymmetric Gaussians.
     lya_params : array-like of length 4, optional
-        Shorthand for the Lya asymmetric Gaussian from a
-        ``jwspecmcmc`` result: ``[A_peak, mu_A, sigma_A, alpha]``.
-        Automatically added to the emission line list.
+        Fixed Lya emission from a ``jwspecmcmc`` result:
+        ``[A_peak, mu_A, sigma_A, alpha]``.  Included in the
+        intrinsic spectrum before DLA absorption following
+        Pollock+26 Eq. 4: ``(continuum + Lya) * exp(-tau_DLA)``.
+        The input data should be **raw flux** (not continuum-
+        subtracted) when using this option.
     n_live : int
         Number of live points for dynesty (default 500).
     seed : int
@@ -691,7 +668,11 @@ def fit_NHI(
         wave_A, flux, flux_err, Av, dust_law, Rv,
     )
 
-    # --- Subtract fitted Lya emission if provided ---
+    # --- Build Lya emission model for inclusion in intrinsic spectrum ---
+    # Following Pollock+26 Eq 4: F = (continuum + Lya) * exp(-tau_DLA)
+    # The Lya profile is fixed from the prior jwspecmcmc fit and included
+    # in the model, NOT subtracted from the data.
+    _lya_ujy_func = None
     if lya_params is not None:
         lp = np.asarray(lya_params)
         if len(lp) != 4:
@@ -701,13 +682,14 @@ def fit_NHI(
             )
         from .models import asymmetric_gaussian
         from .io import _flam_to_ujy
-        # Evaluate Lya model in flam, convert to µJy.
-        lya_flam = asymmetric_gaussian(wave_A, lp[0], lp[1], lp[2], lp[3])
-        wave_um = wave_A * 1e-4
-        lya_ujy = _flam_to_ujy(lya_flam, wave_um)
-        flux_corr = flux_corr - lya_ujy
+
+        def _lya_ujy_func(w):
+            """Evaluate the fixed Lya profile in µJy at wavelengths w."""
+            lya_flam = asymmetric_gaussian(w, lp[0], lp[1], lp[2], lp[3])
+            return _flam_to_ujy(lya_flam, w * 1e-4)
+
         logger.info(
-            "Subtracted Lya emission: A=%.2e, mu=%.1f, sigma=%.1f, alpha=%.1f",
+            "Including Lya in intrinsic model: A=%.2e, mu=%.1f, sigma=%.1f, alpha=%.1f",
             lp[0], lp[1], lp[2], lp[3],
         )
 
@@ -781,7 +763,8 @@ def fit_NHI(
     # --- dynesty log-likelihood ---
     def log_likelihood(theta):
         log_NHI, beta_UV, log_F0 = theta
-        model = _evaluate_model(w, log_F0, beta_UV, log_NHI, z, R=R)
+        model = _evaluate_model(w, log_F0, beta_UV, log_NHI, z, R=R,
+                                lya_ujy_func=_lya_ujy_func)
         resid = f - model
         return -0.5 * np.sum(resid ** 2 * inv_var)
 
@@ -816,7 +799,8 @@ def fit_NHI(
     Sigma_HI = 8e-21 * 10.0 ** log_NHI_med
 
     # --- Best-fit model ---
-    model_best = _evaluate_model(w, log_F0_med, beta_UV_med, log_NHI_med, z, R=R)
+    model_best = _evaluate_model(w, log_F0_med, beta_UV_med, log_NHI_med, z, R=R,
+                                 lya_ujy_func=_lya_ujy_func)
 
     # --- Log-evidence ---
     log_evidence = float(results.logz[-1])
@@ -841,5 +825,5 @@ def fit_NHI(
         z=z,
         Av=Av,
         log_evidence=log_evidence,
-        _lya_subtracted=(lya_params is not None),
+        _lya_subtracted=False,
     )
