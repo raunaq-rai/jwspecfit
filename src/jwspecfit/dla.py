@@ -4,20 +4,26 @@ Fits a UV power-law continuum attenuated by a damped Lyman-alpha
 absorber (DLA) to derive the neutral hydrogen column density N_HI
 in the galaxy's ISM.
 
-The model is:
-    F(lambda) = F0 * lambda^beta_UV * exp(-tau_DLA(lambda, N_HI))
+The model (following Pollock et al. 2026, Eq. 4) is:
 
-where tau_DLA uses the Tepper-Garcia (2006) analytic approximation
-to the Voigt-Hjerting function.
+    F(lambda) = F0 * (lambda/lambda_pivot)^beta_UV * exp(-tau_DLA)
 
-Sampling is performed with NumPyro NUTS (JAX-based HMC).
+where tau_DLA = C * a * N_HI * H(a, x) uses the Voigt-Hjerting
+function H(a, x) evaluated via the Faddeeva function (exact).
+
+The model is convolved with the instrumental line-spread function
+(Gaussian with FWHM = lambda / R) before comparison to data, as
+in Pollock et al. (2026).
+
+Sampling is performed with ``dynesty`` nested sampling (matching
+the paper's methodology).
 
 References
 ----------
 Pollock, C. L., et al. 2026, A&A, arXiv:2602.11783.
     Method and application to z > 9 galaxies.
 Tepper-Garcia, T. 2006, MNRAS, 369, 2025.
-    Analytic Voigt-Hjerting approximation.
+    Voigt-Hjerting function framework.
 """
 
 from __future__ import annotations
@@ -26,12 +32,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-import jax
-import jax.numpy as jnp
 import numpy as np
-import numpyro
-import numpyro.distributions as dist
-from numpyro.infer import MCMC, NUTS
+from scipy.special import wofz
 
 from .lines import REST_LINES_A
 
@@ -51,50 +53,30 @@ _LAMBDA_PIVOT_A = 1500.0       # pivot wavelength for power-law normalisation
 
 
 # --------------------------------------------------------------------------
-# Voigt-Hjerting function (Tepper-Garcia 2006)
+# Voigt-Hjerting function (exact via Faddeeva)
 # --------------------------------------------------------------------------
 
-def tepper_garcia_H(a: jnp.ndarray, u: jnp.ndarray) -> jnp.ndarray:
-    """Voigt-Hjerting function H(a, u) for DLA damping wings.
+def voigt_H(a: float, u: np.ndarray) -> np.ndarray:
+    """Voigt-Hjerting function H(a, u) via the Faddeeva function.
 
-    Uses a Gaussian core plus 4-term asymptotic Lorentzian wing
-    expansion.  The wing series diverges for |u| < 2, so u^2 is
-    floored at 4.0 — this introduces <0.5% error near the line
-    centre, but the optical depth there is >> 10^6 for any DLA
-    (N_HI > 10^{20} cm^{-2}) so exp(-tau) = 0 regardless.
+    Computes the exact H(a, u) = Re[w(u + i*a)] where w(z) is the
+    Faddeeva function.  This is the function that Tepper-Garcia (2006)
+    approximates analytically; here we use the full solution.
 
     Parameters
     ----------
-    a : array-like
+    a : float
         Voigt damping parameter.
-    u : array-like
+    u : np.ndarray
         Dimensionless frequency offset from line centre.
 
     Returns
     -------
-    array-like
-        H(a, u) evaluated at each (a, u) pair.
-
-    Notes
-    -----
-    Accurate to <0.5% across all u for typical DLA damping
-    parameters (a ~ 10^{-4} to 10^{-2}).  Pure JAX — fully
-    differentiable for use with NUTS.
+    np.ndarray
+        H(a, u) at each u.
     """
-    u2 = u ** 2
-    core = jnp.exp(-u2)
-
-    # Asymptotic wing expansion: H_wing ~ (a/sqrt(pi)) * sum_n c_n / u^{2n}
-    # Floor u^2 at 4.0 to avoid divergence near line centre.
-    u2_safe = jnp.maximum(u2, 4.0)
-    u4 = u2_safe ** 2
-    u6 = u2_safe * u4
-    u8 = u4 ** 2
-    wing = (a / jnp.sqrt(jnp.pi)) * (
-        1.0 / u2_safe + 1.5 / u4 + 3.75 / u6 + 13.125 / u8
-    )
-
-    return core + wing
+    z = u + 1j * a
+    return wofz(z).real
 
 
 # --------------------------------------------------------------------------
@@ -102,16 +84,23 @@ def tepper_garcia_H(a: jnp.ndarray, u: jnp.ndarray) -> jnp.ndarray:
 # --------------------------------------------------------------------------
 
 def tau_DLA(
-    wave_A: jnp.ndarray,
+    wave_A: np.ndarray,
     log_NHI: float,
     z: float = 0.0,
     b_kms: float = _B_DEFAULT_KMS,
-) -> jnp.ndarray:
+) -> np.ndarray:
     """Compute DLA optical depth at each wavelength.
+
+    Implements Eq. 1 of Pollock et al. (2026):
+        tau_DLA = N_HI * sigma_0 * H(a, u)
+
+    where sigma_0 = sqrt(pi) * e^2 * f_alpha / (m_e * c * Delta_nu_D),
+    a = Gamma_alpha / (4 pi Delta_nu_D), and u is the dimensionless
+    frequency offset from Lya.
 
     Parameters
     ----------
-    wave_A : array-like
+    wave_A : np.ndarray
         Observed-frame wavelength in Angstrom.
     log_NHI : float
         log10(N_HI / cm^-2).
@@ -122,7 +111,7 @@ def tau_DLA(
 
     Returns
     -------
-    array-like
+    np.ndarray
         Optical depth tau(lambda).
     """
     NHI = 10.0 ** log_NHI
@@ -133,28 +122,66 @@ def tau_DLA(
     nu_0 = _C_CGS / lambda_0_cm
     delta_nu_D = (b_cms / _C_CGS) * nu_0
 
-    # Voigt parameters.
-    a = _GAMMA_ALPHA / (4.0 * jnp.pi * delta_nu_D)
+    # Voigt damping parameter.
+    a = _GAMMA_ALPHA / (4.0 * np.pi * delta_nu_D)
 
-    # Frequency offset: u = (nu - nu_0) / delta_nu_D
-    # In wavelength: nu = c / (lambda * 1e-8), so
-    # u = (c/(lambda*1e-8) - nu_0) / delta_nu_D
-    wave_cm = wave_A * 1e-8
+    # Frequency offset u = (nu - nu_0) / delta_nu_D.
+    wave_cm = np.asarray(wave_A) * 1e-8
     nu = _C_CGS / wave_cm
     u = (nu - nu_0) / delta_nu_D
 
     # Line-centre cross section.
-    # sigma_0 = (sqrt(pi) * e^2 * f) / (m_e * c * delta_nu_D)
     sigma_0 = (
-        jnp.sqrt(jnp.pi) * _E_CGS ** 2 * _F_ALPHA
+        np.sqrt(np.pi) * _E_CGS ** 2 * _F_ALPHA
         / (_ME_CGS * _C_CGS * delta_nu_D)
     )
 
-    H = tepper_garcia_H(a, u)
+    H = voigt_H(a, u)
     tau = NHI * sigma_0 * H
 
-    # Ensure non-negative (numerical noise can give tiny negatives).
-    return jnp.maximum(tau, 0.0)
+    return np.maximum(tau, 0.0)
+
+
+# --------------------------------------------------------------------------
+# Spectral resolution convolution
+# --------------------------------------------------------------------------
+
+def _convolve_resolution(
+    wave_A: np.ndarray,
+    flux: np.ndarray,
+    R: float,
+) -> np.ndarray:
+    """Convolve a spectrum with a Gaussian LSF at resolving power R.
+
+    Parameters
+    ----------
+    wave_A : np.ndarray
+        Wavelength array (must be uniformly or near-uniformly spaced).
+    flux : np.ndarray
+        Flux array to convolve.
+    R : float
+        Spectral resolving power (lambda / FWHM).
+
+    Returns
+    -------
+    np.ndarray
+        Convolved flux array (same length as input).
+    """
+    # Median pixel scale.
+    dlam = np.median(np.diff(wave_A))
+    # FWHM at the midpoint wavelength.
+    lam_mid = np.median(wave_A)
+    fwhm_A = lam_mid / R
+    sigma_A = fwhm_A / 2.3548  # FWHM -> sigma
+
+    # Kernel half-width in pixels.
+    sigma_pix = sigma_A / dlam
+    hw = int(4.0 * sigma_pix) + 1
+    x = np.arange(-hw, hw + 1)
+    kernel = np.exp(-0.5 * (x / sigma_pix) ** 2)
+    kernel /= kernel.sum()
+
+    return np.convolve(flux, kernel, mode="same")
 
 
 # --------------------------------------------------------------------------
@@ -278,6 +305,8 @@ class DLAResult:
         Redshift used in fit.
     Av : float
         Dust correction applied.
+    log_evidence : float
+        Log-evidence (logZ) from dynesty.
     """
 
     log_NHI: float
@@ -294,6 +323,7 @@ class DLAResult:
     model_best: np.ndarray = field(repr=False)
     z: float = 0.0
     Av: float = 0.0
+    log_evidence: float = 0.0
 
     def summary(self) -> str:
         """Return a formatted summary string."""
@@ -309,6 +339,7 @@ class DLAResult:
             f"(+{self.log_F0_err[1]:.2f}, -{self.log_F0_err[0]:.2f})",
             f"z                = {self.z}",
             f"Av               = {self.Av}",
+            f"log(Z)           = {self.log_evidence:.1f}",
             f"N pixels         = {len(self.wave_fit)}",
             f"N samples        = {len(self.samples['log_NHI'])}",
         ]
@@ -362,14 +393,6 @@ class DLAResult:
 
         # Unit conversion factor.
         if flux_unit == "flam":
-            # F_lam = F_nu * c / lam^2  (proportional conversion).
-            # Use Angstrom: F_lam [per A] = F_nu * (c_A_s / lam_A^2)
-            # We just need the shape, so normalise to keep similar scale.
-            conv = _C_CGS * 1e8 / (self.wave_fit ** 2)  # c in A/s / lam^2
-            # Normalise so median is ~1 relative to original.
-            conv = conv / np.median(conv) * np.median(np.abs(self.flux_fit))
-            conv = conv / np.median(np.abs(self.flux_fit * conv / np.median(self.flux_fit)))
-            # Simpler: just do the proportional conversion.
             conv = 1.0 / (self.wave_fit ** 2)
             conv = conv / np.median(conv)
             ylabel = r"$F_\lambda$ (relative)"
@@ -485,46 +508,53 @@ class DLAResult:
 
 
 # --------------------------------------------------------------------------
-# Model evaluation (pure JAX, for use inside and outside numpyro)
+# Model evaluation (numpy — used by dynesty likelihood)
 # --------------------------------------------------------------------------
 
 def _evaluate_model(
-    wave_A: jnp.ndarray,
+    wave_A: np.ndarray,
     log_F0: float,
     beta_UV: float,
     log_NHI: float,
     z: float,
+    R: float | None = None,
     b_kms: float = _B_DEFAULT_KMS,
-) -> jnp.ndarray:
+) -> np.ndarray:
     """Evaluate the DLA-attenuated power-law model.
 
     Parameters
     ----------
-    wave_A : array-like
+    wave_A : np.ndarray
         Observed-frame wavelengths.
     log_F0 : float
-        log10 of continuum normalisation.
+        log10 of continuum normalisation at the pivot wavelength.
     beta_UV : float
         UV spectral slope.
     log_NHI : float
         log10(N_HI / cm^-2).
     z : float
         Source redshift.
+    R : float or None
+        Spectral resolving power.  If not None, the model is
+        convolved with a Gaussian LSF of FWHM = lambda / R.
     b_kms : float
         Doppler parameter in km/s.
 
     Returns
     -------
-    array-like
+    np.ndarray
         Model flux at each wavelength.
     """
     F0 = 10.0 ** log_F0
-    # Normalise wavelengths to pivot (1500 A observed-frame equivalent)
-    # so F0 is the flux density at 1500 A and beta_UV is well-conditioned.
     lam_pivot = _LAMBDA_PIVOT_A * (1.0 + z)
     continuum = F0 * (wave_A / lam_pivot) ** beta_UV
     tau = tau_DLA(wave_A, log_NHI, z=z, b_kms=b_kms)
-    return continuum * jnp.exp(-tau)
+    model = continuum * np.exp(-tau)
+
+    if R is not None:
+        model = _convolve_resolution(wave_A, model, R)
+
+    return model
 
 
 # --------------------------------------------------------------------------
@@ -540,15 +570,19 @@ def fit_NHI(
     Av: float = 0.0,
     dust_law: str = "cardelli",
     Rv: float = 3.1,
+    R: float | None = None,
     mask_lines: bool = True,
     mask_width_A: float = 10.0,
     fit_range_A: tuple[float, float] = (1050.0, 2000.0),
     mask_regions_A: list[tuple[float, float]] | None = None,
-    n_warmup: int = 500,
-    n_samples: int = 2000,
+    n_live: int = 500,
     seed: int = 42,
 ) -> DLAResult:
     """Fit the DLA column density from a Lya damping wing.
+
+    Uses ``dynesty`` nested sampling (matching Pollock et al. 2026)
+    with an exact Voigt-Hjerting profile and optional spectral
+    resolution convolution.
 
     Parameters
     ----------
@@ -566,6 +600,9 @@ def fit_NHI(
         Extinction law: ``"cardelli"`` or ``"salim"``.
     Rv : float
         Total-to-selective extinction ratio (default 3.1).
+    R : float or None
+        Spectral resolving power.  If provided, the model is
+        convolved with a Gaussian LSF at each likelihood evaluation.
     mask_lines : bool
         If True, mask known emission lines.
     mask_width_A : float
@@ -576,18 +613,18 @@ def fit_NHI(
         Additional rest-frame wavelength regions to mask, e.g.
         ISM absorption features: ``[(1255, 1270), (1296, 1310)]``.
         Each tuple is ``(lo, hi)`` in rest-frame Angstrom.
-    n_warmup : int
-        NUTS warmup iterations.
-    n_samples : int
-        NUTS posterior samples.
+    n_live : int
+        Number of live points for dynesty (default 500).
     seed : int
         RNG seed.
 
     Returns
     -------
     DLAResult
-        Fit results with posteriors.
+        Fit results with posteriors and Bayesian evidence.
     """
+    import dynesty
+
     wave_A = np.asarray(wave_A, dtype=np.float64)
     flux = np.asarray(flux, dtype=np.float64)
     flux_err = np.asarray(flux_err, dtype=np.float64)
@@ -608,8 +645,6 @@ def fit_NHI(
     if mask_lines:
         line_mask = _mask_emission_lines(wave_A, z=z, width_A=mask_width_A)
         # Mask only the narrow Lya emission spike (±8 A rest-frame).
-        # The damping wing extends from ~1220 A outward and must not
-        # be masked.
         lya_mask_width = 8.0 * (1.0 + z)
         lya_emission_mask = (
             (wave_A < lya_obs - lya_mask_width)
@@ -619,7 +654,7 @@ def fit_NHI(
     else:
         line_mask = np.ones(len(wave_A), dtype=bool)
 
-    # --- Custom region masking (e.g. ISM absorption features) ---
+    # --- Custom region masking ---
     if mask_regions_A:
         for lo, hi in mask_regions_A:
             lo_obs = lo * (1.0 + z)
@@ -647,46 +682,48 @@ def fit_NHI(
     )
 
     # --- Initial guess for F0 from data ---
-    # F0 is the flux at the pivot wavelength (1500 A rest).
-    # Use median flux near the pivot to estimate it.
     pivot_obs = _LAMBDA_PIVOT_A * (1.0 + z)
-    wave_rest_use = w / (1.0 + z)
     near_pivot = np.abs(w - pivot_obs) < 200.0 * (1.0 + z)
     if near_pivot.sum() > 5:
         log_F0_guess = float(np.log10(np.maximum(np.median(f[near_pivot]), 1e-30)))
     else:
         log_F0_guess = float(np.log10(np.maximum(np.median(f), 1e-30)))
 
-    # --- Convert to JAX arrays ---
-    w_jax = jnp.array(w)
-    f_jax = jnp.array(f)
-    e_jax = jnp.array(e)
+    # --- Prior bounds ---
+    # [log_NHI, beta_UV, log_F0]
+    prior_lo = np.array([18.0, -4.0, log_F0_guess - 5.0])
+    prior_hi = np.array([24.0,  0.0, log_F0_guess + 5.0])
 
-    # --- NumPyro model ---
-    def numpyro_model():
-        log_NHI = numpyro.sample("log_NHI", dist.Uniform(18.0, 24.0))
-        beta_UV = numpyro.sample("beta_UV", dist.Uniform(-4.0, 0.0))
-        log_F0 = numpyro.sample(
-            "log_F0",
-            dist.Uniform(log_F0_guess - 5.0, log_F0_guess + 5.0),
-        )
+    # --- Precompute inverse variance ---
+    inv_var = 1.0 / e ** 2
 
-        model_flux = _evaluate_model(w_jax, log_F0, beta_UV, log_NHI, z)
-        numpyro.sample("obs", dist.Normal(model_flux, e_jax), obs=f_jax)
+    # --- dynesty prior transform ---
+    def prior_transform(u):
+        return prior_lo + u * (prior_hi - prior_lo)
 
-    # --- Run NUTS ---
-    rng_key = jax.random.PRNGKey(seed)
-    kernel = NUTS(numpyro_model)
-    mcmc = MCMC(kernel, num_warmup=n_warmup, num_samples=n_samples,
-                progress_bar=True)
-    mcmc.run(rng_key)
+    # --- dynesty log-likelihood ---
+    def log_likelihood(theta):
+        log_NHI, beta_UV, log_F0 = theta
+        model = _evaluate_model(w, log_F0, beta_UV, log_NHI, z, R=R)
+        resid = f - model
+        return -0.5 * np.sum(resid ** 2 * inv_var)
 
-    samples = mcmc.get_samples()
+    # --- Run dynesty ---
+    sampler = dynesty.NestedSampler(
+        log_likelihood, prior_transform, ndim=3,
+        nlive=n_live, rstate=np.random.default_rng(seed),
+    )
+    sampler.run_nested(print_progress=True)
+    results = sampler.results
 
-    # --- Extract posteriors ---
-    log_NHI_samples = np.array(samples["log_NHI"])
-    beta_UV_samples = np.array(samples["beta_UV"])
-    log_F0_samples = np.array(samples["log_F0"])
+    # --- Extract weighted posterior samples ---
+    from dynesty.utils import resample_equal
+    weights = np.exp(results.logwt - results.logz[-1])
+    samples_arr = resample_equal(results.samples, weights)
+
+    log_NHI_samples = samples_arr[:, 0]
+    beta_UV_samples = samples_arr[:, 1]
+    log_F0_samples = samples_arr[:, 2]
 
     def _median_ci(arr):
         med = float(np.median(arr))
@@ -702,9 +739,10 @@ def fit_NHI(
     Sigma_HI = 8e-21 * 10.0 ** log_NHI_med
 
     # --- Best-fit model ---
-    model_best = np.array(
-        _evaluate_model(w_jax, log_F0_med, beta_UV_med, log_NHI_med, z)
-    )
+    model_best = _evaluate_model(w, log_F0_med, beta_UV_med, log_NHI_med, z, R=R)
+
+    # --- Log-evidence ---
+    log_evidence = float(results.logz[-1])
 
     return DLAResult(
         log_NHI=log_NHI_med,
@@ -725,4 +763,5 @@ def fit_NHI(
         model_best=model_best,
         z=z,
         Av=Av,
+        log_evidence=log_evidence,
     )
