@@ -181,7 +181,10 @@ def _convolve_resolution(
     kernel = np.exp(-0.5 * (x / sigma_pix) ** 2)
     kernel /= kernel.sum()
 
-    return np.convolve(flux, kernel, mode="same")
+    # Pad edges to avoid convolution artifacts.
+    padded = np.pad(flux, hw, mode="edge")
+    convolved = np.convolve(padded, kernel, mode="same")
+    return convolved[hw:-hw]
 
 
 # --------------------------------------------------------------------------
