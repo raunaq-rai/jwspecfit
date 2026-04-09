@@ -519,8 +519,14 @@ def _evaluate_model(
     z: float,
     R: float | None = None,
     b_kms: float = _B_DEFAULT_KMS,
+    emission_lines: list[dict] | None = None,
 ) -> np.ndarray:
     """Evaluate the DLA-attenuated power-law model.
+
+    Following Pollock et al. (2026) Eq. 4, the intrinsic spectrum
+    (continuum + emission lines) is multiplied by exp(-tau_DLA):
+
+        F = (F0*(lam/lam_pivot)^beta + SUM_i emission_i) * exp(-tau_DLA)
 
     Parameters
     ----------
@@ -539,6 +545,15 @@ def _evaluate_model(
         convolved with a Gaussian LSF of FWHM = lambda / R.
     b_kms : float
         Doppler parameter in km/s.
+    emission_lines : list of dict, optional
+        Fixed emission line profiles to include in the intrinsic
+        spectrum before DLA absorption.  Each dict must have keys:
+
+        - ``"type"``: ``"gaussian"`` or ``"asymmetric_gaussian"``
+        - ``"amplitude"``: peak amplitude
+        - ``"centroid_A"``: line centre in Angstrom (observed frame)
+        - ``"sigma_A"``: Gaussian width in Angstrom
+        - ``"alpha"``: skewness (only for ``"asymmetric_gaussian"``)
 
     Returns
     -------
@@ -547,9 +562,28 @@ def _evaluate_model(
     """
     F0 = 10.0 ** log_F0
     lam_pivot = _LAMBDA_PIVOT_A * (1.0 + z)
-    continuum = F0 * (wave_A / lam_pivot) ** beta_UV
+    intrinsic = F0 * (wave_A / lam_pivot) ** beta_UV
+
+    # Add fixed emission lines to intrinsic spectrum.
+    if emission_lines:
+        for line in emission_lines:
+            amp = line["amplitude"]
+            mu = line["centroid_A"]
+            sig = line["sigma_A"]
+            ltype = line.get("type", "gaussian")
+
+            if ltype == "asymmetric_gaussian":
+                from scipy.special import erf
+                alpha = line.get("alpha", 0.0)
+                t = (wave_A - mu) / sig
+                profile = amp * np.exp(-0.5 * t ** 2) * (1.0 + erf(alpha * t / np.sqrt(2.0)))
+            else:
+                profile = amp * np.exp(-0.5 * ((wave_A - mu) / sig) ** 2)
+
+            intrinsic = intrinsic + profile
+
     tau = tau_DLA(wave_A, log_NHI, z=z, b_kms=b_kms)
-    model = continuum * np.exp(-tau)
+    model = intrinsic * np.exp(-tau)
 
     if R is not None:
         model = _convolve_resolution(wave_A, model, R)
@@ -575,6 +609,8 @@ def fit_NHI(
     mask_width_A: float = 10.0,
     fit_range_A: tuple[float, float] = (1050.0, 2000.0),
     mask_regions_A: list[tuple[float, float]] | None = None,
+    emission_lines: list[dict] | None = None,
+    lya_params: np.ndarray | list | None = None,
     n_live: int = 500,
     seed: int = 42,
 ) -> DLAResult:
@@ -583,6 +619,11 @@ def fit_NHI(
     Uses ``dynesty`` nested sampling (matching Pollock et al. 2026)
     with an exact Voigt-Hjerting profile and optional spectral
     resolution convolution.
+
+    Following Eq. 4 of Pollock+26, fixed emission lines can be
+    included in the intrinsic spectrum before DLA absorption is
+    applied.  This is particularly important for Lya, whose
+    profile shape after DLA absorption strongly constrains N_HI.
 
     Parameters
     ----------
@@ -613,6 +654,16 @@ def fit_NHI(
         Additional rest-frame wavelength regions to mask, e.g.
         ISM absorption features: ``[(1255, 1270), (1296, 1310)]``.
         Each tuple is ``(lo, hi)`` in rest-frame Angstrom.
+    emission_lines : list of dict, optional
+        Fixed emission line profiles to include in the intrinsic
+        spectrum before DLA absorption.  Each dict must have:
+        ``{"type": "gaussian"|"asymmetric_gaussian",
+        "amplitude": float, "centroid_A": float, "sigma_A": float}``
+        and optionally ``"alpha"`` for asymmetric Gaussians.
+    lya_params : array-like of length 4, optional
+        Shorthand for the Lya asymmetric Gaussian from a
+        ``jwspecmcmc`` result: ``[A_peak, mu_A, sigma_A, alpha]``.
+        Automatically added to the emission line list.
     n_live : int
         Number of live points for dynesty (default 500).
     seed : int
@@ -689,6 +740,29 @@ def fit_NHI(
     else:
         log_F0_guess = float(np.log10(np.maximum(np.median(f), 1e-30)))
 
+    # --- Build emission line list ---
+    _emission_lines = list(emission_lines) if emission_lines else []
+    if lya_params is not None:
+        lp = np.asarray(lya_params)
+        if len(lp) != 4:
+            raise ValueError(
+                f"lya_params must have 4 elements [A_peak, mu, sigma, alpha], "
+                f"got {len(lp)}."
+            )
+        _emission_lines.append({
+            "type": "asymmetric_gaussian",
+            "amplitude": float(lp[0]),
+            "centroid_A": float(lp[1]),
+            "sigma_A": float(lp[2]),
+            "alpha": float(lp[3]),
+        })
+        logger.info(
+            "Including Lya emission: A=%.2e, mu=%.1f, sigma=%.1f, alpha=%.1f",
+            lp[0], lp[1], lp[2], lp[3],
+        )
+
+    _elines = _emission_lines if _emission_lines else None
+
     # --- Prior bounds ---
     # [log_NHI, beta_UV, log_F0]
     prior_lo = np.array([0.0, -4.0, log_F0_guess - 5.0])
@@ -704,7 +778,8 @@ def fit_NHI(
     # --- dynesty log-likelihood ---
     def log_likelihood(theta):
         log_NHI, beta_UV, log_F0 = theta
-        model = _evaluate_model(w, log_F0, beta_UV, log_NHI, z, R=R)
+        model = _evaluate_model(w, log_F0, beta_UV, log_NHI, z, R=R,
+                                emission_lines=_elines)
         resid = f - model
         return -0.5 * np.sum(resid ** 2 * inv_var)
 
@@ -739,7 +814,8 @@ def fit_NHI(
     Sigma_HI = 8e-21 * 10.0 ** log_NHI_med
 
     # --- Best-fit model ---
-    model_best = _evaluate_model(w, log_F0_med, beta_UV_med, log_NHI_med, z, R=R)
+    model_best = _evaluate_model(w, log_F0_med, beta_UV_med, log_NHI_med, z, R=R,
+                                 emission_lines=_elines)
 
     # --- Log-evidence ---
     log_evidence = float(results.logz[-1])
