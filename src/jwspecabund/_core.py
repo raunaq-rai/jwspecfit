@@ -2128,6 +2128,8 @@ def compute_abundances(
     ne_low_override: float | None = None,
     ne_mid_override: float | None = None,
     ne_high_override: float | None = None,
+    # Balmer decrement SNR floor for A_V derivation
+    snr_balmer: float = 3.0,
     # Forward model kwargs (method="forward")
     forward_sampler: str = "emcee",
     forward_n_walkers: int = 32,
@@ -2277,7 +2279,8 @@ def compute_abundances(
         if Av is None:
             # Derive A_V from all available Balmer decrements (Hγ–H10)/Hβ.
             balmer_out = compute_Av_multi_balmer(
-                fluxes, errors, law=dust_law, **dust_kwargs,
+                fluxes, errors, law=dust_law, snr_min=snr_balmer,
+                **dust_kwargs,
             )
             if balmer_out["n_lines"] > 0:
                 Av_derived = balmer_out["Av"]
