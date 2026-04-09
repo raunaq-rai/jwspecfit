@@ -10,6 +10,7 @@ from typing import Callable
 import numpy as np
 
 from .broad import BroadFitResult, fit_with_broad
+from .dla import DLAResult, fit_NHI
 from .fitter import FitResult, LineResult
 from .fitter import fit_lines as _fit_lines_narrow
 from .io import (
@@ -22,12 +23,14 @@ from .resolution import R_from_pixels, R_prism, resolve_R, sigma_inst_A
 
 __all__ = [
     "BroadFitResult",
+    "DLAResult",
     "FitResult",
     "LineResult",
     "REST_LINES_A",
     "R_from_pixels",
     "R_prism",
     "Spectrum",
+    "fit_NHI",
     "fit_lines",
     "fit_with_broad",
     "get_line_list",
