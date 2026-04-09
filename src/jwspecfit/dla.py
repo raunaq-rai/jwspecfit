@@ -478,6 +478,7 @@ def fit_NHI(
     mask_lines: bool = True,
     mask_width_A: float = 10.0,
     fit_range_A: tuple[float, float] = (1050.0, 2000.0),
+    mask_regions_A: list[tuple[float, float]] | None = None,
     n_warmup: int = 500,
     n_samples: int = 2000,
     seed: int = 42,
@@ -506,6 +507,10 @@ def fit_NHI(
         Half-width of line masks in rest-frame Angstrom.
     fit_range_A : tuple
         Rest-frame wavelength range for the fit.
+    mask_regions_A : list of (float, float), optional
+        Additional rest-frame wavelength regions to mask, e.g.
+        ISM absorption features: ``[(1255, 1270), (1296, 1310)]``.
+        Each tuple is ``(lo, hi)`` in rest-frame Angstrom.
     n_warmup : int
         NUTS warmup iterations.
     n_samples : int
@@ -551,6 +556,13 @@ def fit_NHI(
         line_mask &= lya_emission_mask
     else:
         line_mask = np.ones(len(wave_A), dtype=bool)
+
+    # --- Custom region masking (e.g. ISM absorption features) ---
+    if mask_regions_A:
+        for lo, hi in mask_regions_A:
+            lo_obs = lo * (1.0 + z)
+            hi_obs = hi * (1.0 + z)
+            line_mask &= (wave_A < lo_obs) | (wave_A > hi_obs)
 
     # --- Positive error filter ---
     good_err = err_corr > 0
