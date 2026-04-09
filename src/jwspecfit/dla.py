@@ -572,6 +572,13 @@ def _evaluate_model(
     tau = tau_DLA(wave_A, log_NHI, z=z, b_kms=b_kms)
     model = intrinsic * np.exp(-tau)
 
+    # IGM absorption: complete Gunn-Peterson trough blueward of Lya.
+    # At z >= 5, the IGM is opaque shortward of Lya, so we apply a
+    # hard cutoff.  This is convolved with the LSF below, producing
+    # a smooth transition at the spectral resolution.
+    lya_obs = _LAMBDA_LYA_A * (1.0 + z)
+    model = np.where(wave_A < lya_obs, 0.0, model)
+
     if R is not None:
         model = _convolve_resolution(wave_A, model, R)
 
