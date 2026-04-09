@@ -318,6 +318,7 @@ class DLAResult:
         self,
         ax: Any = None,
         show_residuals: bool = True,
+        flux_unit: str = "fnu",
         **kwargs: Any,
     ) -> Any:
         """Plot the DLA fit over the data.
@@ -330,6 +331,9 @@ class DLAResult:
             figure with two panels is created.
         show_residuals : bool
             If True, show a residual panel below the main plot.
+        flux_unit : str
+            ``"fnu"`` for F_nu (default, same units as input) or
+            ``"flam"`` for F_lambda (converted via F_lam = F_nu * c / lam^2).
         **kwargs
             Passed to the data plot (e.g. ``color``, ``alpha``).
 
@@ -356,22 +360,43 @@ class DLAResult:
         # Convert to rest frame for display.
         wave_rest = self.wave_fit / (1.0 + self.z)
 
+        # Unit conversion factor.
+        if flux_unit == "flam":
+            # F_lam = F_nu * c / lam^2  (proportional conversion).
+            # Use Angstrom: F_lam [per A] = F_nu * (c_A_s / lam_A^2)
+            # We just need the shape, so normalise to keep similar scale.
+            conv = _C_CGS * 1e8 / (self.wave_fit ** 2)  # c in A/s / lam^2
+            # Normalise so median is ~1 relative to original.
+            conv = conv / np.median(conv) * np.median(np.abs(self.flux_fit))
+            conv = conv / np.median(np.abs(self.flux_fit * conv / np.median(self.flux_fit)))
+            # Simpler: just do the proportional conversion.
+            conv = 1.0 / (self.wave_fit ** 2)
+            conv = conv / np.median(conv)
+            ylabel = r"$F_\lambda$ (relative)"
+        else:
+            conv = np.ones_like(self.wave_fit)
+            ylabel = r"$F_\nu$ (flux density)"
+
+        flux_plot = self.flux_fit * conv
+        err_plot = self.flux_err_fit * conv
+        model_plot = self.model_best * conv
+
         # Data.
         data_kw = {"color": "k", "lw": 0.8, "alpha": 0.6, "label": "Data"}
         data_kw.update(kwargs)
-        ax_main.step(wave_rest, self.flux_fit, where="mid", **data_kw)
+        ax_main.step(wave_rest, flux_plot, where="mid", **data_kw)
 
         # Error band.
         ax_main.fill_between(
             wave_rest,
-            self.flux_fit - self.flux_err_fit,
-            self.flux_fit + self.flux_err_fit,
+            flux_plot - err_plot,
+            flux_plot + err_plot,
             color="grey", alpha=0.2, step="mid",
         )
 
         # Best-fit model.
         ax_main.plot(
-            wave_rest, self.model_best,
+            wave_rest, model_plot,
             color="red", lw=1.5, label="DLA model",
         )
 
@@ -379,7 +404,7 @@ class DLAResult:
         lam_pivot = _LAMBDA_PIVOT_A * (1.0 + self.z)
         continuum = 10.0 ** self.log_F0 * (self.wave_fit / lam_pivot) ** self.beta_UV
         ax_main.plot(
-            wave_rest, continuum,
+            wave_rest, continuum * conv,
             color="blue", lw=1, ls="--", alpha=0.5,
             label=rf"Continuum ($\beta_{{UV}}={self.beta_UV:.2f}$)",
         )
@@ -392,7 +417,7 @@ class DLAResult:
             r"Ly$\alpha$", color="orange", fontsize=9,
         )
 
-        ax_main.set_ylabel("Flux density")
+        ax_main.set_ylabel(ylabel)
         ax_main.legend(fontsize=9, frameon=False)
         ax_main.set_title(
             rf"$\log(N_{{\rm HI}}/\mathrm{{cm}}^{{-2}}) = "
@@ -416,6 +441,46 @@ class DLAResult:
             ax_main.set_xlabel(r"Rest wavelength ($\mathrm{\AA}$)")
 
         fig.tight_layout()
+        return fig
+
+    def corner(self, **kwargs: Any) -> Any:
+        """Plot a corner plot of the posterior samples.
+
+        Requires the ``corner`` package.
+
+        Parameters
+        ----------
+        **kwargs
+            Passed to ``corner.corner()``.
+
+        Returns
+        -------
+        matplotlib Figure
+            The corner plot figure.
+        """
+        import corner as corner_pkg
+
+        data = np.column_stack([
+            self.samples["log_NHI"],
+            self.samples["beta_UV"],
+            self.samples["log_F0"],
+        ])
+        labels = [
+            r"$\log(N_{\rm HI}/\mathrm{cm}^{-2})$",
+            r"$\beta_{UV}$",
+            r"$\log(F_0)$",
+        ]
+        truths = [self.log_NHI, self.beta_UV, self.log_F0]
+
+        defaults = dict(
+            labels=labels,
+            truths=truths,
+            show_titles=True,
+            title_kwargs={"fontsize": 11},
+            quantiles=[0.16, 0.5, 0.84],
+        )
+        defaults.update(kwargs)
+        fig = corner_pkg.corner(data, **defaults)
         return fig
 
 
