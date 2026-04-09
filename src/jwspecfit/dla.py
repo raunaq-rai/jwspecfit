@@ -601,11 +601,8 @@ def fit_NHI(
     wave_rest = wave_A / (1.0 + z)
     in_range = (wave_rest >= fit_range_A[0]) & (wave_rest <= fit_range_A[1])
 
-    # --- Mask blueward of Lya line centre (IGM-absorbed / zero flux) ---
+    # --- Lya reference wavelength ---
     lya_obs = _LAMBDA_LYA_A * (1.0 + z)
-    # Keep everything redward of Lya centre — the damping wing
-    # signal is at 1216–1300 A rest, so we must include this region.
-    red_of_lya = wave_A > lya_obs
 
     # --- Emission line masking ---
     if mask_lines:
@@ -633,7 +630,7 @@ def fit_NHI(
     good_err = err_corr > 0
 
     # --- Combined mask ---
-    use = in_range & line_mask & good_err & red_of_lya
+    use = in_range & line_mask & good_err
     if use.sum() < 10:
         raise ValueError(
             f"Only {use.sum()} pixels remain after masking. "
