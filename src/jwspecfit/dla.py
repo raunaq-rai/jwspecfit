@@ -685,6 +685,26 @@ def fit_NHI(
         wave_A, flux, flux_err, Av, dust_law, Rv,
     )
 
+    # --- Subtract fitted Lya emission if provided ---
+    if lya_params is not None:
+        lp = np.asarray(lya_params)
+        if len(lp) != 4:
+            raise ValueError(
+                f"lya_params must have 4 elements [A_peak, mu, sigma, alpha], "
+                f"got {len(lp)}."
+            )
+        from .models import asymmetric_gaussian
+        from .io import _flam_to_ujy
+        # Evaluate Lya model in flam, convert to µJy.
+        lya_flam = asymmetric_gaussian(wave_A, lp[0], lp[1], lp[2], lp[3])
+        wave_um = wave_A * 1e-4
+        lya_ujy = _flam_to_ujy(lya_flam, wave_um)
+        flux_corr = flux_corr - lya_ujy
+        logger.info(
+            "Subtracted Lya emission: A=%.2e, mu=%.1f, sigma=%.1f, alpha=%.1f",
+            lp[0], lp[1], lp[2], lp[3],
+        )
+
     # --- Rest-frame wavelength range selection ---
     wave_rest = wave_A / (1.0 + z)
     in_range = (wave_rest >= fit_range_A[0]) & (wave_rest <= fit_range_A[1])
@@ -740,29 +760,6 @@ def fit_NHI(
     else:
         log_F0_guess = float(np.log10(np.maximum(np.median(f), 1e-30)))
 
-    # --- Build emission line list ---
-    _emission_lines = list(emission_lines) if emission_lines else []
-    if lya_params is not None:
-        lp = np.asarray(lya_params)
-        if len(lp) != 4:
-            raise ValueError(
-                f"lya_params must have 4 elements [A_peak, mu, sigma, alpha], "
-                f"got {len(lp)}."
-            )
-        _emission_lines.append({
-            "type": "asymmetric_gaussian",
-            "amplitude": float(lp[0]),
-            "centroid_A": float(lp[1]),
-            "sigma_A": float(lp[2]),
-            "alpha": float(lp[3]),
-        })
-        logger.info(
-            "Including Lya emission: A=%.2e, mu=%.1f, sigma=%.1f, alpha=%.1f",
-            lp[0], lp[1], lp[2], lp[3],
-        )
-
-    _elines = _emission_lines if _emission_lines else None
-
     # --- Prior bounds ---
     # [log_NHI, beta_UV, log_F0]
     prior_lo = np.array([0.0, -4.0, log_F0_guess - 5.0])
@@ -778,8 +775,7 @@ def fit_NHI(
     # --- dynesty log-likelihood ---
     def log_likelihood(theta):
         log_NHI, beta_UV, log_F0 = theta
-        model = _evaluate_model(w, log_F0, beta_UV, log_NHI, z, R=R,
-                                emission_lines=_elines)
+        model = _evaluate_model(w, log_F0, beta_UV, log_NHI, z, R=R)
         resid = f - model
         return -0.5 * np.sum(resid ** 2 * inv_var)
 
@@ -814,8 +810,7 @@ def fit_NHI(
     Sigma_HI = 8e-21 * 10.0 ** log_NHI_med
 
     # --- Best-fit model ---
-    model_best = _evaluate_model(w, log_F0_med, beta_UV_med, log_NHI_med, z, R=R,
-                                 emission_lines=_elines)
+    model_best = _evaluate_model(w, log_F0_med, beta_UV_med, log_NHI_med, z, R=R)
 
     # --- Log-evidence ---
     log_evidence = float(results.logz[-1])
