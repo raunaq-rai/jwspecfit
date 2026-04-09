@@ -324,6 +324,7 @@ class DLAResult:
     z: float = 0.0
     Av: float = 0.0
     log_evidence: float = 0.0
+    _lya_subtracted: bool = False
 
     def summary(self) -> str:
         """Return a formatted summary string."""
@@ -405,7 +406,9 @@ class DLAResult:
         model_plot = self.model_best * conv
 
         # Data.
-        data_kw = {"color": "k", "lw": 0.8, "alpha": 0.6, "label": "Data"}
+        _data_label = (r"Data (Ly$\alpha$-subtracted)"
+                       if self._lya_subtracted else "Data")
+        data_kw = {"color": "k", "lw": 0.8, "alpha": 0.6, "label": _data_label}
         data_kw.update(kwargs)
         ax_main.step(wave_rest, flux_plot, where="mid", **data_kw)
 
@@ -835,4 +838,5 @@ def fit_NHI(
         z=z,
         Av=Av,
         log_evidence=log_evidence,
+        _lya_subtracted=(lya_params is not None),
     )
