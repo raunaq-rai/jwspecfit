@@ -184,7 +184,7 @@ def cardelli_extinction(
         - 2.09002 * y**7
     )
 
-    # UV: 3.3 <= x < 8.0
+    # UV: 3.3 <= x < 8.0 (Cardelli+89 Section 3a)
     uv = (x >= 3.3) & (x < 8.0)
     xu = x[uv]
     Fa = np.zeros_like(xu)
@@ -194,6 +194,12 @@ def cardelli_extinction(
     Fb[uv2] = 0.2130 * (xu[uv2] - 5.9) ** 2 + 0.1207 * (xu[uv2] - 5.9) ** 3
     a[uv] = 1.752 - 0.316 * xu - 0.104 / ((xu - 4.67) ** 2 + 0.341) + Fa
     b[uv] = -3.090 + 1.825 * xu + 1.206 / ((xu - 4.62) ** 2 + 0.263) + Fb
+
+    # Far-UV: x >= 8.0 (lambda <= 1250 A).  Cardelli+89 Section 3b.
+    fuv = x >= 8.0
+    xf = np.clip(x[fuv], None, 10.0)  # formulae valid to x=10 (1000 A)
+    a[fuv] = -1.073 - 0.628 * (xf - 8.0) + 0.137 * (xf - 8.0) ** 2 - 0.070 * (xf - 8.0) ** 3
+    b[fuv] = 13.670 + 4.257 * (xf - 8.0) - 0.420 * (xf - 8.0) ** 2 + 0.374 * (xf - 8.0) ** 3
 
     A_over_Av = a + b / Rv
     A_lambda = Av * A_over_Av

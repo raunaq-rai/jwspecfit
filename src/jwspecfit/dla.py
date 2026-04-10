@@ -195,6 +195,7 @@ def _mask_emission_lines(
     wave_A: np.ndarray,
     z: float = 0.0,
     width_A: float = 10.0,
+    exclude: set[str] | None = None,
 ) -> np.ndarray:
     """Create a boolean mask that is True for pixels to *keep*.
 
@@ -206,6 +207,8 @@ def _mask_emission_lines(
         Source redshift.
     width_A : float
         Half-width of each mask region in rest-frame Angstrom.
+    exclude : set of str, optional
+        Line names to skip (not mask).
 
     Returns
     -------
@@ -213,7 +216,10 @@ def _mask_emission_lines(
         Boolean array (True = keep, False = masked).
     """
     keep = np.ones(len(wave_A), dtype=bool)
+    skip = exclude or set()
     for name, lam_rest in REST_LINES_A.items():
+        if name in skip:
+            continue
         lam_obs = lam_rest * (1.0 + z)
         width_obs = width_A * (1.0 + z)
         keep &= (wave_A < lam_obs - width_obs) | (wave_A > lam_obs + width_obs)
@@ -328,6 +334,7 @@ class DLAResult:
     Av: float = 0.0
     log_evidence: float = 0.0
     _lya_subtracted: bool = False
+    lya_params: np.ndarray | None = None
 
     def summary(self) -> str:
         """Return a formatted summary string."""
@@ -341,12 +348,23 @@ class DLAResult:
             f"(+{self.beta_UV_err[1]:.2f}, -{self.beta_UV_err[0]:.2f})",
             f"log(F0)          = {self.log_F0:.2f} "
             f"(+{self.log_F0_err[1]:.2f}, -{self.log_F0_err[0]:.2f})",
+        ]
+        if self.lya_params is not None:
+            lp = self.lya_params
+            lines.append(
+                f"Lya A_peak       = {lp[0]:.2e}  "
+                f"sigma={lp[2]:.2f} A  alpha={lp[3]:.2f}"
+            )
+            lines.append(
+                f"Lya fitted       = {'log_A_lya' in self.samples}"
+            )
+        lines.extend([
             f"z                = {self.z}",
             f"Av               = {self.Av}",
             f"log(Z)           = {self.log_evidence:.1f}",
             f"N pixels         = {len(self.wave_fit)}",
             f"N samples        = {len(self.samples['log_NHI'])}",
-        ]
+        ])
         return "\n".join(lines)
 
     def plot(
@@ -423,20 +441,50 @@ class DLAResult:
             color="grey", alpha=0.2, step="mid",
         )
 
-        # Best-fit model.
-        ax_main.plot(
-            wave_rest, model_plot,
-            color="red", lw=1.5, label="DLA model",
-        )
-
-        # Intrinsic continuum (no DLA).
+        # --- Component decomposition ---
         lam_pivot = _LAMBDA_PIVOT_A * (1.0 + self.z)
         continuum = 10.0 ** self.log_F0 * (self.wave_fit / lam_pivot) ** self.beta_UV
+        lya_obs = _LAMBDA_LYA_A * (1.0 + self.z)
+        _R = getattr(self, '_R', None)
+
+        # 1) Intrinsic continuum (no DLA, no IGM).
         ax_main.plot(
             wave_rest, continuum * conv,
             color="blue", lw=1, ls="--", alpha=0.5,
-            label=rf"Continuum ($\beta_{{UV}}={self.beta_UV:.2f}$)",
+            label=rf"Intrinsic cont. ($\beta_{{UV}}={self.beta_UV:.2f}$)",
         )
+
+        # 2) Continuum × DLA × IGM (no Lyα).
+        tau = tau_DLA(self.wave_fit, self.log_NHI, z=self.z)
+        cont_dla = continuum * np.exp(-tau)
+        cont_dla = np.where(self.wave_fit < lya_obs, 0.0, cont_dla)
+        if _R is not None:
+            cont_dla = _convolve_resolution(self.wave_fit, cont_dla, _R)
+        ax_main.plot(
+            wave_rest, cont_dla * conv,
+            color="purple", lw=1.5, alpha=0.8,
+            label=rf"Cont. $\times$ DLA ($\log N_{{HI}}={self.log_NHI:.1f}$)",
+        )
+
+        # 3) Lyα component (convolved, with IGM cutoff).
+        if self.lya_params is not None:
+            from .models import asymmetric_gaussian
+            from .io import _flam_to_ujy
+
+            lp = self.lya_params
+            lya_flam = asymmetric_gaussian(
+                self.wave_fit, lp[0], lp[1], lp[2], lp[3],
+            )
+            lya_ujy = _flam_to_ujy(lya_flam, self.wave_fit * 1e-4)
+            lya_ujy = np.where(self.wave_fit < lya_obs, 0.0, lya_ujy)
+            if _R is not None:
+                lya_ujy = _convolve_resolution(self.wave_fit, lya_ujy, _R)
+            ax_main.plot(
+                wave_rest, lya_ujy * conv,
+                color="green", lw=1.5, alpha=0.8,
+                label=r"Ly$\alpha$ (escaped)",
+            )
+
 
         # Lya marker.
         lya_rest = _LAMBDA_LYA_A
@@ -445,6 +493,14 @@ class DLAResult:
             lya_rest + 5, ax_main.get_ylim()[1] * 0.9,
             r"Ly$\alpha$", color="orange", fontsize=9,
         )
+
+        # Set y-axis from data, not the error envelope.
+        finite = np.isfinite(flux_plot)
+        if finite.any():
+            ylo = float(np.nanpercentile(flux_plot[finite], 2))
+            yhi = float(np.nanpercentile(flux_plot[finite], 98))
+            margin = 0.15 * max(yhi - ylo, abs(yhi) * 0.1)
+            ax_main.set_ylim(ylo - margin, yhi + margin)
 
         ax_main.set_ylabel(ylabel)
         ax_main.legend(fontsize=9, frameon=False)
@@ -489,17 +545,56 @@ class DLAResult:
         """
         import corner as corner_pkg
 
-        data = np.column_stack([
-            self.samples["log_NHI"],
-            self.samples["beta_UV"],
-            self.samples["log_F0"],
-        ])
-        labels = [
-            r"$\log(N_{\rm HI}/\mathrm{cm}^{-2})$",
-            r"$\beta_{UV}$",
-            r"$\log(F_0)$",
-        ]
-        truths = [self.log_NHI, self.beta_UV, self.log_F0]
+        cols = [self.samples["log_NHI"]]
+        labels = [r"$\log(N_{\rm HI}/\mathrm{cm}^{-2})$"]
+        truths = [self.log_NHI]
+
+        # Only include beta/F0 if they have a real posterior (not fixed).
+        beta_samples = self.samples["beta_UV"]
+        if np.std(beta_samples) > 1e-10:
+            cols.append(beta_samples)
+            cols.append(self.samples["log_F0"])
+            labels.extend([r"$\beta_{UV}$", r"$\log(F_0)$"])
+            truths.extend([self.beta_UV, self.log_F0])
+
+        # Include Lyα params if fitted jointly.
+        if "log_A_lya" in self.samples:
+            cols.append(self.samples["log_A_lya"])
+            cols.append(self.samples["sigma_lya"])
+            cols.append(self.samples["alpha_lya"])
+            labels.extend([
+                r"$\log(A_{\rm Ly\alpha})$",
+                r"$\sigma_{\rm Ly\alpha}$ (\AA)",
+                r"$\alpha_{\rm Ly\alpha}$",
+            ])
+            truths.extend([
+                float(np.median(self.samples["log_A_lya"])),
+                float(np.median(self.samples["sigma_lya"])),
+                float(np.median(self.samples["alpha_lya"])),
+            ])
+
+        if len(cols) == 1:
+            # 1D posterior — corner can't handle it, plot histogram.
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(figsize=(5, 4))
+            ax.hist(cols[0], bins=50, density=True, color="steelblue", alpha=0.7)
+            ax.axvline(truths[0], color="red", lw=1.5, label="Median")
+            lo = np.percentile(cols[0], 16)
+            hi = np.percentile(cols[0], 84)
+            ax.axvline(lo, color="grey", ls="--", lw=1)
+            ax.axvline(hi, color="grey", ls="--", lw=1)
+            ax.set_xlabel(labels[0], fontsize=12)
+            ax.set_ylabel("Posterior density")
+            ax.set_title(
+                f"${np.median(cols[0]):.2f}^{{+{hi - np.median(cols[0]):.2f}}}"
+                f"_{{-{np.median(cols[0]) - lo:.2f}}}$",
+                fontsize=12,
+            )
+            ax.legend(fontsize=9)
+            fig.tight_layout()
+            return fig
+
+        data = np.column_stack(cols)
 
         defaults = dict(
             labels=labels,
@@ -526,6 +621,7 @@ def _evaluate_model(
     R: float | None = None,
     b_kms: float = _B_DEFAULT_KMS,
     lya_ujy_func: object | None = None,
+    lya_free_params: tuple[float, float, float] | None = None,
 ) -> np.ndarray:
     """Evaluate the DLA-attenuated power-law model.
 
@@ -555,29 +651,53 @@ def _evaluate_model(
         Function that takes wavelength array (Å) and returns the
         fixed Lyα emission profile in µJy.  Added to the intrinsic
         spectrum before DLA absorption.
+    lya_free_params : tuple of (log_A, sigma, alpha), optional
+        Free Lyα parameters: log10(A_peak) in flam, sigma in Å,
+        and skewness alpha.  Centroid fixed at Lyα rest × (1+z).
+        The Lyα emission is added **after** DLA absorption — the
+        observed Lyα photons already escaped the neutral gas via
+        resonant scattering into the damping wing frequencies.
 
     Returns
     -------
     np.ndarray
         Model flux at each wavelength.
     """
+    from .io import _flam_to_ujy
+    from .models import asymmetric_gaussian
+
     F0 = 10.0 ** log_F0
     lam_pivot = _LAMBDA_PIVOT_A * (1.0 + z)
-    intrinsic = F0 * (wave_A / lam_pivot) ** beta_UV
+    continuum = F0 * (wave_A / lam_pivot) ** beta_UV
 
-    # Add fixed Lya emission to intrinsic spectrum.
-    if lya_ujy_func is not None:
-        intrinsic = intrinsic + lya_ujy_func(wave_A)
-
+    # DLA absorption on the continuum only.
     tau = tau_DLA(wave_A, log_NHI, z=z, b_kms=b_kms)
-    model = intrinsic * np.exp(-tau)
+    model = continuum * np.exp(-tau)
 
     # IGM absorption: complete Gunn-Peterson trough blueward of Lya.
-    # At z >= 5, the IGM is opaque shortward of Lya, so we apply a
-    # hard cutoff.  This is convolved with the LSF below, producing
-    # a smooth transition at the spectral resolution.
     lya_obs = _LAMBDA_LYA_A * (1.0 + z)
     model = np.where(wave_A < lya_obs, 0.0, model)
+
+    # Add Lyα emission AFTER DLA and IGM absorption.
+    # The observed Lyα photons already escaped the DLA (via resonant
+    # scattering into the damping wing frequencies), so they should
+    # not be attenuated again.  The IGM cutoff still applies to the
+    # blue wing of Lyα (absorbed at z > z_source).
+    lya_ujy = None
+    if lya_ujy_func is not None:
+        lya_ujy = lya_ujy_func(wave_A)
+
+    if lya_free_params is not None:
+        log_A, sigma, alpha = lya_free_params
+        A_peak = 10.0 ** log_A
+        mu = _LAMBDA_LYA_A * (1.0 + z)
+        lya_flam = asymmetric_gaussian(wave_A, A_peak, mu, sigma, alpha)
+        lya_ujy = _flam_to_ujy(lya_flam, wave_A * 1e-4)
+
+    if lya_ujy is not None:
+        # Apply IGM cutoff to Lyα blue wing too.
+        lya_ujy = np.where(wave_A < lya_obs, 0.0, lya_ujy)
+        model = model + lya_ujy
 
     if R is not None:
         model = _convolve_resolution(wave_A, model, R)
@@ -595,14 +715,16 @@ def fit_NHI(
     flux_err: np.ndarray,
     z: float = 0.0,
     *,
+    continuum: np.ndarray | None = None,
     Av: float = 0.0,
     dust_law: str = "cardelli",
     Rv: float = 3.1,
     R: float | None = None,
-    mask_lines: bool = True,
+    mask_lines: bool = False,
     mask_width_A: float = 10.0,
     fit_range_A: tuple[float, float] = (1050.0, 2000.0),
     mask_regions_A: list[tuple[float, float]] | None = None,
+    fit_lya: bool = False,
     lya_params: np.ndarray | list | None = None,
     n_live: int = 500,
     seed: int = 42,
@@ -613,21 +735,23 @@ def fit_NHI(
     with an exact Voigt-Hjerting profile and optional spectral
     resolution convolution.
 
-    Following Eq. 4 of Pollock+26, fixed emission lines can be
-    included in the intrinsic spectrum before DLA absorption is
-    applied.  This is particularly important for Lya, whose
-    profile shape after DLA absorption strongly constrains N_HI.
-
     Parameters
     ----------
     wave_A : np.ndarray
         Wavelength array in Angstrom (observed frame).
     flux : np.ndarray
-        Flux density array.
+        Flux density array (raw, not continuum-subtracted).
     flux_err : np.ndarray
         1-sigma flux errors.
     z : float
         Source redshift (0 for rest-frame spectra).
+    continuum : np.ndarray, optional
+        Moving-average continuum estimate (same length as ``flux``).
+        When provided, the DLA model is fitted to this smooth
+        continuum instead of the raw flux.  This removes emission
+        lines automatically and gives a clean damping wing signal.
+        Only 3 parameters are fitted (``log_NHI``, ``beta_UV``,
+        ``log_F0``); ``fit_lya`` and ``lya_params`` are ignored.
     Av : float
         Dust extinction A_V to correct for before fitting.
     dust_law : str
@@ -644,16 +768,13 @@ def fit_NHI(
     fit_range_A : tuple
         Rest-frame wavelength range for the fit.
     mask_regions_A : list of (float, float), optional
-        Additional rest-frame wavelength regions to mask, e.g.
-        ISM absorption features: ``[(1255, 1270), (1296, 1310)]``.
-        Each tuple is ``(lo, hi)`` in rest-frame Angstrom.
+        Additional rest-frame wavelength regions to mask.
+    fit_lya : bool
+        If True, jointly fit Lyα emission with DLA absorption.
+        Ignored when ``continuum`` is provided.
     lya_params : array-like of length 4, optional
-        Fixed Lya emission from a ``jwspecmcmc`` result:
-        ``[A_peak, mu_A, sigma_A, alpha]``.  Included in the
-        intrinsic spectrum before DLA absorption following
-        Pollock+26 Eq. 4: ``(continuum + Lya) * exp(-tau_DLA)``.
-        The input data should be **raw flux** (not continuum-
-        subtracted) when using this option.
+        Fixed or hint Lyα params.  Ignored when ``continuum``
+        is provided.
     n_live : int
         Number of live points for dynesty (default 500).
     seed : int
@@ -670,17 +791,27 @@ def fit_NHI(
     flux = np.asarray(flux, dtype=np.float64)
     flux_err = np.asarray(flux_err, dtype=np.float64)
 
-    # --- Dust correction ---
-    flux_corr, err_corr = _apply_dust_correction(
-        wave_A, flux, flux_err, Av, dust_law, Rv,
-    )
+    # --- Continuum mode: fit to smooth continuum estimate ---
+    _use_continuum = continuum is not None
+    if _use_continuum:
+        continuum = np.asarray(continuum, dtype=np.float64)
+        fit_lya = False
+        lya_params = None
 
-    # --- Build Lya emission model for inclusion in intrinsic spectrum ---
-    # Following Pollock+26 Eq 4: F = (continuum + Lya) * exp(-tau_DLA)
-    # The Lya profile is fixed from the prior jwspecmcmc fit and included
-    # in the model, NOT subtracted from the data.
+    # --- Dust correction ---
+    if _use_continuum:
+        # Apply dust correction to continuum and errors.
+        flux_corr, err_corr = _apply_dust_correction(
+            wave_A, continuum, flux_err, Av, dust_law, Rv,
+        )
+    else:
+        flux_corr, err_corr = _apply_dust_correction(
+            wave_A, flux, flux_err, Av, dust_law, Rv,
+        )
+
+    # --- Build fixed Lya model (only when fit_lya=False, no continuum) ---
     _lya_ujy_func = None
-    if lya_params is not None:
+    if lya_params is not None and not fit_lya:
         lp = np.asarray(lya_params)
         if len(lp) != 4:
             raise ValueError(
@@ -691,12 +822,11 @@ def fit_NHI(
         from .io import _flam_to_ujy
 
         def _lya_ujy_func(w):
-            """Evaluate the fixed Lya profile in µJy at wavelengths w."""
             lya_flam = asymmetric_gaussian(w, lp[0], lp[1], lp[2], lp[3])
             return _flam_to_ujy(lya_flam, w * 1e-4)
 
         logger.info(
-            "Including Lya in intrinsic model: A=%.2e, mu=%.1f, sigma=%.1f, alpha=%.1f",
+            "Including fixed Lya: A=%.2e, mu=%.1f, sigma=%.1f, alpha=%.1f",
             lp[0], lp[1], lp[2], lp[3],
         )
 
@@ -708,16 +838,20 @@ def fit_NHI(
     lya_obs = _LAMBDA_LYA_A * (1.0 + z)
 
     # --- Emission line masking ---
-    if mask_lines:
-        line_mask = _mask_emission_lines(wave_A, z=z, width_A=mask_width_A)
-        # Mask only the narrow Lya emission spike (±8 A rest-frame).
-        lya_mask_width = 8.0 * (1.0 + z)
-        lya_emission_mask = (
-            (wave_A < lya_obs - lya_mask_width)
-            | (wave_A > lya_obs + lya_mask_width)
+    if mask_lines and not _use_continuum:
+        _exclude = {"Lya"} if fit_lya else None
+        line_mask = _mask_emission_lines(
+            wave_A, z=z, width_A=mask_width_A, exclude=_exclude,
         )
-        line_mask &= lya_emission_mask
+        if not fit_lya:
+            lya_mask_width = 8.0 * (1.0 + z)
+            lya_emission_mask = (
+                (wave_A < lya_obs - lya_mask_width)
+                | (wave_A > lya_obs + lya_mask_width)
+            )
+            line_mask &= lya_emission_mask
     else:
+        # No line masking needed for continuum mode.
         line_mask = np.ones(len(wave_A), dtype=bool)
 
     # --- Custom region masking ---
@@ -727,11 +861,11 @@ def fit_NHI(
             hi_obs = hi * (1.0 + z)
             line_mask &= (wave_A < lo_obs) | (wave_A > hi_obs)
 
-    # --- Positive error filter ---
-    good_err = err_corr > 0
+    # --- Positive error and finite flux filter ---
+    good = (err_corr > 0) & np.isfinite(flux_corr)
 
     # --- Combined mask ---
-    use = in_range & line_mask & good_err
+    use = in_range & line_mask & good
     if use.sum() < 10:
         raise ValueError(
             f"Only {use.sum()} pixels remain after masking. "
@@ -742,9 +876,11 @@ def fit_NHI(
     f = flux_corr[use]
     e = err_corr[use]
 
+    _mode = "continuum" if _use_continuum else ("fit_lya" if fit_lya else "standard")
     logger.info(
-        "DLA fit: %d pixels in [%.0f, %.0f] A rest-frame (z=%.3f, Av=%.2f).",
-        len(w), fit_range_A[0], fit_range_A[1], z, Av,
+        "DLA fit (%s): %d pixels in [%.0f, %.0f] A rest-frame "
+        "(z=%.3f, Av=%.2f).",
+        _mode, len(w), fit_range_A[0], fit_range_A[1], z, Av,
     )
 
     # --- Initial guess for F0 from data ---
@@ -755,32 +891,118 @@ def fit_NHI(
     else:
         log_F0_guess = float(np.log10(np.maximum(np.median(f), 1e-30)))
 
-    # --- Prior bounds ---
-    # [log_NHI, beta_UV, log_F0]
-    prior_lo = np.array([0.0, -4.0, log_F0_guess - 5.0])
-    prior_hi = np.array([24.0,  0.0, log_F0_guess + 5.0])
-
     # --- Precompute inverse variance ---
     inv_var = 1.0 / e ** 2
 
-    # --- dynesty prior transform ---
-    def prior_transform(u):
-        return prior_lo + u * (prior_hi - prior_lo)
+    # ================================================================
+    # Stage 1: Fit continuum (F0, beta_UV) from the RED side only,
+    # where the DLA optical depth is negligible.
+    # ================================================================
+    # The wing boundary separates the DLA-affected region (blue)
+    # from the unabsorbed continuum (red).  Use 1280 Å so the
+    # power-law fit is anchored close to the wing transition.
+    _wing_boundary_A = 1280.0 * (1.0 + z)
+    red_mask = w > _wing_boundary_A
+    if red_mask.sum() < 5:
+        _wing_boundary_A = lya_obs + 50.0
+        red_mask = w > _wing_boundary_A
 
-    # --- dynesty log-likelihood ---
+    w_red = w[red_mask]
+    f_red = f[red_mask]
+    e_red = e[red_mask]
+
+    # Fit F = F0 * (lam/lam_pivot)^beta in linear space via curve_fit.
+    from scipy.optimize import curve_fit
+    lam_pivot = _LAMBDA_PIVOT_A * (1.0 + z)
+
+    def _power_law(lam, log_F0, beta):
+        return 10.0 ** log_F0 * (lam / lam_pivot) ** beta
+
+    pos_red = (f_red > 0) & (e_red > 0)
+    if pos_red.sum() > 5:
+        try:
+            popt, _ = curve_fit(
+                _power_law,
+                w_red[pos_red], f_red[pos_red],
+                p0=[log_F0_guess, -1.5],
+                sigma=e_red[pos_red], absolute_sigma=True,
+                bounds=([-30, -4.0], [30, 1.0]),
+            )
+            _fixed_log_F0 = float(popt[0])
+            _fixed_beta = float(popt[1])
+        except (RuntimeError, ValueError):
+            _fixed_log_F0 = log_F0_guess
+            _fixed_beta = -1.5
+    else:
+        _fixed_log_F0 = log_F0_guess
+        _fixed_beta = -1.5
+
+    logger.info(
+        "Stage 1 (red continuum): log_F0=%.3f, beta_UV=%.3f "
+        "from %d pixels redward of %.0f A.",
+        _fixed_log_F0, _fixed_beta, int(red_mask.sum()), _wing_boundary_A,
+    )
+
+    # ================================================================
+    # Stage 2: Fit log_NHI with F0 and beta fixed, focusing on the
+    # damping wing region where τ_DLA shapes the spectrum.
+    # ================================================================
+    # Use only the wing region for the NHI fit so the flat red
+    # continuum doesn't dominate the likelihood.
+    wing_mask = w <= _wing_boundary_A
+    w_wing = w[wing_mask]
+    f_wing = f[wing_mask]
+    inv_var_wing = inv_var[wing_mask]
+
+    if wing_mask.sum() < 5:
+        logger.warning(
+            "Only %d pixels in the wing region. Falling back to full range.",
+            wing_mask.sum(),
+        )
+        w_wing = w
+        f_wing = f
+        inv_var_wing = inv_var
+
+    logger.info(
+        "Stage 2 (wing fit): %d pixels in wing region (< %.0f A).",
+        len(w_wing), _wing_boundary_A,
+    )
+
+    # 1D dynesty: only log_NHI is free.
+    ndim = 1
+
+    def _log_like_nhi(log_NHI):
+        model = _evaluate_model(
+            w_wing, _fixed_log_F0, _fixed_beta, log_NHI, z, R=R,
+            lya_ujy_func=_lya_ujy_func if not fit_lya else None,
+        )
+        resid = f_wing - model
+        return -0.5 * np.sum(resid ** 2 * inv_var_wing)
+
+    # Quick grid search to find the best log_NHI and centre the prior.
+    _grid = np.linspace(18.0, 23.0, 100)
+    _grid_ll = np.array([_log_like_nhi(v) for v in _grid])
+    _best_nhi = float(_grid[np.argmax(_grid_ll)])
+    # Centre prior ±2 dex around the grid optimum, clipped to [18, 23].
+    prior_lo_nhi = np.array([max(18.0, _best_nhi - 2.0)])
+    prior_hi_nhi = np.array([min(23.0, _best_nhi + 2.0)])
+    logger.info(
+        "Grid search best: log_NHI=%.2f, prior=[%.1f, %.1f].",
+        _best_nhi, prior_lo_nhi[0], prior_hi_nhi[0],
+    )
+
+    def prior_transform(u):
+        return prior_lo_nhi + u * (prior_hi_nhi - prior_lo_nhi)
+
     def log_likelihood(theta):
-        log_NHI, beta_UV, log_F0 = theta
-        model = _evaluate_model(w, log_F0, beta_UV, log_NHI, z, R=R,
-                                lya_ujy_func=_lya_ujy_func)
-        resid = f - model
-        return -0.5 * np.sum(resid ** 2 * inv_var)
+        return _log_like_nhi(theta[0])
 
     # --- Run dynesty ---
     sampler = dynesty.NestedSampler(
-        log_likelihood, prior_transform, ndim=3,
+        log_likelihood, prior_transform, ndim=ndim,
         nlive=n_live, rstate=np.random.default_rng(seed),
     )
-    sampler.run_nested(print_progress=True)
+    sampler.run_nested(print_progress=True, dlogz=0.01)
     results = sampler.results
 
     # --- Extract weighted posterior samples ---
@@ -789,8 +1011,6 @@ def fit_NHI(
     samples_arr = resample_equal(results.samples, weights)
 
     log_NHI_samples = samples_arr[:, 0]
-    beta_UV_samples = samples_arr[:, 1]
-    log_F0_samples = samples_arr[:, 2]
 
     def _median_ci(arr):
         med = float(np.median(arr))
@@ -799,20 +1019,36 @@ def fit_NHI(
         return med, (lo, hi)
 
     log_NHI_med, log_NHI_err = _median_ci(log_NHI_samples)
-    beta_UV_med, beta_UV_err = _median_ci(beta_UV_samples)
-    log_F0_med, log_F0_err = _median_ci(log_F0_samples)
+
+    # F0 and beta are fixed — no posterior, just point estimates.
+    beta_UV_med = _fixed_beta
+    beta_UV_err = (0.0, 0.0)
+    log_F0_med = _fixed_log_F0
+    log_F0_err = (0.0, 0.0)
+
+    samples_dict = {
+        "log_NHI": log_NHI_samples,
+        "beta_UV": np.full_like(log_NHI_samples, _fixed_beta),
+        "log_F0": np.full_like(log_NHI_samples, _fixed_log_F0),
+    }
 
     # --- Surface density (Pollock+26 Eq. 7) ---
     Sigma_HI = 8e-21 * 10.0 ** log_NHI_med
 
-    # --- Best-fit model ---
-    model_best = _evaluate_model(w, log_F0_med, beta_UV_med, log_NHI_med, z, R=R,
-                                 lya_ujy_func=_lya_ujy_func)
+    # --- Best-fit model (evaluated on full fit range for plotting) ---
+    model_best = _evaluate_model(
+        w, log_F0_med, beta_UV_med, log_NHI_med, z, R=R,
+        lya_ujy_func=_lya_ujy_func if not fit_lya else None,
+    )
 
     # --- Log-evidence ---
     log_evidence = float(results.logz[-1])
 
-    return DLAResult(
+    final_lya_params = None
+    if lya_params is not None:
+        final_lya_params = np.asarray(lya_params)
+
+    result = DLAResult(
         log_NHI=log_NHI_med,
         log_NHI_err=log_NHI_err,
         beta_UV=beta_UV_med,
@@ -820,11 +1056,7 @@ def fit_NHI(
         log_F0=log_F0_med,
         log_F0_err=log_F0_err,
         Sigma_HI=Sigma_HI,
-        samples={
-            "log_NHI": log_NHI_samples,
-            "beta_UV": beta_UV_samples,
-            "log_F0": log_F0_samples,
-        },
+        samples=samples_dict,
         wave_fit=np.array(w),
         flux_fit=np.array(f),
         flux_err_fit=np.array(e),
@@ -833,4 +1065,7 @@ def fit_NHI(
         Av=Av,
         log_evidence=log_evidence,
         _lya_subtracted=False,
+        lya_params=final_lya_params,
     )
+    result._R = R
+    return result
