@@ -214,6 +214,7 @@ def _bic_bootstrap_single(
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
+    ciii_doublet_ratio: float | None = None,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
 
@@ -272,6 +273,7 @@ def _bic_bootstrap_single(
                 sigma_overrides=sigma_overrides,
                 centroid_overrides=centroid_overrides,
                 niv_doublet_ratio=niv_doublet_ratio,
+                ciii_doublet_ratio=ciii_doublet_ratio,
             )
         except (ValueError, RuntimeError):
             results[variant] = np.nan
@@ -363,6 +365,7 @@ def _fit_model_variant(
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
+    ciii_doublet_ratio: float | None = None,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -406,6 +409,7 @@ def _fit_model_variant(
         sigma_overrides=sigma_overrides,
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
+        ciii_doublet_ratio=ciii_doublet_ratio,
         _label=variant_label, _p0_hint=p0_hint,
     )
 
@@ -449,6 +453,7 @@ def fit_with_broad(
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
+    ciii_doublet_ratio: float | None = None,
     _print_R: bool = True,
 ) -> BroadFitResult:
     """Fit emission lines with optional broad Balmer components.
@@ -534,6 +539,7 @@ def fit_with_broad(
         sigma_overrides=sigma_overrides,
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
+        ciii_doublet_ratio=ciii_doublet_ratio,
     )
 
     bic_b1 = np.nan
@@ -556,6 +562,7 @@ def fit_with_broad(
                 sigma_overrides=sigma_overrides,
                 centroid_overrides=centroid_overrides,
                 niv_doublet_ratio=niv_doublet_ratio,
+                ciii_doublet_ratio=ciii_doublet_ratio,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -589,6 +596,7 @@ def fit_with_broad(
                 sigma_overrides=sigma_overrides,
                 centroid_overrides=centroid_overrides,
                 niv_doublet_ratio=niv_doublet_ratio,
+                ciii_doublet_ratio=ciii_doublet_ratio,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -629,7 +637,7 @@ def fit_with_broad(
                 fit_narrow, balmer_mask, variants_to_fit, sigma_factor,
                 centroid_vmax, moving_average, tie_uv_doublets,
                 tie_uv_centroids, tie_uv_widths, sigma_overrides,
-                centroid_overrides, niv_doublet_ratio,
+                centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
             )
             for i in range(n_boot_bic)
         )
@@ -663,7 +671,7 @@ def fit_with_broad(
                     spectrum, z, narrow_lines, grating, R, continuum, deg,
                     broad_type, 0, fit_narrow, 1, sigma_factor, centroid_vmax,
                     moving_average, tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
-                    sigma_overrides, centroid_overrides, niv_doublet_ratio,
+                    sigma_overrides, centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
                 )
             for variant, fut in futures.items():
                 fit_v, _ = fut.result()
@@ -682,7 +690,7 @@ def fit_with_broad(
                     spectrum, z, narrow_lines, grating, R, continuum, deg,
                     variant, 0, fit_narrow, n_jobs, sigma_factor, centroid_vmax,
                     moving_average, tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
-                    sigma_overrides, centroid_overrides, niv_doublet_ratio,
+                    sigma_overrides, centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
                 )
                 bic_futures[variant] = fut
 
@@ -742,6 +750,7 @@ def fit_with_broad(
             sigma_overrides=sigma_overrides,
             centroid_overrides=centroid_overrides,
             niv_doublet_ratio=niv_doublet_ratio,
+            ciii_doublet_ratio=ciii_doublet_ratio,
         )
         all_fits[best_name] = best_fit
 

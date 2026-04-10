@@ -64,6 +64,7 @@ class ConstraintSet:
     tie_uv_widths: bool = True
     blended_doublets: set[str] | None = None
     niv_doublet_ratio: float | None = None
+    ciii_doublet_ratio: float | None = None
 
     def apply(self, params: np.ndarray) -> np.ndarray:
         """Apply constraints to a parameter vector (in-place copy).
@@ -182,10 +183,12 @@ class ConstraintSet:
                     if self.tie_uv_centroids:
                         p[nL + i_sec] = p[nL + i_pri] * lam_ratio
                     p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
-                    # NIV: use explicit ratio if provided (e.g. from
-                    # CIII]-derived density).
+                    # Use explicit ratio if provided (e.g. from
+                    # assumed density).
                     if (pri, sec) == ("NIV_1486", "NIV_1483") and self.niv_doublet_ratio is not None:
                         p[i_sec] = p[i_pri] * self.niv_doublet_ratio
+                    elif (pri, sec) == ("CIII]_1907", "CIII]") and self.ciii_doublet_ratio is not None:
+                        p[i_sec] = p[i_pri] * self.ciii_doublet_ratio
                     # Fix amplitude for unresolved doublets.
                     elif sec in _blended:
                         ratio = _INTERCOM_LOW_DENSITY_RATIOS.get(
@@ -312,8 +315,10 @@ class ConstraintSet:
                     if self.tie_uv_centroids:
                         free[nL + i_sec] = False
                     free[2 * nL + i_sec] = False
-                    # NIV amplitude derived when explicit ratio is set.
+                    # Amplitude derived when explicit ratio is set.
                     if (pri, sec) == ("NIV_1486", "NIV_1483") and self.niv_doublet_ratio is not None:
+                        free[i_sec] = False
+                    elif (pri, sec) == ("CIII]_1907", "CIII]") and self.ciii_doublet_ratio is not None:
                         free[i_sec] = False
                     elif sec in _blended:
                         free[i_sec] = False

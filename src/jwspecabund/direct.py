@@ -137,6 +137,39 @@ def compute_ne_CIII(
     return float(ne)
 
 
+def ciii_ratio_at_density(
+    ne: float,
+    Te: float = 1e4,
+) -> float:
+    """Predict the CIII] 1909/1907 flux ratio at a given electron density.
+
+    Useful for fixing the CIII] doublet ratio in the fitter when the
+    density is assumed or known from another diagnostic.
+
+    Parameters
+    ----------
+    ne : float
+        Electron density in cm^-3.
+    Te : float
+        Electron temperature in K (default 10^4).
+
+    Returns
+    -------
+    float
+        Expected F(1909) / F(1907) ratio.
+    """
+    pn = _get_pyneb()
+    atom = pn.Atom("C", 3)
+    emiss_1909 = atom.getEmissivity(Te, ne, wave=1909)
+    emiss_1907 = atom.getEmissivity(Te, ne, wave=1907)
+    if emiss_1907 <= 0:
+        raise ValueError(
+            f"PyNEB returned zero emissivity for CIII] 1907 at "
+            f"n_e={ne:.0f}, T_e={Te:.0f}"
+        )
+    return float(emiss_1909 / emiss_1907)
+
+
 def niv_ratio_at_density(
     ne: float,
     Te: float = 1e4,
