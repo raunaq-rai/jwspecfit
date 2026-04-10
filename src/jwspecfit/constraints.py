@@ -31,7 +31,7 @@ _INTERCOM_LOW_DENSITY_RATIOS: dict[tuple[str, str], float] = {
     ("OIII_1666", "OIII_1661"): 0.83,   # 1/1.20, low-density limit
     ("CIII]_1907", "CIII]"):     0.65,   # Keenan+1992
     ("CII]_2326", "CII]_2324"):  0.49,   # A-value ratio, same upper level
-    ("NIV_1486",   "NIV_1483"):  0.67,   # low-density limit; flips at ne > 5e4
+    ("NIV_1486",   "NIV_1483"):  1.48,   # low-density limit (PyNEB); drops below 1 at ne > 5e4
     ("NIII_1749",  "NIII_1752"): 0.67,
     ("SiIII_1",   "SiIII_2"):   0.67,
 }
@@ -63,6 +63,7 @@ class ConstraintSet:
     tie_uv_centroids: bool = True
     tie_uv_widths: bool = True
     blended_doublets: set[str] | None = None
+    niv_doublet_ratio: float | None = None
 
     def apply(self, params: np.ndarray) -> np.ndarray:
         """Apply constraints to a parameter vector (in-place copy).
@@ -181,8 +182,12 @@ class ConstraintSet:
                     if self.tie_uv_centroids:
                         p[nL + i_sec] = p[nL + i_pri] * lam_ratio
                     p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
+                    # NIV: use explicit ratio if provided (e.g. from
+                    # CIII]-derived density).
+                    if (pri, sec) == ("NIV_1486", "NIV_1483") and self.niv_doublet_ratio is not None:
+                        p[i_sec] = p[i_pri] * self.niv_doublet_ratio
                     # Fix amplitude for unresolved doublets.
-                    if sec in _blended:
+                    elif sec in _blended:
                         ratio = _INTERCOM_LOW_DENSITY_RATIOS.get(
                             (pri, sec), 0.67,
                         )
@@ -307,7 +312,10 @@ class ConstraintSet:
                     if self.tie_uv_centroids:
                         free[nL + i_sec] = False
                     free[2 * nL + i_sec] = False
-                    if sec in _blended:
+                    # NIV amplitude derived when explicit ratio is set.
+                    if (pri, sec) == ("NIV_1486", "NIV_1483") and self.niv_doublet_ratio is not None:
+                        free[i_sec] = False
+                    elif sec in _blended:
                         free[i_sec] = False
 
             # UV intercombination widths: first available is anchor (free),

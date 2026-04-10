@@ -279,6 +279,7 @@ def fit_lines(
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     lya_break: bool = False,
+    niv_doublet_ratio: float | None = None,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -595,6 +596,7 @@ def fit_lines(
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
         blended_doublets=_blended if _blended else None,
+        niv_doublet_ratio=niv_doublet_ratio,
     )
 
     # Initial parameters: [amplitudes, centroids, sigmas].

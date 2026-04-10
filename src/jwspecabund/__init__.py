@@ -43,6 +43,7 @@ from .direct import (
     compute_Te_OIII,
     compute_Te_OIII_1666,
     compute_total_abundances,
+    niv_ratio_at_density,
 )
 from .martinez25_icf import (
     compute_NO_martinez25,

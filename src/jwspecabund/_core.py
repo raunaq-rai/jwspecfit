@@ -495,15 +495,22 @@ def _compute_multi_ne(
         ne_high = ne_low
 
     # Clamp ne_high if it exceeds the maximum (prevents unphysical
-    # density from noisy doublet ratios).
+    # density from noisy doublet ratios).  Always fall back to ne_mid
+    # (never ne_low) — if CIII] is unavailable, keep the raw value.
     if ne_high > ne_high_max:
-        ne_fallback = ne_mid if ne_mid is not None else ne_low
-        logger.warning(
-            "n_e(high) = %.0f cm^-3 exceeds ne_high_max=%.0f; "
-            "falling back to %.0f cm^-3.",
-            ne_high, ne_high_max, ne_fallback,
-        )
-        ne_high = ne_fallback
+        if ne_mid is not None:
+            logger.warning(
+                "n_e(high) = %.0f cm^-3 exceeds ne_high_max=%.0f; "
+                "falling back to n_e(mid) = %.0f cm^-3.",
+                ne_high, ne_high_max, ne_mid,
+            )
+            ne_high = ne_mid
+        else:
+            logger.warning(
+                "n_e(high) = %.0f cm^-3 exceeds ne_high_max=%.0f "
+                "but no n_e(mid) available; keeping raw value.",
+                ne_high, ne_high_max,
+            )
 
     return ne_low, ne_mid, ne_high, ne_failures
 

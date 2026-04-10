@@ -155,6 +155,7 @@ def fit_lines(
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     lya_break: bool = False,
+    niv_doublet_ratio: float | None = None,
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
@@ -295,6 +296,7 @@ def fit_lines(
                     sigma_overrides=sigma_overrides,
                     centroid_overrides=centroid_overrides,
                     lya_break=lya_break,
+                    niv_doublet_ratio=niv_doublet_ratio,
                     _label=win_label,
                 )
             else:
@@ -312,6 +314,7 @@ def fit_lines(
                     tie_uv_widths=tie_uv_widths,
                     sigma_overrides=sigma_overrides,
                     centroid_overrides=centroid_overrides,
+                    niv_doublet_ratio=niv_doublet_ratio,
                     _print_R=False,
                 )
             window_results.append(res)
@@ -340,6 +343,7 @@ def fit_lines(
             sigma_overrides=sigma_overrides,
             centroid_overrides=centroid_overrides,
             lya_break=lya_break,
+            niv_doublet_ratio=niv_doublet_ratio,
         )
 
     return fit_with_broad(
@@ -359,5 +363,5 @@ def fit_lines(
         tie_uv_widths=tie_uv_widths,
         sigma_overrides=sigma_overrides,
         centroid_overrides=centroid_overrides,
-
+        niv_doublet_ratio=niv_doublet_ratio,
     )

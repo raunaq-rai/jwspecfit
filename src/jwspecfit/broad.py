@@ -213,6 +213,7 @@ def _bic_bootstrap_single(
     tie_uv_widths: bool = True,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
+    niv_doublet_ratio: float | None = None,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
 
@@ -242,6 +243,8 @@ def _bic_bootstrap_single(
         Tie UV doublet kinematics (default ``False``).
     sigma_overrides : dict, optional
         Per-line sigma bounds in Angstroms ``{name: (lo, hi)}``.
+    niv_doublet_ratio : float, optional
+        Fixed F(1483)/F(1486) ratio for the NIV] doublet.
 
     Returns
     -------
@@ -268,7 +271,7 @@ def _bic_bootstrap_single(
                 tie_uv_widths=tie_uv_widths,
                 sigma_overrides=sigma_overrides,
                 centroid_overrides=centroid_overrides,
-
+                niv_doublet_ratio=niv_doublet_ratio,
             )
         except (ValueError, RuntimeError):
             results[variant] = np.nan
@@ -359,6 +362,7 @@ def _fit_model_variant(
     tie_uv_widths: bool = True,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
+    niv_doublet_ratio: float | None = None,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -401,6 +405,7 @@ def _fit_model_variant(
         tie_uv_widths=tie_uv_widths,
         sigma_overrides=sigma_overrides,
         centroid_overrides=centroid_overrides,
+        niv_doublet_ratio=niv_doublet_ratio,
         _label=variant_label, _p0_hint=p0_hint,
     )
 
@@ -443,6 +448,7 @@ def fit_with_broad(
     tie_uv_widths: bool = True,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
+    niv_doublet_ratio: float | None = None,
     _print_R: bool = True,
 ) -> BroadFitResult:
     """Fit emission lines with optional broad Balmer components.
@@ -527,7 +533,7 @@ def fit_with_broad(
         tie_uv_widths=tie_uv_widths,
         sigma_overrides=sigma_overrides,
         centroid_overrides=centroid_overrides,
-
+        niv_doublet_ratio=niv_doublet_ratio,
     )
 
     bic_b1 = np.nan
@@ -549,7 +555,7 @@ def fit_with_broad(
                 tie_uv_widths=tie_uv_widths,
                 sigma_overrides=sigma_overrides,
                 centroid_overrides=centroid_overrides,
-
+                niv_doublet_ratio=niv_doublet_ratio,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -582,7 +588,7 @@ def fit_with_broad(
                 tie_uv_widths=tie_uv_widths,
                 sigma_overrides=sigma_overrides,
                 centroid_overrides=centroid_overrides,
-
+                niv_doublet_ratio=niv_doublet_ratio,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -623,7 +629,7 @@ def fit_with_broad(
                 fit_narrow, balmer_mask, variants_to_fit, sigma_factor,
                 centroid_vmax, moving_average, tie_uv_doublets,
                 tie_uv_centroids, tie_uv_widths, sigma_overrides,
-                centroid_overrides,
+                centroid_overrides, niv_doublet_ratio,
             )
             for i in range(n_boot_bic)
         )
@@ -657,7 +663,7 @@ def fit_with_broad(
                     spectrum, z, narrow_lines, grating, R, continuum, deg,
                     broad_type, 0, fit_narrow, 1, sigma_factor, centroid_vmax,
                     moving_average, tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
-                    sigma_overrides, centroid_overrides,
+                    sigma_overrides, centroid_overrides, niv_doublet_ratio,
                 )
             for variant, fut in futures.items():
                 fit_v, _ = fut.result()
@@ -676,7 +682,7 @@ def fit_with_broad(
                     spectrum, z, narrow_lines, grating, R, continuum, deg,
                     variant, 0, fit_narrow, n_jobs, sigma_factor, centroid_vmax,
                     moving_average, tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
-                    sigma_overrides, centroid_overrides,
+                    sigma_overrides, centroid_overrides, niv_doublet_ratio,
                 )
                 bic_futures[variant] = fut
 
@@ -735,7 +741,7 @@ def fit_with_broad(
             tie_uv_widths=tie_uv_widths,
             sigma_overrides=sigma_overrides,
             centroid_overrides=centroid_overrides,
-
+            niv_doublet_ratio=niv_doublet_ratio,
         )
         all_fits[best_name] = best_fit
 
