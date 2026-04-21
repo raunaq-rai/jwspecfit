@@ -6,7 +6,8 @@ derivation for JWST NIRSpec spectra.**
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENCE)
 [![Tests](https://img.shields.io/badge/tests-pytest-lightgrey.svg)](tests/)
-[![Docs](https://img.shields.io/badge/docs-readthedocs-8ca1af.svg)](https://jwspecfit.readthedocs.io/)
+[![Docs](https://readthedocs.org/projects/jwspecfit/badge/?version=latest)](https://jwspecfit.readthedocs.io/en/latest/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19679794.svg)](https://doi.org/10.5281/zenodo.19679794)
 
 `jwspecfit` is a coordinated suite of three Python packages covering the full
 analysis chain from 1-D extracted NIRSpec spectra to element abundances. It is
@@ -195,26 +196,17 @@ and the resolution model.
 
 ## Citation
 
-`jwspecfit` has not yet been published. If you use it in academic work, please
-cite it as unreleased software using the metadata in
-[`CITATION.cff`](CITATION.cff), which renders on GitHub's "Cite this
-repository" button and is consumable by reference managers.
+If you use `jwspecfit` in academic work, please cite it using the DOI
+below (also available via GitHub's "Cite this repository" button, which
+reads the `CITATION.cff` in the repo root):
 
-### How to get a citeable DOI
+> **DOI:** [10.5281/zenodo.19679794](https://doi.org/10.5281/zenodo.19679794)
 
-Because the package is not yet associated with a journal paper, the
-recommended way to obtain a permanent citation handle is a **Zenodo** DOI:
+This is a concept-DOI — it always resolves to the latest Zenodo-archived
+release. Follow the DOI link for per-version DOIs if you need to pin a
+specific release.
 
-1. Sign in to [Zenodo](https://zenodo.org/) with your GitHub account and
-   enable the `raunaq-rai/jwspecfit` repository on the
-   [GitHub integration page](https://zenodo.org/account/settings/github/).
-2. On GitHub, create a release (e.g. `v1.0.0`). Zenodo automatically
-   archives that tag, mints a DOI, and returns a concept-DOI that always
-   resolves to the latest release.
-3. Paste the DOI back into `CITATION.cff` (the `doi:` field) and into the
-   BibTeX entry below.
-
-### BibTeX (placeholder — fill in DOI once minted)
+### BibTeX
 
 ```bibtex
 @software{rai_jwspecfit,
@@ -222,16 +214,15 @@ recommended way to obtain a permanent citation handle is a **Zenodo** DOI:
   title        = {{jwspecfit}: Resolution-aware emission-line fitting,
                   MCMC sampling, and chemical abundances for JWST NIRSpec},
   year         = {2026},
-  version      = {1.0.0},
+  version      = {1.0.1},
   publisher    = {Zenodo},
-  doi          = {10.5281/zenodo.XXXXXXX},
-  url          = {https://github.com/raunaq-rai/jwspecfit},
+  doi          = {10.5281/zenodo.19679794},
+  url          = {https://doi.org/10.5281/zenodo.19679794},
 }
 ```
 
-Once a companion paper is on arXiv/accepted, replace the software citation
-with the paper reference (or cite both — software citation for the code
-version used, paper citation for the methods).
+Once a companion paper is on arXiv/accepted, cite both — the software
+DOI for the exact code version used, the paper for the methods.
 
 ### Citing the methods
 
