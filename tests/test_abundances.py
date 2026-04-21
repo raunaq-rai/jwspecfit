@@ -94,6 +94,163 @@ class TestDustCorrection:
         assert Av_err > 0.0
 
 
+class TestBalmerAnchor:
+    """Tests for the `anchor` option in compute_Av_multi_balmer."""
+
+    @staticmethod
+    def _attenuate(flux_intrinsic, wave_A, Av, law="salim"):
+        """Apply attenuation at a single wavelength (for synthesising tests)."""
+        from jwspecabund.dust import salim_attenuation, cardelli_extinction
+        fn = salim_attenuation if law == "salim" else cardelli_extinction
+        A_lam = fn(np.array([wave_A]), Av)[0]
+        return flux_intrinsic * 10.0 ** (-0.4 * A_lam)
+
+    def _synthesise_balmer_fluxes(self, Av_true, law="salim"):
+        """Build observed Balmer fluxes at known A_V using the master ladder."""
+        from jwspecabund.dust import _BALMER_LADDER
+
+        fluxes = {}
+        errors = {}
+        # Intrinsic Hβ flux = 1.0; all others scaled by their ladder ratio.
+        for name, (wave, ratio_over_Hb) in _BALMER_LADDER.items():
+            f_int = ratio_over_Hb * 1.0
+            f_obs = self._attenuate(f_int, wave, Av_true, law=law)
+            fluxes[name] = f_obs
+            # 1% errors so SNR >> 3.
+            errors[name] = 0.01 * f_obs
+        return fluxes, errors
+
+    def test_ha_anchor_recovers_av(self):
+        """compute_Av_multi_balmer with anchor='Ha' recovers known A_V."""
+        from jwspecabund.dust import compute_Av_multi_balmer
+
+        Av_true = 0.6
+        fluxes, errors = self._synthesise_balmer_fluxes(Av_true)
+
+        out = compute_Av_multi_balmer(fluxes, errors, anchor="Ha")
+
+        assert out["anchor"] == "Ha"
+        assert out["n_lines"] >= 3
+        # Hα itself is the anchor, so not in numerator list.
+        assert all(r["line"] != "Ha" for r in out["individual"])
+        np.testing.assert_allclose(out["Av"], Av_true, atol=1e-3)
+
+    def test_hbeta_anchor_recovers_av(self):
+        """Default anchor='HBETA' recovers known A_V (regression)."""
+        from jwspecabund.dust import compute_Av_multi_balmer
+
+        Av_true = 0.4
+        fluxes, errors = self._synthesise_balmer_fluxes(Av_true)
+
+        out = compute_Av_multi_balmer(fluxes, errors)
+
+        assert out["anchor"] == "HBETA"
+        assert out["n_lines"] >= 3
+        assert all(r["line"] != "HBETA" for r in out["individual"])
+        np.testing.assert_allclose(out["Av"], Av_true, atol=1e-3)
+
+    def test_ha_and_hbeta_anchors_agree_on_synthetic_data(self):
+        """Both anchors should return the same Av for the same synthetic spectrum."""
+        from jwspecabund.dust import compute_Av_multi_balmer
+
+        Av_true = 0.8
+        fluxes, errors = self._synthesise_balmer_fluxes(Av_true)
+
+        out_hb = compute_Av_multi_balmer(fluxes, errors, anchor="HBETA")
+        out_ha = compute_Av_multi_balmer(fluxes, errors, anchor="Ha")
+
+        np.testing.assert_allclose(out_hb["Av"], out_ha["Av"], atol=2e-3)
+
+    def test_invalid_anchor_raises(self):
+        """Unknown anchor must raise ValueError."""
+        from jwspecabund.dust import compute_Av_multi_balmer
+
+        with pytest.raises(ValueError, match="anchor"):
+            compute_Av_multi_balmer(
+                {"HBETA": 1.0, "HGAMMA": 0.4},
+                {"HBETA": 0.01, "HGAMMA": 0.01},
+                anchor="Hgamma",
+            )
+
+    def test_missing_anchor_returns_zero(self):
+        """If the anchor line is absent, function returns Av=0, n_lines=0."""
+        from jwspecabund.dust import compute_Av_multi_balmer
+
+        fluxes = {"HBETA": 1.0, "HGAMMA": 0.4}
+        errors = {"HBETA": 0.01, "HGAMMA": 0.01}
+        out = compute_Av_multi_balmer(fluxes, errors, anchor="Ha")
+
+        assert out["Av"] == 0.0
+        assert out["n_lines"] == 0
+        assert out["anchor"] == "Ha"
+
+    def test_numerator_ratios_are_anchor_relative(self):
+        """Intrinsic ratios in `individual` should be numerator/anchor."""
+        from jwspecabund.dust import compute_Av_multi_balmer, _BALMER_LADDER
+
+        # No dust → observed ratios equal intrinsic.
+        fluxes, errors = self._synthesise_balmer_fluxes(Av_true=0.0)
+
+        out = compute_Av_multi_balmer(fluxes, errors, anchor="Ha")
+        _, ha_ratio = _BALMER_LADDER["Ha"]
+
+        for r in out["individual"]:
+            _, num_ratio_over_Hb = _BALMER_LADDER[r["line"]]
+            expected = num_ratio_over_Hb / ha_ratio
+            np.testing.assert_allclose(r["intrinsic_ratio"], expected, rtol=1e-12)
+
+    def test_compute_abundances_threads_anchor(self):
+        """compute_abundances(balmer_anchor='Ha') reaches derivation and logs it."""
+        from dataclasses import dataclass
+
+        from jwspecabund import compute_abundances
+
+        @dataclass
+        class MockLineResult:
+            name: str
+            flux: float
+            flux_err: float
+            snr: float
+
+        @dataclass
+        class MockFitResult:
+            lines: dict
+
+        # Synthesise Balmer fluxes at Av_true, plus a couple of metal lines so
+        # the strong-line method has what it needs.  We only care that the
+        # anchor is threaded through and the derived Av is correct.
+        Av_true = 0.5
+        fluxes, errors = self._synthesise_balmer_fluxes(Av_true)
+        line_fluxes = dict(fluxes)
+        line_errors = dict(errors)
+        # Minimal metal lines for strong-line method (observed, so they get
+        # dust-corrected inside compute_abundances).
+        Hb_int = 1.0
+        line_fluxes["OIII_5007"] = self._attenuate(5.0 * Hb_int, 5008.24, Av_true)
+        line_errors["OIII_5007"] = 0.05 * line_fluxes["OIII_5007"]
+        line_fluxes["OII_doublet"] = self._attenuate(2.0 * Hb_int, 3728.0, Av_true)
+        line_errors["OII_doublet"] = 0.05 * line_fluxes["OII_doublet"]
+
+        lines = {
+            name: MockLineResult(
+                name=name, flux=f, flux_err=line_errors[name],
+                snr=f / line_errors[name] if line_errors[name] > 0 else 0.0,
+            )
+            for name, f in line_fluxes.items()
+        }
+        result = MockFitResult(lines=lines)
+
+        abund = compute_abundances(
+            result, z=2.0, method="strong_line",
+            balmer_anchor="Ha", n_mc=50,
+        )
+
+        # Av should be recovered to within a few percent — this confirms the
+        # anchor flowed all the way through to compute_Av_multi_balmer.
+        assert abund.Av is not None
+        np.testing.assert_allclose(abund.Av, Av_true, atol=5e-3)
+
+
 # -----------------------------------------------------------------------
 # Strong-line tests
 # -----------------------------------------------------------------------

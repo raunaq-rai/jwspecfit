@@ -2137,6 +2137,8 @@ def compute_abundances(
     ne_high_override: float | None = None,
     # Balmer decrement SNR floor for A_V derivation
     snr_balmer: float = 3.0,
+    # Balmer decrement anchor line for A_V derivation
+    balmer_anchor: str = "HBETA",
     # Forward model kwargs (method="forward")
     forward_sampler: str = "emcee",
     forward_n_walkers: int = 32,
@@ -2161,7 +2163,13 @@ def compute_abundances(
     dust_law : str
         ``"salim"`` (default) or ``"cardelli"``.
     Av : float or None
-        V-band attenuation. If ``None``, derived from Balmer decrement.
+        V-band attenuation. If ``None``, derived from Balmer decrement
+        (see *balmer_anchor*).
+    balmer_anchor : str
+        Reference line for the multi-Balmer A_V derivation: ``"HBETA"``
+        (default) uses Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ; ``"Ha"`` uses
+        Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα.  Ignored when *Av* is
+        supplied directly.
     Av_err : float or None
         1σ error on A_V when *Av* is supplied.  If ``None`` (default),
         A_V is treated as fixed (no MC sampling of dust).  Ignored when
@@ -2284,30 +2292,37 @@ def compute_abundances(
     _balmer_info: dict | None = None
     if dust_correct:
         if Av is None:
-            # Derive A_V from all available Balmer decrements (Hγ–H10)/Hβ.
+            # Derive A_V from all available Balmer decrements anchored on
+            # either Hβ (default) or Hα via `balmer_anchor`.
             balmer_out = compute_Av_multi_balmer(
                 fluxes, errors, law=dust_law, snr_min=snr_balmer,
-                **dust_kwargs,
+                anchor=balmer_anchor, **dust_kwargs,
             )
+            anchor_label = "Hα" if balmer_anchor == "Ha" else "Hβ"
             if balmer_out["n_lines"] > 0:
                 Av_derived = balmer_out["Av"]
                 Av_err_derived = balmer_out["Av_err"]
                 _balmer_info = balmer_out
                 for r in balmer_out["individual"]:
                     logger.info(
-                        "A_V from %s/Hb = %.3f +/- %.3f  (obs ratio = %.4f, "
+                        "A_V from %s/%s = %.3f +/- %.3f  (obs ratio = %.4f, "
                         "intrinsic = %.4f)",
-                        r["line"], r["Av"], r["Av_err"],
+                        r["line"], anchor_label,
+                        r["Av"], r["Av_err"],
                         r["observed_ratio"], r["intrinsic_ratio"],
                     )
                 logger.info(
-                    "A_V weighted mean = %.3f +/- %.3f (%d lines).",
+                    "A_V weighted mean (anchor=%s) = %.3f +/- %.3f (%d lines).",
+                    anchor_label,
                     balmer_out["Av"], balmer_out["Av_err"],
                     balmer_out["n_lines"],
                 )
             else:
                 Av_derived = 0.0
-                logger.info("No Balmer pair available for A_V; assuming A_V=0.")
+                logger.info(
+                    "No Balmer pair available for A_V (anchor=%s); assuming A_V=0.",
+                    anchor_label,
+                )
         else:
             Av_derived = Av
             if Av_err is not None:
@@ -2534,12 +2549,15 @@ def compute_abundances(
 
     # Inject per-line Balmer decrement details into diagnostics.
     if _balmer_info and primary_result is not None and primary_result.diagnostics is not None:
+        anchor_label = "Hα" if _balmer_info.get("anchor") == "Ha" else "Hβ"
         parts = []
         for r in _balmer_info["individual"]:
-            parts.append(f"{r['line']}/Hb → A_V={r['Av']:.3f}±{r['Av_err']:.3f}")
+            parts.append(
+                f"{r['line']}/{anchor_label} → A_V={r['Av']:.3f}±{r['Av_err']:.3f}"
+            )
         primary_result.diagnostics["A_V"] = (
-            f"weighted mean of {_balmer_info['n_lines']} decrements: "
-            + "; ".join(parts)
+            f"weighted mean of {_balmer_info['n_lines']} decrements "
+            f"(anchor={anchor_label}): " + "; ".join(parts)
         )
 
     if primary_result is None:

@@ -336,15 +336,20 @@ def compute_Av_from_balmer(
     return max(Av, 0.0), Av_err
 
 
-# Mapping from flux-dict key to (rest wavelength in Å, intrinsic Hx/Hβ ratio).
+# Balmer-line reference table: {name: (rest wavelength in Å, Case B ratio to Hβ)}.
+# Ratios are at T=10⁴ K, n_e=100 cm⁻³ (Osterbrock & Ferland 2006).
 # EXCLUDED: Hε (blended with [NeIII] 3968, Δλ=3 Å) and
 #           H8 (blended with HeI 3889, Δλ=0.4 Å).
-_BALMER_DECREMENT_LINES: dict[str, tuple[float, float]] = {
-    "HGAMMA":   (4342.90, 0.468),
-    "HDELTA":   (4102.89, 0.259),
-    "H9":       (3836.48, 0.0731),
-    "H10":      (3799.00, 0.0530),
+_BALMER_LADDER: dict[str, tuple[float, float]] = {
+    "Ha":     (6564.61, 2.86),
+    "HBETA":  (4862.68, 1.00),
+    "HGAMMA": (4341.68, 0.468),
+    "HDELTA": (4102.89, 0.259),
+    "H9":     (3836.48, 0.0731),
+    "H10":    (3799.00, 0.0530),
 }
+
+_VALID_BALMER_ANCHORS: tuple[str, ...] = ("HBETA", "Ha")
 
 
 def compute_Av_multi_balmer(
@@ -352,12 +357,14 @@ def compute_Av_multi_balmer(
     errors: dict[str, float],
     law: str = "salim",
     snr_min: float = 3.0,
+    anchor: str = "HBETA",
     **kwargs,
 ) -> dict[str, object]:
     """Derive A_V from every available Balmer decrement.
 
-    Uses all detected Balmer lines (Hγ through H10) relative to Hβ,
-    returning individual and weighted-average A_V values.
+    Ratios each detected Balmer line against the chosen *anchor* line
+    (Hβ by default, optionally Hα) and returns individual and
+    weighted-average A_V values.
 
     Parameters
     ----------
@@ -369,6 +376,10 @@ def compute_Av_multi_balmer(
         ``"salim"`` (default) or ``"cardelli"``.
     snr_min : float
         Minimum SNR for a Balmer line to be included (default 3.0).
+    anchor : str
+        Reference (denominator) line for the decrement.  ``"HBETA"``
+        (default) or ``"Ha"``.  When ``"Ha"``, ratios used are
+        Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα.
     **kwargs
         Extra arguments to the attenuation law (Rv, delta, B).
 
@@ -377,17 +388,27 @@ def compute_Av_multi_balmer(
     dict
         Keys: ``"Av"`` (weighted mean), ``"Av_err"`` (error on mean),
         ``"individual"`` (list of dicts with per-line results),
-        ``"n_lines"`` (number of lines used).
+        ``"n_lines"`` (number of lines used), ``"anchor"`` (anchor name).
     """
-    if "HBETA" not in fluxes or fluxes["HBETA"] <= 0:
-        return {"Av": 0.0, "Av_err": np.nan, "individual": [], "n_lines": 0}
+    if anchor not in _VALID_BALMER_ANCHORS:
+        raise ValueError(
+            f"anchor must be one of {_VALID_BALMER_ANCHORS}, got {anchor!r}"
+        )
 
-    hb_flux = fluxes["HBETA"]
-    hb_err = errors.get("HBETA", 0.0)
-    hb_wave = 4864.04  # default
+    if anchor not in fluxes or fluxes[anchor] <= 0:
+        return {
+            "Av": 0.0, "Av_err": np.nan, "individual": [],
+            "n_lines": 0, "anchor": anchor,
+        }
+
+    anchor_wave, anchor_ratio_over_Hb = _BALMER_LADDER[anchor]
+    anchor_flux = fluxes[anchor]
+    anchor_err = errors.get(anchor, 0.0)
 
     results = []
-    for name, (wave, intrinsic_ratio) in _BALMER_DECREMENT_LINES.items():
+    for name, (wave, ratio_over_Hb) in _BALMER_LADDER.items():
+        if name == anchor:
+            continue
         if name not in fluxes or fluxes[name] <= 0:
             continue
         f = fluxes[name]
@@ -395,20 +416,25 @@ def compute_Av_multi_balmer(
         if e > 0 and f / e < snr_min:
             continue
 
+        intrinsic_ratio = ratio_over_Hb / anchor_ratio_over_Hb
+
         av, av_err = compute_Av_from_balmer(
-            f, hb_flux, e, hb_err,
+            f, anchor_flux, e, anchor_err,
             law=law, intrinsic_ratio=intrinsic_ratio,
-            wave_num_A=wave, wave_den_A=hb_wave,
+            wave_num_A=wave, wave_den_A=anchor_wave,
             **kwargs,
         )
         results.append({
             "line": name, "wave": wave, "Av": av, "Av_err": av_err,
-            "observed_ratio": f / hb_flux,
+            "observed_ratio": f / anchor_flux,
             "intrinsic_ratio": intrinsic_ratio,
         })
 
     if not results:
-        return {"Av": 0.0, "Av_err": np.nan, "individual": results, "n_lines": 0}
+        return {
+            "Av": 0.0, "Av_err": np.nan, "individual": results,
+            "n_lines": 0, "anchor": anchor,
+        }
 
     # Inverse-variance weighted mean.
     avs = np.array([r["Av"] for r in results])
@@ -430,6 +456,7 @@ def compute_Av_multi_balmer(
         "Av_err": av_mean_err,
         "individual": results,
         "n_lines": len(results),
+        "anchor": anchor,
     }
 
 
