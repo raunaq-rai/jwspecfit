@@ -4,6 +4,13 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## 1.0.1 — 2026-04-21
+
+Patch release to retry Zenodo DOI minting. The v1.0.0 deposit failed
+validation because `CITATION.cff` contained a placeholder ORCID; the
+ORCID field has been removed and the citation metadata cleaned up. No
+functional code changes.
+
 ## Unreleased
 
 - **`jwspecabund`:** new `balmer_anchor` option on
