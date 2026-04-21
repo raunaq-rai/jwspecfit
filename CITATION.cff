@@ -1,0 +1,50 @@
+cff-version: 1.2.0
+message: >
+  If you use this software in a publication, please cite it using the
+  metadata below.  To mint a permanent DOI, enable the repository on
+  Zenodo and create a GitHub release — see the README for the full
+  procedure.
+title: "jwspecfit: resolution-aware emission-line fitting, MCMC sampling, and chemical abundances for JWST NIRSpec"
+abstract: >
+  jwspecfit is a coordinated suite of three Python packages for the
+  analysis of JWST NIRSpec spectra: least-squares Gaussian line fitting
+  with resolution-aware bin-averaged profiles (jwspecfit), Bayesian MCMC
+  fitting via NUTS, emcee, or nautilus (jwspecmcmc), and chemical
+  abundance derivation via direct-Te (PyNEB), Bayesian forward model
+  (Cullen+25), or strong-line calibrations (Sanders+25) with
+  Balmer-decrement dust correction anchored on Halpha or Hbeta
+  (jwspecabund).
+type: software
+authors:
+  - family-names: "Rai"
+    given-names: "Raunaq"
+    affiliation: "UCL Department of Physics & Astronomy"
+    email: "raunaq.rai.22@ucl.ac.uk"
+    orcid: "https://orcid.org/0000-0000-0000-0000"
+version: "1.0.0"
+date-released: "2026-04-21"
+license: MIT
+repository-code: "https://github.com/raunaq-rai/jwspecfit"
+url: "https://jwspecfit.readthedocs.io/"
+keywords:
+  - astronomy
+  - astrophysics
+  - JWST
+  - NIRSpec
+  - spectroscopy
+  - emission-line fitting
+  - chemical abundances
+  - high-redshift galaxies
+  - Python
+# Once a Zenodo DOI is minted via the GitHub→Zenodo integration, add it below:
+# doi: "10.5281/zenodo.XXXXXXX"
+# Once a companion paper is published, add it here:
+# preferred-citation:
+#   type: article
+#   authors:
+#     - family-names: "Rai"
+#       given-names: "Raunaq"
+#   title: "..."
+#   journal: "MNRAS"
+#   year: 2026
+#   doi: "10.1093/mnras/XXXXXXX"
