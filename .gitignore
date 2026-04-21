@@ -24,6 +24,10 @@ Thumbs.db
 # Jupyter
 .ipynb_checkpoints/
 
+# Sphinx / ReadTheDocs build artefacts
+docs/_build/
+docs/api_reference/generated/
+
 # Keep FITS data in repo (small test files)
 # !data/*.fits
 # !data/*.npz

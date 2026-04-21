@@ -915,7 +915,6 @@ fig = jwspecfit.plot_fit(result, exclude_wave_A=[(5000, 6000), (48000, 50000)])
 | `BROAD2_SIGMA_V_HI` | `broad` | `2120.0` km/s | BROAD2 upper σ_v bound |
 
 ---
----
 
 # `jwspecmcmc` API Reference
 
@@ -1259,7 +1258,6 @@ credible interval marked.
 
 Returns `matplotlib.axes.Axes`.
 
----
 ---
 
 # `jwspecabund` API Reference
