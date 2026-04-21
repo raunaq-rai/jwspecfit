@@ -1,14 +1,17 @@
 # Citation
 
-If you use `jwspecfit` in academic work, please cite it using the DOI
-below (also available via GitHub's "Cite this repository" button, which
-reads the `CITATION.cff` in the repo root):
+If you use `jwspecfit` in your research, **please cite it**. Choose
+whichever format your reference manager or journal prefers.
 
-> **DOI:** [10.5281/zenodo.19679794](https://doi.org/10.5281/zenodo.19679794)
+> ## 📖 DOI: [10.5281/zenodo.19679794](https://doi.org/10.5281/zenodo.19679794)
+>
+> Concept DOI — always resolves to the latest Zenodo-archived release.
 
-This is a concept-DOI — it always resolves to the latest Zenodo-archived
-release. Follow the DOI link for per-version DOIs if you need to pin a
-specific release.
+## Plain text
+
+> Rai, R. (2026). *jwspecfit: Resolution-aware emission-line fitting,
+> MCMC sampling, and chemical abundances for JWST NIRSpec* (v1.0.1).
+> Zenodo. <https://doi.org/10.5281/zenodo.19679794>
 
 ## BibTeX
 
@@ -24,6 +27,24 @@ specific release.
   url          = {https://doi.org/10.5281/zenodo.19679794},
 }
 ```
+
+## Other formats
+
+APA · Chicago · IEEE · Harvard · MLA · CSL-JSON · DataCite XML are all
+available from the
+[Zenodo record page](https://zenodo.org/records/19679794) — click the
+**Export** panel on the right-hand side.
+
+GitHub's **"Cite this repository"** button on the repository page reads
+[`CITATION.cff`](https://github.com/raunaq-rai/jwspecfit/blob/main/CITATION.cff)
+and produces APA / BibTeX on the fly.
+
+## Pinning a specific version
+
+The concept DOI above always points to the latest release. If a paper
+needs to cite the *exact* code version used for reproducibility, pick
+the per-version DOI from the **Versions** list on the Zenodo record
+page.
 
 ## Citing the methods
 

@@ -64,9 +64,48 @@ pytest tests/
 
 ## Citation
 
-> **DOI:** [10.5281/zenodo.19679794](https://doi.org/10.5281/zenodo.19679794)
+If you use `jwspecfit` in your research, **please cite it**. Choose
+whichever format your reference manager or journal prefers.
 
-Export BibTeX from the [Zenodo record](https://zenodo.org/records/19679794), or use GitHub's "Cite this repository" button (reads `CITATION.cff`).
+> ### 📖 DOI: [10.5281/zenodo.19679794](https://doi.org/10.5281/zenodo.19679794)
+>
+> Concept DOI — always resolves to the latest Zenodo-archived release.
+
+### Plain text
+
+> Rai, R. (2026). *jwspecfit: Resolution-aware emission-line fitting,
+> MCMC sampling, and chemical abundances for JWST NIRSpec* (v1.0.1).
+> Zenodo. <https://doi.org/10.5281/zenodo.19679794>
+
+### BibTeX
+
+```bibtex
+@software{rai_jwspecfit,
+  author       = {Rai, Raunaq},
+  title        = {{jwspecfit}: Resolution-aware emission-line fitting,
+                  MCMC sampling, and chemical abundances for JWST NIRSpec},
+  year         = {2026},
+  version      = {1.0.1},
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.19679794},
+  url          = {https://doi.org/10.5281/zenodo.19679794},
+}
+```
+
+### Other formats
+
+APA · Chicago · IEEE · Harvard · MLA · CSL-JSON · DataCite XML are all
+available from the [Zenodo record page](https://zenodo.org/records/19679794)
+(Export panel on the right).
+
+GitHub's **"Cite this repository"** button (top-right of the repo page)
+reads [`CITATION.cff`](CITATION.cff) and produces APA/BibTeX on the fly.
+
+### Pinning a specific version
+
+The concept DOI above always points to the latest release. If a paper
+needs to cite the *exact* code version used for reproducibility, pick
+the per-version DOI from the "Versions" list on the Zenodo page.
 
 ## Licence
 
