@@ -18,7 +18,7 @@ from .io import (
 )
 from .lines import REST_LINES_A, get_line_list, observable_lines
 from .lyman_alpha import igm_transmission, lya_model
-from .plotting import plot_fit, plot_fit_interactive
+from .plotting import plot_fit, plot_fit_interactive, plot_spectrum_interactive
 from .resolution import R_from_pixels, R_prism, resolve_R, sigma_inst_A
 
 __all__ = [
@@ -39,6 +39,7 @@ __all__ = [
     "observable_lines",
     "plot_fit",
     "plot_fit_interactive",
+    "plot_spectrum_interactive",
     "read_dict",
     "read_fits",
     "read_npz",

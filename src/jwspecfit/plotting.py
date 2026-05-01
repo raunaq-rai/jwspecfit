@@ -8,10 +8,12 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
+    import plotly.graph_objects as go
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
     from .fitter import FitResult
+    from .io import Spectrum
 
 
 def _build_exclude_mask(
@@ -393,6 +395,167 @@ def _to_rgba(colour: str, alpha: float) -> str:
         h = colour.lstrip("#")
         return f"rgba({int(h[0:2],16)},{int(h[2:4],16)},{int(h[4:6],16)},{alpha})"
     return f"rgba(150,150,150,{alpha})"
+
+
+def plot_spectrum_interactive(
+    source: "Spectrum | str | Path",
+    *,
+    z: float | None = None,
+    wave_unit: str = "A",
+    flux_unit: str = "fnu",
+    rest_frame: bool = False,
+    exclude_wave_A: list[tuple[float, float]] | None = None,
+    title: str | None = None,
+    **read_kwargs,
+) -> "go.Figure":
+    """Open and interactively plot a 1-D spectrum.
+
+    Accepts either a :class:`~jwspecfit.io.Spectrum` object or a path to
+    a ``.fits`` / ``.npz`` file.  When given a path, the file is read
+    via :func:`~jwspecfit.io.read_fits` (or :func:`read_npz` for
+    ``.npz``) and any extra ``read_kwargs`` are forwarded to the
+    reader (e.g. ``hdu=``, ``wave_col=`` for FITS overrides).
+
+    Parameters
+    ----------
+    source : Spectrum, str, or Path
+        Spectrum object or path to a FITS / NPZ file.
+    z : float, optional
+        Source redshift.  Used only when *source* is a path; for an
+        existing :class:`Spectrum`, its own ``z`` is preserved.  When
+        non-``None``, also enables ``rest_frame`` axis labelling if
+        requested.
+    wave_unit : str
+        ``"A"`` for Angstroms (default) or ``"um"`` for microns.
+    flux_unit : str
+        ``"fnu"`` for µJy (default) or ``"flam"`` for erg/s/cm²/Å.
+    rest_frame : bool
+        If ``True`` and the spectrum has a redshift, divide wavelengths
+        by ``(1 + z)``.  Default ``False`` (observed frame).
+    exclude_wave_A : list of (float, float), optional
+        Wavelength ranges in Angstroms to hide from the plot.
+    title : str, optional
+        Figure title.  Defaults to filename + redshift if available.
+    **read_kwargs
+        Forwarded to the file reader when *source* is a path.
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+    """
+    import plotly.graph_objects as go
+    from .io import Spectrum, read_fits, read_npz, _ujy_to_flam
+
+    # Resolve the source to a Spectrum.
+    if isinstance(source, Spectrum):
+        spec = source
+    else:
+        path = Path(source)
+        suffix = path.suffix.lower()
+        if suffix in (".fits", ".fit", ".fz"):
+            spec = read_fits(path, z=z, **read_kwargs)
+        elif suffix == ".npz":
+            spec = read_npz(path, z=z, **read_kwargs)
+        else:
+            raise ValueError(
+                f"Unsupported file extension {suffix!r}: pass a .fits or "
+                f".npz file, or a Spectrum object."
+            )
+
+    # Rest-frame scaling.
+    zp1 = 1.0
+    if rest_frame and spec.z is not None:
+        zp1 = 1.0 + spec.z
+    elif rest_frame and spec.z is None:
+        rest_frame = False  # Silently fall back; no z available.
+
+    if wave_unit == "A":
+        wave = spec.wave_A / zp1
+        xlabel = "Rest Wavelength [Å]" if rest_frame else "Wavelength [Å]"
+    else:
+        wave = spec.wave_um / zp1
+        xlabel = "Rest Wavelength [µm]" if rest_frame else "Wavelength [µm]"
+
+    use_flam = flux_unit.lower() == "flam"
+    if use_flam:
+        flux = _ujy_to_flam(spec.flux_ujy, spec.wave_um)
+        err = _ujy_to_flam(spec.err_ujy, spec.wave_um)
+        flux_label = "erg/s/cm²/Å"
+        ylabel = f"fλ [{flux_label}]"
+    else:
+        flux = spec.flux_ujy
+        err = spec.err_ujy
+        flux_label = "µJy"
+        ylabel = f"Flux density [{flux_label}]"
+
+    # For plotting, only require finite flux — be lenient about errors so
+    # spectra without an error array (e.g. image HDUs) still render.
+    valid = np.isfinite(flux)
+    keep = _build_exclude_mask(spec.wave_A, exclude_wave_A)
+    show = valid & keep
+    has_err = np.any(np.isfinite(err) & (err > 0))
+    err_show = show & np.isfinite(err) & (err > 0)
+
+    fig = go.Figure()
+
+    # Error band — only when we actually have positive finite errors.
+    if has_err and np.any(err_show):
+        fig.add_trace(go.Scatter(
+            x=np.concatenate([wave[err_show], wave[err_show][::-1]]),
+            y=np.concatenate([(flux + err)[err_show], (flux - err)[err_show][::-1]]),
+            fill="toself", fillcolor="rgba(150,150,150,0.20)",
+            line=dict(width=0), showlegend=False, hoverinfo="skip",
+            name="±1σ",
+        ))
+
+    # Data trace (histogram-step style).
+    fig.add_trace(go.Scatter(
+        x=wave[show], y=flux[show],
+        mode="lines", name="Data",
+        line=dict(color="black", width=0.9, shape="hvh"),
+        hovertemplate=f"λ=%{{x:.3f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
+    ))
+
+    # Title.
+    if title is None:
+        bits = []
+        fname = spec.meta.get("filename")
+        if fname:
+            bits.append(str(fname))
+        if spec.z is not None:
+            bits.append(f"z = {spec.z:.4f}")
+        if spec.grating:
+            bits.append(spec.grating)
+        title = "  |  ".join(bits)
+
+    # Y-limits — robust to outliers and negative values.
+    if np.any(show):
+        f_show = flux[show]
+        finite = np.isfinite(f_show)
+        if np.any(finite):
+            lo, hi = np.nanpercentile(f_show[finite], [2, 98])
+            pad = 0.15 * (hi - lo if hi > lo else max(abs(hi), 1.0))
+            y_lower = min(0.0, lo - pad)
+            y_upper = hi + pad
+        else:
+            y_lower, y_upper = -1.0, 1.0
+    else:
+        y_lower, y_upper = -1.0, 1.0
+
+    fig.update_layout(
+        title=title,
+        xaxis_title=xlabel,
+        yaxis_title=ylabel,
+        yaxis_range=[y_lower, y_upper],
+        xaxis=dict(exponentformat="none"),
+        template="plotly_white",
+        hovermode="x unified",
+        dragmode="zoom",
+        legend=dict(x=1.0, y=1.0, xanchor="right"),
+        width=1000,
+        height=500,
+    )
+    return fig
 
 
 def plot_fit_interactive(

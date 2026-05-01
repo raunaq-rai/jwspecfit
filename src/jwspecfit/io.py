@@ -99,18 +99,219 @@ class Spectrum:
         )
 
 
-def read_fits(path: str | Path, z: float | None = None) -> Spectrum:
-    """Read a JWST NIRSpec 1-D extracted spectrum from FITS.
+# --- Unit aliases for FITS auto-detection ---------------------------------
 
-    Expects an HDU named ``SPEC1D`` with columns ``wave``, ``flux``, ``err``
-    (wavelength in µm, flux and error in µJy).
+_WAVE_TO_UM = {
+    "um": 1.0, "micron": 1.0, "microns": 1.0, "micrometer": 1.0,
+    "micrometre": 1.0, "micrometers": 1.0, "micrometres": 1.0,
+    "a": 1e-4, "ang": 1e-4, "angstrom": 1e-4, "angstroms": 1e-4,
+    "nm": 1e-3, "nanometer": 1e-3, "nanometre": 1e-3,
+    "m": 1e6, "meter": 1e6, "metre": 1e6,
+}
+
+_FNU_TO_UJY = {
+    "ujy": 1.0, "microjansky": 1.0, "microjy": 1.0,
+    "njy": 1e-3, "nanojansky": 1e-3,
+    "mjy": 1e3, "millijansky": 1e3,
+    "jy": 1e6, "jansky": 1e6,
+}
+
+_FLAM_UNITS = {
+    "erg/s/cm2/a", "erg/s/cm^2/a", "erg/s/cm**2/a",
+    "erg s-1 cm-2 angstrom-1", "erg s^-1 cm^-2 angstrom^-1",
+    "erg/(s cm2 a)", "flam",
+}
+
+
+def _normalise_unit(u: str | None) -> str:
+    """Lowercase, strip, and remove common ornamentation from a unit string."""
+    if u is None:
+        return ""
+    s = str(u).strip().lower()
+    # Replace fancy characters and squash whitespace.
+    return (
+        s.replace("μ", "u").replace("µ", "u")
+         .replace("å", "a").replace("Å", "a")
+         .replace(" ", "")
+    )
+
+
+def _convert_wave_to_um(wave: np.ndarray, unit: str | None) -> np.ndarray:
+    """Convert wavelength array in *unit* to microns.  Defaults to µm."""
+    u = _normalise_unit(unit)
+    if u == "" or u in _WAVE_TO_UM:
+        return wave * _WAVE_TO_UM.get(u, 1.0)
+    raise ValueError(f"Unrecognised wavelength unit: {unit!r}")
+
+
+def _convert_flux_to_ujy(
+    flux: np.ndarray, unit: str | None, wave_um: np.ndarray,
+) -> np.ndarray:
+    """Convert flux array in *unit* to µJy.  Defaults to µJy."""
+    u = _normalise_unit(unit)
+    if u == "" or u in _FNU_TO_UJY:
+        return flux * _FNU_TO_UJY.get(u, 1.0)
+    if u in _FLAM_UNITS:
+        return _flam_to_ujy(flux, wave_um)
+    raise ValueError(f"Unrecognised flux unit: {unit!r}")
+
+
+# --- Column-name aliases for auto-detection -------------------------------
+
+_WAVE_NAMES = {"wave", "wavelength", "lam", "lambda", "loglam", "wavelen"}
+_FLUX_NAMES = {"flux", "flux_density", "fnu", "flam", "f_lambda", "f_nu", "spec"}
+_ERR_NAMES = {
+    "err", "error", "flux_err", "flux_error", "fluxerr", "sigma", "noise",
+    "uncertainty", "stddev", "std",
+}
+_IVAR_NAMES = {"ivar", "inv_var", "inverse_variance", "weight", "wht"}
+
+
+def _find_column(table_names: list[str], aliases: set[str]) -> str | None:
+    """Return the first column name in *table_names* matching one of *aliases*.
+
+    Comparison is case-insensitive.  Exact matches are preferred over
+    substring matches.
+    """
+    lower_map = {name.lower(): name for name in table_names}
+    for alias in aliases:
+        if alias in lower_map:
+            return lower_map[alias]
+    # Fallback: substring match.
+    for alias in aliases:
+        for lname, orig in lower_map.items():
+            if alias in lname:
+                return orig
+    return None
+
+
+def _read_bintable_spectrum(
+    hdu, wave_col: str | None, flux_col: str | None, err_col: str | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """Extract (wave_um, flux_ujy, err_ujy, meta) from a BinTable HDU."""
+    data = hdu.data
+    columns = hdu.columns
+    names = [c.name for c in columns]
+    units = {c.name: c.unit for c in columns}
+
+    wcol = wave_col or _find_column(names, _WAVE_NAMES)
+    fcol = flux_col or _find_column(names, _FLUX_NAMES)
+    if wcol is None or fcol is None:
+        raise ValueError(
+            f"Could not auto-detect wave/flux columns in HDU "
+            f"{hdu.name!r}: available columns = {names}"
+        )
+
+    wave_raw = np.asarray(data[wcol], dtype=float)
+    flux_raw = np.asarray(data[fcol], dtype=float)
+
+    # Handle SDSS-style log10(λ/Å) column.
+    if wcol.lower() == "loglam":
+        wave_um = (10.0 ** wave_raw) * 1e-4
+    else:
+        wave_um = _convert_wave_to_um(wave_raw, units.get(wcol))
+
+    flux_ujy = _convert_flux_to_ujy(flux_raw, units.get(fcol), wave_um)
+
+    # Error column: explicit name, then aliases, then derive from ivar.
+    ecol = err_col or _find_column(names, _ERR_NAMES)
+    if ecol is not None:
+        err_raw = np.asarray(data[ecol], dtype=float)
+        err_unit = units.get(ecol) or units.get(fcol)  # err often missing TUNIT
+        err_ujy = _convert_flux_to_ujy(err_raw, err_unit, wave_um)
+    else:
+        ivar_col = _find_column(names, _IVAR_NAMES)
+        if ivar_col is not None:
+            ivar = np.asarray(data[ivar_col], dtype=float)
+            err_raw = np.where(ivar > 0, 1.0 / np.sqrt(np.where(ivar > 0, ivar, 1.0)), np.inf)
+            err_ujy = _convert_flux_to_ujy(err_raw, units.get(fcol), wave_um)
+        else:
+            logger.warning(
+                "No error/uncertainty column found in HDU %r; setting err=0.",
+                hdu.name,
+            )
+            err_ujy = np.zeros_like(flux_ujy)
+
+    meta = {"hdu": hdu.name, "columns": names, "wave_col": wcol, "flux_col": fcol}
+    return wave_um, flux_ujy, err_ujy, meta
+
+
+def _read_image_spectrum(hdu) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """Extract a 1-D spectrum from an Image HDU using WCS keywords.
+
+    Reads ``CRVAL1``, ``CDELT1`` (or ``CD1_1``), ``CRPIX1``, ``CTYPE1``,
+    ``CUNIT1`` to build the wavelength axis.  Flux units come from
+    ``BUNIT``.  No error array is available from a single image — the
+    error is set to zero.
+    """
+    header = hdu.header
+    data = np.asarray(hdu.data, dtype=float)
+    if data.ndim != 1:
+        raise ValueError(
+            f"Image HDU has shape {data.shape}; need 1-D for spectrum reading."
+        )
+
+    n = data.size
+    crval = float(header.get("CRVAL1", 0.0))
+    crpix = float(header.get("CRPIX1", 1.0))
+    cdelt = float(header.get("CDELT1", header.get("CD1_1", 1.0)))
+    ctype = str(header.get("CTYPE1", "")).upper()
+    cunit = header.get("CUNIT1", None)
+    bunit = header.get("BUNIT", None)
+
+    pix = np.arange(n, dtype=float) + 1.0
+    wave_raw = crval + (pix - crpix) * cdelt
+    if "LOG" in ctype or "AWAV-LOG" in ctype:
+        wave_raw = 10.0 ** wave_raw
+
+    wave_um = _convert_wave_to_um(wave_raw, cunit)
+    flux_ujy = _convert_flux_to_ujy(data, bunit, wave_um)
+    err_ujy = np.zeros_like(flux_ujy)
+
+    meta = {"hdu": hdu.name, "ctype1": ctype, "cunit1": cunit, "bunit": bunit}
+    return wave_um, flux_ujy, err_ujy, meta
+
+
+def read_fits(
+    path: str | Path,
+    z: float | None = None,
+    *,
+    hdu: str | int | None = None,
+    wave_col: str | None = None,
+    flux_col: str | None = None,
+    err_col: str | None = None,
+) -> Spectrum:
+    """Read a 1-D spectrum from a FITS file.
+
+    By default tries the JWST/NIRSpec ``SPEC1D`` BinTable convention with
+    columns ``wave`` (µm), ``flux`` (µJy), ``err`` (µJy).  Falls through
+    to auto-detection across all extensions when SPEC1D is absent or
+    when *hdu* is given:
+
+    1. **BinTable HDUs** — the first table containing wavelength- and
+       flux-like columns wins.  Recognised column-name aliases include
+       ``wave/wavelength/lam/lambda/loglam`` and ``flux/fnu/flam`` and
+       ``err/error/sigma/noise`` (or ``ivar``).  Units are read from
+       ``TUNITn`` keywords; common aliases (µm/Å/nm, µJy/mJy/Jy,
+       erg/s/cm²/Å) are converted automatically.
+
+    2. **Image HDUs** — a 1-D image is read with the WCS keywords
+       ``CRVAL1``, ``CDELT1``/``CD1_1``, ``CRPIX1``, ``CTYPE1``,
+       ``CUNIT1``; flux unit is ``BUNIT``.  Errors are not available
+       from an image and are set to zero.
 
     Parameters
     ----------
     path : str or Path
         Path to the FITS file.
     z : float, optional
-        Source redshift to attach.
+        Source redshift to attach to the returned :class:`Spectrum`.
+    hdu : str or int, optional
+        Force a specific HDU to read (name or index).  When ``None``
+        (default), tries SPEC1D first, then auto-detects.
+    wave_col, flux_col, err_col : str, optional
+        Force specific column names instead of auto-detecting.  Only
+        used for BinTable HDUs.
 
     Returns
     -------
@@ -118,18 +319,37 @@ def read_fits(path: str | Path, z: float | None = None) -> Spectrum:
     """
     path = Path(path)
     with fits.open(path) as hdul:
-        data = hdul["SPEC1D"].data
-        header = hdul["SPEC1D"].header
+        # 1. Explicit HDU request.
+        if hdu is not None:
+            target = hdul[hdu]
+            wave_um, flux_ujy, err_ujy, meta = _read_one(
+                target, wave_col, flux_col, err_col,
+            )
+        # 2. Default fast path: SPEC1D, optionally with explicit columns.
+        elif "SPEC1D" in [h.name for h in hdul]:
+            wave_um, flux_ujy, err_ujy, meta = _read_one(
+                hdul["SPEC1D"], wave_col, flux_col, err_col,
+            )
+        # 3. Auto-detect across all extensions.
+        else:
+            wave_um, flux_ujy, err_ujy, meta = _autodetect_spectrum(
+                hdul, wave_col, flux_col, err_col,
+            )
 
-        wave_um = np.asarray(data["wave"], dtype=float)
-        flux_ujy = np.asarray(data["flux"], dtype=float)
-        err_ujy = np.asarray(data["err"], dtype=float)
+        # Header metadata: prefer the spectrum HDU, fall back to primary.
+        primary_header = hdul[0].header
+        try:
+            spec_header = hdul[meta["hdu"]].header if meta.get("hdu") else primary_header
+        except KeyError:
+            spec_header = primary_header
+        grating = spec_header.get("GRATING", primary_header.get("GRATING", None))
+        filt = spec_header.get("FILTER", primary_header.get("FILTER", None))
 
-        grating = header.get("GRATING", None)
-        filt = header.get("FILTER", None)
-
-    meta = {"filename": path.name, "filter": filt}
-    logger.info("Read %s: %d pixels, grating=%s", path.name, len(wave_um), grating)
+    meta.update({"filename": path.name, "filter": filt})
+    logger.info(
+        "Read %s [%s]: %d pixels, grating=%s",
+        path.name, meta.get("hdu", "?"), len(wave_um), grating,
+    )
 
     return Spectrum(
         wave_um=wave_um,
@@ -138,6 +358,39 @@ def read_fits(path: str | Path, z: float | None = None) -> Spectrum:
         grating=grating,
         z=z,
         meta=meta,
+    )
+
+
+def _read_one(
+    hdu, wave_col: str | None, flux_col: str | None, err_col: str | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """Dispatch a single HDU to BinTable or Image reader."""
+    if hasattr(hdu, "columns") and hdu.columns is not None:
+        return _read_bintable_spectrum(hdu, wave_col, flux_col, err_col)
+    if hdu.data is not None and hdu.data.ndim == 1:
+        return _read_image_spectrum(hdu)
+    raise ValueError(
+        f"HDU {hdu.name!r} is neither a BinTable nor a 1-D image."
+    )
+
+
+def _autodetect_spectrum(
+    hdul, wave_col: str | None, flux_col: str | None, err_col: str | None,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict]:
+    """Try every extension until one yields a valid (wave, flux) pair."""
+    last_err: Exception | None = None
+    for hdu in hdul:
+        # Skip primary HDUs with no data.
+        if hdu.data is None:
+            continue
+        try:
+            return _read_one(hdu, wave_col, flux_col, err_col)
+        except (ValueError, KeyError) as exc:
+            last_err = exc
+            continue
+    raise ValueError(
+        f"No HDU in file contained a recognisable 1-D spectrum.  "
+        f"Last error: {last_err}"
     )
 
 
