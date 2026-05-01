@@ -888,6 +888,31 @@ plot with error band and zero line.
 
 ---
 
+### `plot_spectrum_interactive()`
+
+```python
+def plot_spectrum_interactive(
+    source: Spectrum | str | Path,
+    *,
+    z: float | None = None,
+    wave_unit: str = "A",
+    flux_unit: str = "fnu",
+    rest_frame: bool = False,
+    exclude_wave_A: list[tuple[float, float]] | None = None,
+    title: str | None = None,
+    **read_kwargs,
+) -> go.Figure:
+```
+
+Open a spectrum directly in plotly without first running a fit.
+Accepts a `Spectrum` object or a path to a `.fits` / `.npz` file —
+the file is read automatically and any extra `read_kwargs` are
+forwarded to the underlying reader (e.g. `hdu=`, `wave_col=` for
+non-standard FITS layouts).  Renders the data plus a ±1σ band
+whenever an error array is available.
+
+---
+
 ### Wavelength exclusion
 
 Both plotting functions accept `exclude_wave_A`: a list of `(lo, hi)` tuples

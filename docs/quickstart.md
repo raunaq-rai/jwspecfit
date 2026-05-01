@@ -111,6 +111,41 @@ print(abund.NO)               # log(N/O)
 4. Selects direct-T_e, strong-line, or forward-model based on line availability.
 5. Applies ICFs (Martinez+25 for N/O, Izotov+06 for S, Ne, Ar).
 
+## 5. DLA fitting (optional)
+
+For high-redshift spectra showing damped Lyα absorption, fit the
+column density via nested sampling:
+
+```bash
+pip install jwspecfit[dla]
+```
+
+```python
+result = jwspecfit.fit_NHI(
+    wave_A=spec.wave_A,
+    flux=spec.flux_ujy,
+    flux_err=spec.err_ujy,
+    z=0.0,                       # 0 for rest-frame stacks
+    fit_range_A=(1100., 2000.),
+    R=spec.R,
+    n_live=200,
+)
+print(result.summary())          # log(N_HI), beta_UV, Sigma_HI, log(Z)
+result.plot()
+```
+
+See the [user guide](user_guide/jwspecfit.md#dla-fitting) for the full
+option list.
+
+## Quick interactive view
+
+To open a FITS or NPZ spectrum directly in plotly without fitting:
+
+```python
+fig = jwspecfit.plot_spectrum_interactive("spectrum.fits", z=6.0)
+fig.show()
+```
+
 ## Next steps
 
 - Worked notebooks: see `docs/notebooks/`.

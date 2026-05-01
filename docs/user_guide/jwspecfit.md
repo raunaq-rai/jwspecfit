@@ -13,8 +13,32 @@ import jwspecfit
 spec = jwspecfit.read_fits("spectrum.fits", z=6.0)
 ```
 
+`read_fits` accepts both the JWST `SPEC1D` BinTable convention
+(default) and arbitrary 1-D FITS files: it auto-detects column names
+(`wave/wavelength/lam/lambda/loglam`, `flux`, `err/sigma/ivar`),
+reads units from the `TUNIT` keywords (μm/Å/nm, μJy/mJy/Jy,
+erg/s/cm²/Å) and falls through to image HDUs with WCS keywords
+(`CRVAL1`, `CDELT1`, `CRPIX1`, `CTYPE1`, `CUNIT1`, `BUNIT`).
+Override the auto-detection with `hdu=`, `wave_col=`, `flux_col=`,
+`err_col=` if needed.
+
 See the {doc}`quickstart guide <../quickstart>` for the full list of
 readers (`read_fits`, `read_dict`, `read_npz`).
+
+### Quick interactive view
+
+To pop a spectrum open in plotly without first running a fit, call
+`plot_spectrum_interactive` directly on a path or a `Spectrum`:
+
+```python
+fig = jwspecfit.plot_spectrum_interactive("spectrum.fits", z=6.0)
+fig = jwspecfit.plot_spectrum_interactive("stack.npz", rest_frame=True)
+fig = jwspecfit.plot_spectrum_interactive(spec, flux_unit="flam")
+fig.show()
+```
+
+The plot has zoom/pan, hover read-outs, and a ±1σ band whenever an
+error array is available.
 
 ## Fitting
 
@@ -85,6 +109,63 @@ uv_lines = [
 ]
 result = jwspecfit.fit_lines(spec, z=6.0, lines=uv_lines)
 ```
+
+## DLA fitting
+
+`jwspecfit.fit_NHI` fits the Lyα damping wing of a damped Lyα
+absorber (DLA) using nested sampling (`dynesty`) with an exact
+Voigt–Hjerting profile, and returns `log(N_HI)`, the UV slope
+`β_UV`, and a continuum normalisation. Install the optional
+dependency first:
+
+```bash
+pip install jwspecfit[dla]   # installs dynesty
+```
+
+A typical call on a stacked rest-frame spectrum (such as a
+`stacking_project` NPZ output):
+
+```python
+import jwspecfit
+
+spec = jwspecfit.read_npz(
+    "binned_stack_arrays/birthrate_prism/"
+    "stack_b3myr_steady_Muv-21.0to-19.0_zgt6.0_prism.npz",
+    z=0.0,        # stack is already rest-frame
+    R=400.0,      # effective resolving power of the stack
+)
+
+result = jwspecfit.fit_NHI(
+    wave_A=spec.wave_A,
+    flux=spec.flux_ujy,
+    flux_err=spec.err_ujy,
+    z=0.0,
+    fit_range_A=(1100.0, 2000.0),   # rest-frame wavelength window
+    R=spec.R,                        # convolve model with LSF
+    n_live=200,                      # dynesty live points
+    seed=42,
+)
+print(result.summary())
+fig = result.plot()                  # data + best-fit + residuals
+```
+
+Useful options:
+
+| Argument          | Purpose                                                       |
+| ----------------- | ------------------------------------------------------------- |
+| `z`               | Source redshift; pass `0.0` for rest-frame stacks             |
+| `fit_range_A`     | Rest-frame wavelength window used in the likelihood           |
+| `mask_lines`      | Mask known emission lines automatically                       |
+| `mask_regions_A`  | Extra rest-frame regions to ignore (e.g. residuals, IGM)      |
+| `Av`, `dust_law`  | Pre-correct the spectrum for foreground attenuation           |
+| `continuum`       | Fit to a smooth moving-average continuum (line-free wings)    |
+| `fit_lya`         | Jointly fit a Lyα emission profile with the DLA absorption    |
+| `n_live`, `seed`  | dynesty sampling controls                                     |
+
+The returned `DLAResult` exposes posteriors via `result.samples`
+(a dict of arrays for `log_NHI`, `beta_UV`, `log_F0`), Bayesian
+evidence as `result.log_evidence`, and a built-in `result.plot()`
+method.
 
 ## Plotting
 
