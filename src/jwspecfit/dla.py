@@ -50,6 +50,119 @@ _ME_CGS = 9.1094e-28           # electron mass (g)
 _C_CGS = 2.9979e10             # speed of light (cm/s)
 _B_DEFAULT_KMS = 30.0          # default Doppler parameter (km/s)
 _LAMBDA_PIVOT_A = 1500.0       # pivot wavelength for power-law normalisation
+_R_ALPHA = _GAMMA_ALPHA * _LAMBDA_LYA_A * 1e-8 / (4.0 * np.pi * _C_CGS)  # ≈ 2.02e-8
+_IGM_Z_MIN_DEFAULT = 5.3       # IGM integration lower bound (Bosman+22 reionisation end)
+
+
+# --------------------------------------------------------------------------
+# IGM damping wing (Miralda-Escudé 1998 / Totani et al. 2006 closed form)
+# --------------------------------------------------------------------------
+
+def _IGM_I(x: np.ndarray) -> np.ndarray:
+    """Helper integral for the Miralda-Escudé (1998) damping wing.
+
+    I(x) = x^(9/2)/(1-x) + (9/7) x^(7/2) + (9/5) x^(5/2) + 3 x^(3/2)
+           + 9 x^(1/2) - (9/2) ln[(1+x^(1/2))/(1-x^(1/2))]
+
+    Defined for x ∈ (0, 1).
+    """
+    sqx = np.sqrt(x)
+    return (
+        x ** 4.5 / (1.0 - x)
+        + (9.0 / 7.0) * x ** 3.5
+        + (9.0 / 5.0) * x ** 2.5
+        + 3.0 * x ** 1.5
+        + 9.0 * sqx
+        - 4.5 * np.log((1.0 + sqx) / (1.0 - sqx))
+    )
+
+
+def tau_IGM_DW(
+    wave_A: np.ndarray,
+    x_HI: float,
+    z_source: float,
+    z_min: float = _IGM_Z_MIN_DEFAULT,
+    cosmo: Any = None,
+) -> np.ndarray:
+    """IGM damping-wing optical depth from a uniformly neutral IGM.
+
+    Implements the closed-form solution of Miralda-Escudé (1998), as
+    written in Totani et al. (2006) Eq. 3 and used in Pollock et al.
+    (2026) Eq. 3.  Computes the redward Lyα damping-wing absorption
+    by neutral hydrogen of mean fraction ``x_HI`` distributed
+    uniformly between redshift ``z_min`` and ``z_source``.
+
+    Parameters
+    ----------
+    wave_A : np.ndarray
+        Observed-frame wavelength array in Angstrom.
+    x_HI : float
+        Volume-averaged neutral hydrogen fraction of the IGM.
+    z_source : float
+        Source redshift (upper bound of the IGM integration).
+    z_min : float
+        Lower bound of the IGM integration; default 5.3 (Bosman+22).
+    cosmo : astropy.cosmology, optional
+        Cosmology used to compute the line-centre Gunn-Peterson optical
+        depth.  Defaults to Planck18.
+
+    Returns
+    -------
+    np.ndarray
+        Optical depth τ_IGM(λ).  Zero for pixels redward of the
+        source's Lyα (the formula returns zero by construction
+        outside the integration range), and a finite damping-wing
+        contribution between λ_α(1+z_source) and longer wavelengths.
+
+    Notes
+    -----
+    For pixels blueward of λ_α(1+z_source) the photon would have been
+    absorbed inside the GP forest already; the IGM damping-wing
+    formula is not the right description there.  Callers should
+    enforce a separate model = 0 cut blueward of source Lyα.
+    """
+    if cosmo is None:
+        from astropy.cosmology import Planck18 as cosmo
+
+    wave_A = np.asarray(wave_A, dtype=float)
+    out = np.zeros_like(wave_A)
+    if x_HI <= 0.0:
+        return out
+
+    # Redshift at which a photon of observed λ would have hit Lyα.
+    z_obs = wave_A / _LAMBDA_LYA_A - 1.0
+
+    # The damping wing applies redward of source Lyα (z_obs > z_source).
+    valid = z_obs > z_source
+    if not np.any(valid):
+        return out
+
+    z_o = z_obs[valid]
+    x1 = (1.0 + z_min) / (1.0 + z_o)
+    x2 = (1.0 + z_source) / (1.0 + z_o)
+
+    eps = 1e-9
+    x1 = np.clip(x1, eps, 1.0 - eps)
+    x2 = np.clip(x2, eps, 1.0 - eps)
+
+    # Line-centre Gunn-Peterson optical depth at z_obs (Madau 1995 form).
+    h = float(cosmo.h)
+    Ob_h2 = float(cosmo.Ob0) * h * h
+    Om_h2 = float(cosmo.Om0) * h * h
+    tau_GP_z = (
+        6.45e5
+        * (Ob_h2 / 0.022)
+        * (Om_h2 / 0.13) ** -0.5
+        * ((1.0 + z_o) / 10.0) ** 1.5
+    )
+
+    out[valid] = (
+        tau_GP_z
+        * x_HI
+        * (_R_ALPHA / np.pi)
+        * (_IGM_I(x2) - _IGM_I(x1))
+    )
+    return np.maximum(out, 0.0)
 
 
 # --------------------------------------------------------------------------
@@ -335,20 +448,42 @@ class DLAResult:
     log_evidence: float = 0.0
     _lya_subtracted: bool = False
     lya_params: np.ndarray | None = None
+    # --- IGM damping-wing extension (Pollock+26) ---
+    x_HI: float = 0.0
+    x_HI_err: tuple[float, float] = (0.0, 0.0)
+    fit_x_HI: bool = False
+    igm_z_min: float = _IGM_Z_MIN_DEFAULT
+    # --- Upper-limit reporting for unconstrained sources ---
+    log_NHI_upper95: float = 0.0
+    is_upper_limit: bool = False
 
     def summary(self) -> str:
         """Return a formatted summary string."""
         lines = [
-            "DLA Fit Result",
-            "=" * 40,
-            f"log(N_HI/cm^-2)  = {self.log_NHI:.2f} "
-            f"(+{self.log_NHI_err[1]:.2f}, -{self.log_NHI_err[0]:.2f})",
+            "DLA Fit Result (Pollock+26-style joint sampling)",
+            "=" * 50,
+        ]
+        if self.is_upper_limit:
+            lines.append(
+                f"log(N_HI/cm^-2)  < {self.log_NHI_upper95:.2f}   (95% upper limit)"
+            )
+        else:
+            lines.append(
+                f"log(N_HI/cm^-2)  = {self.log_NHI:.2f} "
+                f"(+{self.log_NHI_err[1]:.2f}, -{self.log_NHI_err[0]:.2f})"
+            )
+        lines.extend([
             f"Sigma_HI         = {self.Sigma_HI:.1f} Msun/pc^2",
             f"beta_UV          = {self.beta_UV:.2f} "
             f"(+{self.beta_UV_err[1]:.2f}, -{self.beta_UV_err[0]:.2f})",
             f"log(F0)          = {self.log_F0:.2f} "
             f"(+{self.log_F0_err[1]:.2f}, -{self.log_F0_err[0]:.2f})",
-        ]
+        ])
+        if self.fit_x_HI:
+            lines.append(
+                f"x_HI (IGM)       = {self.x_HI:.2f} "
+                f"(+{self.x_HI_err[1]:.2f}, -{self.x_HI_err[0]:.2f})"
+            )
         if self.lya_params is not None:
             lp = self.lya_params
             lines.append(
@@ -620,43 +755,53 @@ def _evaluate_model(
     z: float,
     R: float | None = None,
     b_kms: float = _B_DEFAULT_KMS,
+    x_HI: float = 0.0,
+    igm_z_min: float = _IGM_Z_MIN_DEFAULT,
     lya_ujy_func: object | None = None,
     lya_free_params: tuple[float, float, float] | None = None,
 ) -> np.ndarray:
-    """Evaluate the DLA-attenuated power-law model.
+    """Evaluate the joint DLA + IGM damping-wing model.
 
-    Following Pollock et al. (2026) Eq. 4, the intrinsic spectrum
-    (continuum + emission lines) is multiplied by exp(-tau_DLA):
+    Implements Pollock et al. (2026) Eq. 4 — the intrinsic continuum
+    (single power-law) plus any Lyα emission is attenuated by the
+    local DLA and the IGM damping wing simultaneously:
 
-        F = (F0*(lam/lam_pivot)^beta + Lya(lam)) * exp(-tau_DLA)
+        F(λ) = [F0 (λ/λ_pivot)^β + Lyα(λ)] · exp(−τ_DLA) · exp(−τ_IGM)
 
     Parameters
     ----------
     wave_A : np.ndarray
-        Observed-frame wavelengths.
+        Observed-frame wavelengths in Angstrom.
     log_F0 : float
-        log10 of continuum normalisation at the pivot wavelength.
+        log10 of the continuum normalisation at the (observer-frame)
+        pivot wavelength λ_pivot · (1 + z), in the same flux units as
+        the input data (typically µJy).
     beta_UV : float
-        UV spectral slope.
+        UV spectral slope of the intrinsic continuum.
     log_NHI : float
-        log10(N_HI / cm^-2).
+        log10(N_HI / cm^-2) of the local DLA.
     z : float
         Source redshift.
     R : float or None
-        Spectral resolving power.  If not None, the model is
-        convolved with a Gaussian LSF of FWHM = lambda / R.
+        Spectral resolving power.  If given, the model is convolved
+        with a Gaussian LSF of FWHM = λ / R.
     b_kms : float
-        Doppler parameter in km/s.
+        Doppler parameter in km/s used in the Voigt profile.  The
+        damping wing is insensitive to ``b`` for log N_HI > 20.3.
+    x_HI : float
+        Volume-averaged neutral fraction of the IGM (Miralda-Escudé
+        damping-wing term).  Default 0 (no IGM contribution).
+    igm_z_min : float
+        Lower-redshift bound of the IGM integration (default 5.3,
+        Bosman+22 reionisation end).
     lya_ujy_func : callable or None
-        Function that takes wavelength array (Å) and returns the
-        fixed Lyα emission profile in µJy.  Added to the intrinsic
-        spectrum before DLA absorption.
+        Function returning a fixed Lyα emission profile in µJy.
+        Added to the intrinsic continuum before attenuation.
     lya_free_params : tuple of (log_A, sigma, alpha), optional
-        Free Lyα parameters: log10(A_peak) in flam, sigma in Å,
-        and skewness alpha.  Centroid fixed at Lyα rest × (1+z).
-        The Lyα emission is added **after** DLA absorption — the
-        observed Lyα photons already escaped the neutral gas via
-        resonant scattering into the damping wing frequencies.
+        Free Lyα parameters: log10(A_peak) in F_λ (erg/s/cm²/Å),
+        sigma in Å, and skewness α.  Centroid fixed at Lyα rest × (1+z).
+        The profile is added to the continuum and attenuated by both
+        DLA and IGM (Pollock+26 convention).
 
     Returns
     -------
@@ -670,34 +815,31 @@ def _evaluate_model(
     lam_pivot = _LAMBDA_PIVOT_A * (1.0 + z)
     continuum = F0 * (wave_A / lam_pivot) ** beta_UV
 
-    # DLA absorption on the continuum only.
-    tau = tau_DLA(wave_A, log_NHI, z=z, b_kms=b_kms)
-    model = continuum * np.exp(-tau)
-
-    # IGM absorption: complete Gunn-Peterson trough blueward of Lya.
-    lya_obs = _LAMBDA_LYA_A * (1.0 + z)
-    model = np.where(wave_A < lya_obs, 0.0, model)
-
-    # Add Lyα emission AFTER DLA and IGM absorption.
-    # The observed Lyα photons already escaped the DLA (via resonant
-    # scattering into the damping wing frequencies), so they should
-    # not be attenuated again.  The IGM cutoff still applies to the
-    # blue wing of Lyα (absorbed at z > z_source).
-    lya_ujy = None
+    # Build the intrinsic spectrum: continuum + (optional) Lyα emission.
+    intrinsic = continuum.copy()
     if lya_ujy_func is not None:
-        lya_ujy = lya_ujy_func(wave_A)
-
+        intrinsic = intrinsic + lya_ujy_func(wave_A)
     if lya_free_params is not None:
         log_A, sigma, alpha = lya_free_params
         A_peak = 10.0 ** log_A
         mu = _LAMBDA_LYA_A * (1.0 + z)
         lya_flam = asymmetric_gaussian(wave_A, A_peak, mu, sigma, alpha)
-        lya_ujy = _flam_to_ujy(lya_flam, wave_A * 1e-4)
+        intrinsic = intrinsic + _flam_to_ujy(lya_flam, wave_A * 1e-4)
 
-    if lya_ujy is not None:
-        # Apply IGM cutoff to Lyα blue wing too.
-        lya_ujy = np.where(wave_A < lya_obs, 0.0, lya_ujy)
-        model = model + lya_ujy
+    # DLA + IGM attenuation (Pollock+26 Eq. 4).
+    tau_total = tau_DLA(wave_A, log_NHI, z=z, b_kms=b_kms)
+    if x_HI > 0.0:
+        tau_total = tau_total + tau_IGM_DW(
+            wave_A, x_HI, z_source=z, z_min=igm_z_min,
+        )
+    model = intrinsic * np.exp(-tau_total)
+
+    # Hard zero blueward of source Lyα — the GP forest is essentially
+    # saturated there.  The Miralda-Escudé damping wing only models the
+    # red side of source Lyα; the formula is not applicable to forest
+    # photons that would have hit Lyα at z < z_source.
+    lya_obs = _LAMBDA_LYA_A * (1.0 + z)
+    model = np.where(wave_A < lya_obs, 0.0, model)
 
     if R is not None:
         model = _convolve_resolution(wave_A, model, R)
@@ -715,77 +857,109 @@ def fit_NHI(
     flux_err: np.ndarray,
     z: float = 0.0,
     *,
+    fit_x_HI: bool = False,
+    igm_z_min: float = _IGM_Z_MIN_DEFAULT,
+    b_kms: float = _B_DEFAULT_KMS,
     continuum: np.ndarray | None = None,
     Av: float = 0.0,
     dust_law: str = "cardelli",
     Rv: float = 3.1,
     R: float | None = None,
-    mask_lines: bool = False,
-    mask_width_A: float = 10.0,
-    fit_range_A: tuple[float, float] = (1050.0, 2000.0),
+    mask_lines: bool = True,
+    mask_width_A: float = 20.0,
+    fit_range_A: tuple[float, float] = (1216.0, 3000.0),
     mask_regions_A: list[tuple[float, float]] | None = None,
     fit_lya: bool = False,
     lya_params: np.ndarray | list | None = None,
+    prior_log_NHI: tuple[float, float] = (18.0, 24.0),
+    prior_x_HI: tuple[float, float] = (0.0, 1.0),
+    prior_beta_UV: tuple[float, float] = (-4.0, 0.0),
+    prior_log_F0: tuple[float, float] | None = None,
+    prior_log_A_lya: tuple[float, float] = (-22.0, -15.0),
+    prior_sigma_lya: tuple[float, float] = (1.0, 30.0),
+    prior_alpha_lya: tuple[float, float] = (0.0, 5.0),
     n_live: int = 500,
+    dlogz: float = 0.5,
     seed: int = 42,
 ) -> DLAResult:
-    """Fit the DLA column density from a Lya damping wing.
+    """Joint Bayesian fit of the DLA + IGM damping wing (Pollock+26-style).
 
-    Uses ``dynesty`` nested sampling (matching Pollock et al. 2026)
-    with an exact Voigt-Hjerting profile and optional spectral
-    resolution convolution.
+    Implements the Pollock et al. (2026) joint nested-sampling fit
+    over (log_F0, β_UV, log_NHI[, x_HI[, Lyα]]) with an exact
+    Voigt-Hjerting profile and the Miralda-Escudé (1998) IGM damping
+    wing in the Totani+06 closed form.
 
     Parameters
     ----------
-    wave_A : np.ndarray
-        Wavelength array in Angstrom (observed frame).
-    flux : np.ndarray
-        Flux density array (raw, not continuum-subtracted).
-    flux_err : np.ndarray
-        1-sigma flux errors.
+    wave_A, flux, flux_err : np.ndarray
+        Wavelength (observed-frame Å) and flux density arrays.
     z : float
-        Source redshift (0 for rest-frame spectra).
+        Source redshift (use 0 for rest-frame stacks).
+    fit_x_HI : bool
+        If True, sample over IGM neutral fraction x_HI in addition to
+        the local DLA.  Recommended at z > 6.
+    igm_z_min : float
+        Lower-redshift bound of the IGM integration (default 5.3,
+        Bosman+22 reionisation end).
+    b_kms : float
+        Doppler parameter (km/s) for the Voigt profile.  The damping
+        wing is insensitive to b for log N_HI > 20.3.
     continuum : np.ndarray, optional
-        Moving-average continuum estimate (same length as ``flux``).
-        When provided, the DLA model is fitted to this smooth
-        continuum instead of the raw flux.  This removes emission
-        lines automatically and gives a clean damping wing signal.
-        Only 3 parameters are fitted (``log_NHI``, ``beta_UV``,
-        ``log_F0``); ``fit_lya`` and ``lya_params`` are ignored.
-    Av : float
-        Dust extinction A_V to correct for before fitting.
-    dust_law : str
-        Extinction law: ``"cardelli"`` or ``"salim"``.
-    Rv : float
-        Total-to-selective extinction ratio (default 3.1).
+        Pre-smoothed continuum estimate.  When provided the model is
+        fit against this smoothed array instead of the raw flux —
+        emission lines are then implicitly removed.
+    Av, dust_law, Rv : float, str, float
+        Optional foreground dust correction applied before fitting.
     R : float or None
-        Spectral resolving power.  If provided, the model is
-        convolved with a Gaussian LSF at each likelihood evaluation.
+        Spectral resolving power for LSF convolution.
     mask_lines : bool
-        If True, mask known emission lines.
+        If True (default), mask known UV emission lines and a window
+        around source Lyα.
     mask_width_A : float
-        Half-width of line masks in rest-frame Angstrom.
+        Half-width of line masks (rest-frame Å).  Default 20 Å is
+        appropriate for NIRSpec PRISM resolution.
     fit_range_A : tuple
-        Rest-frame wavelength range for the fit.
+        Rest-frame fit window (default 1216–3000 Å, matching
+        Pollock+26 — Lyα to just below the Balmer break).
     mask_regions_A : list of (float, float), optional
-        Additional rest-frame wavelength regions to mask.
+        Extra rest-frame wavelength ranges to ignore.
     fit_lya : bool
-        If True, jointly fit Lyα emission with DLA absorption.
-        Ignored when ``continuum`` is provided.
-    lya_params : array-like of length 4, optional
-        Fixed or hint Lyα params.  Ignored when ``continuum``
-        is provided.
+        Jointly fit a skewed Lyα emission profile.
+    lya_params : array of length 4, optional
+        Pre-determined Lyα profile (A_peak, μ, σ, α) added to the
+        intrinsic spectrum before attenuation.
+    prior_log_NHI, prior_x_HI, prior_beta_UV : tuple
+        Uniform-prior bounds for the named parameter (Pollock+26 Sect. 3.2
+        defaults: log_NHI ∈ [18,24], x_HI ∈ [0,1], β_UV ∈ [-4,0]).
+    prior_log_F0 : tuple, optional
+        Uniform prior bounds on log10(F0) in the same flux units as the
+        input data.  Defaults to ±3 dex around the median continuum
+        flux derived from the input spectrum.
+    prior_log_A_lya, prior_sigma_lya, prior_alpha_lya : tuple
+        Priors used when ``fit_lya=True``.
     n_live : int
-        Number of live points for dynesty (default 500).
+        Number of dynesty live points (default 500).
+    dlogz : float
+        dynesty convergence threshold on log Z (default 0.5).
     seed : int
         RNG seed.
 
     Returns
     -------
     DLAResult
-        Fit results with posteriors and Bayesian evidence.
+        Posterior samples for every free parameter, median ± 16/84
+        percentiles, log-evidence, and a 95th-percentile upper limit
+        on log N_HI when the posterior is unconstrained.
+
+    Notes
+    -----
+    - Pollock+26 Eq. 4: F = (F0·(λ/λ_pivot)^β + Lyα) · exp(−τ_DLA) · exp(−τ_IGM).
+    - Lyα emission is added *before* attenuation (Pollock+26 convention).
+    - Reports an upper limit when the posterior touches the prior
+      lower bound (Pollock+26 do this for 21/48 sources).
     """
     import dynesty
+    from dynesty.utils import resample_equal
 
     wave_A = np.asarray(wave_A, dtype=np.float64)
     flux = np.asarray(flux, dtype=np.float64)
@@ -800,7 +974,6 @@ def fit_NHI(
 
     # --- Dust correction ---
     if _use_continuum:
-        # Apply dust correction to continuum and errors.
         flux_corr, err_corr = _apply_dust_correction(
             wave_A, continuum, flux_err, Av, dust_law, Rv,
         )
@@ -809,7 +982,7 @@ def fit_NHI(
             wave_A, flux, flux_err, Av, dust_law, Rv,
         )
 
-    # --- Build fixed Lya model (only when fit_lya=False, no continuum) ---
+    # --- Build fixed Lya model (only when fit_lya=False) ---
     _lya_ujy_func = None
     if lya_params is not None and not fit_lya:
         lp = np.asarray(lya_params)
@@ -834,7 +1007,6 @@ def fit_NHI(
     wave_rest = wave_A / (1.0 + z)
     in_range = (wave_rest >= fit_range_A[0]) & (wave_rest <= fit_range_A[1])
 
-    # --- Lya reference wavelength ---
     lya_obs = _LAMBDA_LYA_A * (1.0 + z)
 
     # --- Emission line masking ---
@@ -844,27 +1016,19 @@ def fit_NHI(
             wave_A, z=z, width_A=mask_width_A, exclude=_exclude,
         )
         if not fit_lya:
-            lya_mask_width = 8.0 * (1.0 + z)
-            lya_emission_mask = (
+            lya_mask_width = max(mask_width_A, 8.0) * (1.0 + z)
+            line_mask &= (
                 (wave_A < lya_obs - lya_mask_width)
                 | (wave_A > lya_obs + lya_mask_width)
             )
-            line_mask &= lya_emission_mask
     else:
-        # No line masking needed for continuum mode.
         line_mask = np.ones(len(wave_A), dtype=bool)
 
-    # --- Custom region masking ---
     if mask_regions_A:
         for lo, hi in mask_regions_A:
-            lo_obs = lo * (1.0 + z)
-            hi_obs = hi * (1.0 + z)
-            line_mask &= (wave_A < lo_obs) | (wave_A > hi_obs)
+            line_mask &= (wave_A < lo * (1.0 + z)) | (wave_A > hi * (1.0 + z))
 
-    # --- Positive error and finite flux filter ---
     good = (err_corr > 0) & np.isfinite(flux_corr)
-
-    # --- Combined mask ---
     use = in_range & line_mask & good
     if use.sum() < 10:
         raise ValueError(
@@ -875,178 +1039,136 @@ def fit_NHI(
     w = wave_A[use]
     f = flux_corr[use]
     e = err_corr[use]
-
-    _mode = "continuum" if _use_continuum else ("fit_lya" if fit_lya else "standard")
-    logger.info(
-        "DLA fit (%s): %d pixels in [%.0f, %.0f] A rest-frame "
-        "(z=%.3f, Av=%.2f).",
-        _mode, len(w), fit_range_A[0], fit_range_A[1], z, Av,
-    )
-
-    # --- Initial guess for F0 from data ---
-    pivot_obs = _LAMBDA_PIVOT_A * (1.0 + z)
-    near_pivot = np.abs(w - pivot_obs) < 200.0 * (1.0 + z)
-    if near_pivot.sum() > 5:
-        log_F0_guess = float(np.log10(np.maximum(np.median(f[near_pivot]), 1e-30)))
-    else:
-        log_F0_guess = float(np.log10(np.maximum(np.median(f), 1e-30)))
-
-    # --- Precompute inverse variance ---
     inv_var = 1.0 / e ** 2
 
-    # ================================================================
-    # Stage 1: Fit continuum (F0, beta_UV) from the RED side only,
-    # where the DLA optical depth is negligible.
-    # ================================================================
-    # The wing boundary separates the DLA-affected region (blue)
-    # from the unabsorbed continuum (red).  Use 1280 Å so the
-    # power-law fit is anchored close to the wing transition.
-    _wing_boundary_A = 1280.0 * (1.0 + z)
-    red_mask = w > _wing_boundary_A
-    if red_mask.sum() < 5:
-        _wing_boundary_A = lya_obs + 50.0
-        red_mask = w > _wing_boundary_A
-
-    w_red = w[red_mask]
-    f_red = f[red_mask]
-    e_red = e[red_mask]
-
-    # Fit F = F0 * (lam/lam_pivot)^beta in linear space via curve_fit.
-    from scipy.optimize import curve_fit
-    lam_pivot = _LAMBDA_PIVOT_A * (1.0 + z)
-
-    def _power_law(lam, log_F0, beta):
-        return 10.0 ** log_F0 * (lam / lam_pivot) ** beta
-
-    pos_red = (f_red > 0) & (e_red > 0)
-    if pos_red.sum() > 5:
-        try:
-            popt, _ = curve_fit(
-                _power_law,
-                w_red[pos_red], f_red[pos_red],
-                p0=[log_F0_guess, -1.5],
-                sigma=e_red[pos_red], absolute_sigma=True,
-                bounds=([-30, -4.0], [30, 1.0]),
-            )
-            _fixed_log_F0 = float(popt[0])
-            _fixed_beta = float(popt[1])
-        except (RuntimeError, ValueError):
-            _fixed_log_F0 = log_F0_guess
-            _fixed_beta = -1.5
+    _mode_bits = ["joint"]
+    if fit_x_HI:
+        _mode_bits.append("DLA+IGM")
     else:
-        _fixed_log_F0 = log_F0_guess
-        _fixed_beta = -1.5
-
+        _mode_bits.append("DLA-only")
+    if fit_lya:
+        _mode_bits.append("+Lyα")
+    if _use_continuum:
+        _mode_bits.append("continuum")
     logger.info(
-        "Stage 1 (red continuum): log_F0=%.3f, beta_UV=%.3f "
-        "from %d pixels redward of %.0f A.",
-        _fixed_log_F0, _fixed_beta, int(red_mask.sum()), _wing_boundary_A,
+        "DLA fit (%s): %d pixels in [%.0f, %.0f] Å rest-frame "
+        "(z=%.3f, Av=%.2f).",
+        " ".join(_mode_bits), len(w), fit_range_A[0], fit_range_A[1], z, Av,
     )
 
-    # ================================================================
-    # Stage 2: Fit log_NHI with F0 and beta fixed, focusing on the
-    # damping wing region where τ_DLA shapes the spectrum.
-    # ================================================================
-    # Use only the wing region for the NHI fit so the flat red
-    # continuum doesn't dominate the likelihood.
-    wing_mask = w <= _wing_boundary_A
-    w_wing = w[wing_mask]
-    f_wing = f[wing_mask]
-    inv_var_wing = inv_var[wing_mask]
+    # --- Construct the prior ---
+    # Default log_F0 prior centred on data median if user did not pass one.
+    if prior_log_F0 is None:
+        f_med = float(np.nanmedian(np.maximum(f, 1e-30)))
+        log_F0_centre = float(np.log10(max(f_med, 1e-30)))
+        prior_log_F0 = (log_F0_centre - 3.0, log_F0_centre + 3.0)
 
-    if wing_mask.sum() < 5:
-        logger.warning(
-            "Only %d pixels in the wing region. Falling back to full range.",
-            wing_mask.sum(),
-        )
-        w_wing = w
-        f_wing = f
-        inv_var_wing = inv_var
+    pri_lo = [prior_log_F0[0], prior_beta_UV[0], prior_log_NHI[0]]
+    pri_hi = [prior_log_F0[1], prior_beta_UV[1], prior_log_NHI[1]]
+    param_names = ["log_F0", "beta_UV", "log_NHI"]
 
-    logger.info(
-        "Stage 2 (wing fit): %d pixels in wing region (< %.0f A).",
-        len(w_wing), _wing_boundary_A,
-    )
+    if fit_x_HI:
+        pri_lo.append(prior_x_HI[0])
+        pri_hi.append(prior_x_HI[1])
+        param_names.append("x_HI")
 
-    # 1D dynesty: only log_NHI is free.
-    ndim = 1
+    if fit_lya:
+        pri_lo.extend([prior_log_A_lya[0], prior_sigma_lya[0], prior_alpha_lya[0]])
+        pri_hi.extend([prior_log_A_lya[1], prior_sigma_lya[1], prior_alpha_lya[1]])
+        param_names.extend(["log_A_lya", "sigma_lya", "alpha_lya"])
 
-    def _log_like_nhi(log_NHI):
-        model = _evaluate_model(
-            w_wing, _fixed_log_F0, _fixed_beta, log_NHI, z, R=R,
-            lya_ujy_func=_lya_ujy_func if not fit_lya else None,
-        )
-        resid = f_wing - model
-        return -0.5 * np.sum(resid ** 2 * inv_var_wing)
-
-    # Quick grid search to find the best log_NHI and centre the prior.
-    _grid = np.linspace(18.0, 23.0, 100)
-    _grid_ll = np.array([_log_like_nhi(v) for v in _grid])
-    _best_nhi = float(_grid[np.argmax(_grid_ll)])
-    # Centre prior ±2 dex around the grid optimum, clipped to [18, 23].
-    prior_lo_nhi = np.array([max(18.0, _best_nhi - 2.0)])
-    prior_hi_nhi = np.array([min(23.0, _best_nhi + 2.0)])
-    logger.info(
-        "Grid search best: log_NHI=%.2f, prior=[%.1f, %.1f].",
-        _best_nhi, prior_lo_nhi[0], prior_hi_nhi[0],
-    )
+    pri_lo = np.asarray(pri_lo)
+    pri_hi = np.asarray(pri_hi)
+    pri_range = pri_hi - pri_lo
+    ndim = len(pri_lo)
 
     def prior_transform(u):
-        return prior_lo_nhi + u * (prior_hi_nhi - prior_lo_nhi)
+        return pri_lo + u * pri_range
 
     def log_likelihood(theta):
-        return _log_like_nhi(theta[0])
+        log_F0 = theta[0]
+        beta_UV = theta[1]
+        log_NHI = theta[2]
+        idx = 3
+        x_HI = float(theta[idx]) if fit_x_HI else 0.0
+        if fit_x_HI:
+            idx += 1
+        lya_free = tuple(theta[idx:idx + 3]) if fit_lya else None
+
+        m = _evaluate_model(
+            w, log_F0, beta_UV, log_NHI, z,
+            R=R, b_kms=b_kms,
+            x_HI=x_HI, igm_z_min=igm_z_min,
+            lya_ujy_func=_lya_ujy_func if not fit_lya else None,
+            lya_free_params=lya_free,
+        )
+        resid = f - m
+        return -0.5 * float(np.sum(resid * resid * inv_var))
 
     # --- Run dynesty ---
     sampler = dynesty.NestedSampler(
         log_likelihood, prior_transform, ndim=ndim,
         nlive=n_live, rstate=np.random.default_rng(seed),
     )
-    sampler.run_nested(print_progress=True, dlogz=0.01)
+    sampler.run_nested(print_progress=True, dlogz=dlogz)
     results = sampler.results
 
-    # --- Extract weighted posterior samples ---
-    from dynesty.utils import resample_equal
     weights = np.exp(results.logwt - results.logz[-1])
-    samples_arr = resample_equal(results.samples, weights)
+    samples = resample_equal(results.samples, weights)
 
-    log_NHI_samples = samples_arr[:, 0]
+    samples_dict: dict[str, np.ndarray] = {
+        name: samples[:, i] for i, name in enumerate(param_names)
+    }
 
     def _median_ci(arr):
-        med = float(np.median(arr))
-        lo = med - float(np.percentile(arr, 16))
-        hi = float(np.percentile(arr, 84)) - med
-        return med, (lo, hi)
+        m = float(np.median(arr))
+        lo = m - float(np.percentile(arr, 16))
+        hi = float(np.percentile(arr, 84)) - m
+        return m, (lo, hi)
 
-    log_NHI_med, log_NHI_err = _median_ci(log_NHI_samples)
+    log_F0_med, log_F0_err = _median_ci(samples_dict["log_F0"])
+    beta_UV_med, beta_UV_err = _median_ci(samples_dict["beta_UV"])
+    log_NHI_med, log_NHI_err = _median_ci(samples_dict["log_NHI"])
 
-    # F0 and beta are fixed — no posterior, just point estimates.
-    beta_UV_med = _fixed_beta
-    beta_UV_err = (0.0, 0.0)
-    log_F0_med = _fixed_log_F0
-    log_F0_err = (0.0, 0.0)
+    if fit_x_HI:
+        x_HI_med, x_HI_err = _median_ci(samples_dict["x_HI"])
+    else:
+        x_HI_med, x_HI_err = 0.0, (0.0, 0.0)
+        # Keep an empty x_HI sample for downstream compatibility.
+        samples_dict["x_HI"] = np.zeros_like(samples_dict["log_NHI"])
 
-    samples_dict = {
-        "log_NHI": log_NHI_samples,
-        "beta_UV": np.full_like(log_NHI_samples, _fixed_beta),
-        "log_F0": np.full_like(log_NHI_samples, _fixed_log_F0),
-    }
+    # --- Upper-limit detection: posterior touches the prior lower bound ---
+    nhi_p5 = float(np.percentile(samples_dict["log_NHI"], 5))
+    is_upper_limit = nhi_p5 <= prior_log_NHI[0] + 0.1
+    log_NHI_upper95 = float(np.percentile(samples_dict["log_NHI"], 95))
+    if is_upper_limit:
+        logger.info(
+            "log_NHI posterior is unconstrained — reporting 95%% upper "
+            "limit log_NHI < %.2f.", log_NHI_upper95,
+        )
 
     # --- Surface density (Pollock+26 Eq. 7) ---
     Sigma_HI = 8e-21 * 10.0 ** log_NHI_med
 
-    # --- Best-fit model (evaluated on full fit range for plotting) ---
+    # --- Best-fit model on the full fit window (for plotting) ---
+    lya_free_best = None
+    if fit_lya:
+        lya_free_best = (
+            float(np.median(samples_dict["log_A_lya"])),
+            float(np.median(samples_dict["sigma_lya"])),
+            float(np.median(samples_dict["alpha_lya"])),
+        )
     model_best = _evaluate_model(
-        w, log_F0_med, beta_UV_med, log_NHI_med, z, R=R,
+        w, log_F0_med, beta_UV_med, log_NHI_med, z,
+        R=R, b_kms=b_kms,
+        x_HI=x_HI_med, igm_z_min=igm_z_min,
         lya_ujy_func=_lya_ujy_func if not fit_lya else None,
+        lya_free_params=lya_free_best,
     )
 
-    # --- Log-evidence ---
     log_evidence = float(results.logz[-1])
 
-    final_lya_params = None
-    if lya_params is not None:
-        final_lya_params = np.asarray(lya_params)
+    final_lya_params = np.asarray(lya_params) if lya_params is not None else None
 
     result = DLAResult(
         log_NHI=log_NHI_med,
@@ -1066,6 +1188,151 @@ def fit_NHI(
         log_evidence=log_evidence,
         _lya_subtracted=False,
         lya_params=final_lya_params,
+        x_HI=x_HI_med,
+        x_HI_err=x_HI_err,
+        fit_x_HI=fit_x_HI,
+        igm_z_min=igm_z_min,
+        log_NHI_upper95=log_NHI_upper95,
+        is_upper_limit=is_upper_limit,
     )
     result._R = R
     return result
+
+
+# --------------------------------------------------------------------------
+# D_Lyα equivalent-width statistic (Heintz et al. 2025, Eq. 1)
+# --------------------------------------------------------------------------
+
+def compute_D_Lya(
+    wave_A: np.ndarray,
+    flux: np.ndarray,
+    flux_err: np.ndarray,
+    z: float,
+    *,
+    cont_range_A: tuple[float, float] = (1250.0, 2600.0),
+    int_range_A: tuple[float, float] = (1180.0, 1350.0),
+    mask_lines: bool = True,
+    mask_width_A: float = 20.0,
+    n_mc: int = 1000,
+    seed: int = 42,
+) -> dict[str, float]:
+    """Heintz+25 D_Lyα equivalent-width statistic (Eq. 1).
+
+    Fits a power-law continuum F_cont(λ) = F_1550 (λ/1550)^β over
+    *cont_range_A* (lines masked) then integrates
+
+        D_Lyα = ∫ (1 − F_λ / F_cont(λ)) dλ / (1 + z)
+
+    over *int_range_A* (rest-frame).  D_Lyα < 0 indicates a
+    Lyα emitter; ≳50 Å indicates a strong damped absorber.
+
+    Parameters
+    ----------
+    wave_A, flux, flux_err : np.ndarray
+        Spectrum in observed-frame Å and arbitrary linear flux units.
+    z : float
+        Source redshift.
+    cont_range_A : tuple
+        Rest-frame range used to fit the power-law continuum
+        (default 1250–2600 Å, matching Heintz+25).
+    int_range_A : tuple
+        Rest-frame range over which the EW integral is taken
+        (default 1180–1350 Å, matching Heintz+25 Eq. 1).
+    mask_lines : bool
+        Whether to mask known UV emission lines from the continuum
+        fit (default True).  The integral is always taken over the
+        full *int_range_A* — emission/absorption inside it is the
+        signal.
+    mask_width_A : float
+        Half-width of line masks for the continuum fit (rest-frame Å).
+    n_mc : int
+        Monte-Carlo iterations for D_Lyα uncertainty propagation.
+    seed : int
+        RNG seed.
+
+    Returns
+    -------
+    dict
+        ``{"D_Lya": float, "D_Lya_err": float, "beta_UV": float,
+        "beta_UV_err": float, "F_1550": float, "F_1550_err": float}``
+    """
+    from scipy.optimize import curve_fit
+
+    wave_A = np.asarray(wave_A, dtype=np.float64)
+    flux = np.asarray(flux, dtype=np.float64)
+    flux_err = np.asarray(flux_err, dtype=np.float64)
+
+    wave_rest = wave_A / (1.0 + z)
+    pivot = 1550.0  # rest-frame (Heintz+25)
+
+    in_cont = (wave_rest >= cont_range_A[0]) & (wave_rest <= cont_range_A[1])
+    if mask_lines:
+        line_mask = _mask_emission_lines(wave_A, z=z, width_A=mask_width_A)
+        # Also mask the broad Lyα region from the continuum fit.
+        lya_obs = _LAMBDA_LYA_A * (1.0 + z)
+        line_mask &= (
+            (wave_A < lya_obs - 50.0 * (1.0 + z))
+            | (wave_A > lya_obs + 50.0 * (1.0 + z))
+        )
+    else:
+        line_mask = np.ones(len(wave_A), dtype=bool)
+    cont_use = in_cont & line_mask & (flux_err > 0) & np.isfinite(flux)
+    if cont_use.sum() < 5:
+        raise ValueError(
+            f"Only {cont_use.sum()} continuum pixels in {cont_range_A} Å; "
+            "cannot fit β_UV."
+        )
+
+    def power_law(lam_rest, F_1550, beta):
+        return F_1550 * (lam_rest / pivot) ** beta
+
+    f_med = float(np.nanmedian(flux[cont_use]))
+    popt, pcov = curve_fit(
+        power_law,
+        wave_rest[cont_use], flux[cont_use],
+        p0=[max(f_med, 1e-30), -2.0],
+        sigma=flux_err[cont_use], absolute_sigma=True,
+        bounds=([1e-30, -5.0], [1e30, 1.0]),
+    )
+    F_1550_med, beta_med = popt
+    perr = np.sqrt(np.diag(pcov))
+
+    # Integral: D_Lyα = ∫ (1 - F/F_cont) dλ / (1+z), in rest-frame Å.
+    in_int = (wave_rest >= int_range_A[0]) & (wave_rest <= int_range_A[1])
+    in_int &= (flux_err > 0) & np.isfinite(flux)
+    if in_int.sum() < 3:
+        raise ValueError(
+            f"Only {in_int.sum()} pixels in EW integral range "
+            f"{int_range_A} Å — increase the spectrum coverage."
+        )
+    w_int = wave_rest[in_int]
+    f_int = flux[in_int]
+    fe_int = flux_err[in_int]
+    order = np.argsort(w_int)
+    w_int = w_int[order]
+    f_int = f_int[order]
+    fe_int = fe_int[order]
+
+    rng = np.random.default_rng(seed)
+    D_samples = np.empty(n_mc)
+    for k in range(n_mc):
+        F_1550_k = F_1550_med + perr[0] * rng.standard_normal()
+        beta_k = beta_med + perr[1] * rng.standard_normal()
+        f_k = f_int + fe_int * rng.standard_normal(len(f_int))
+        cont_k = F_1550_k * (w_int / pivot) ** beta_k
+        # Avoid divide-by-zero at the rare positive-continuum dips.
+        with np.errstate(divide="ignore", invalid="ignore"):
+            integrand = np.where(cont_k > 0, 1.0 - f_k / cont_k, 0.0)
+        D_samples[k] = np.trapz(integrand, w_int)
+    D_Lya_med = float(np.median(D_samples))
+    D_Lya_err = float(np.std(D_samples))
+
+    return {
+        "D_Lya": D_Lya_med,
+        "D_Lya_err": D_Lya_err,
+        "beta_UV": float(beta_med),
+        "beta_UV_err": float(perr[1]),
+        "F_1550": float(F_1550_med),
+        "F_1550_err": float(perr[0]),
+        "n_pixels": int(in_int.sum()),
+    }
