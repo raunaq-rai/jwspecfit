@@ -867,6 +867,7 @@ def fit_NHI(
     R: float | None = None,
     mask_lines: bool = True,
     mask_width_A: float = 20.0,
+    mask_lya_emission_width_A: float = 8.0,
     fit_range_A: tuple[float, float] = (1216.0, 3000.0),
     mask_regions_A: list[tuple[float, float]] | None = None,
     fit_lya: bool = False,
@@ -913,11 +914,18 @@ def fit_NHI(
     R : float or None
         Spectral resolving power for LSF convolution.
     mask_lines : bool
-        If True (default), mask known UV emission lines and a window
-        around source Lyα.
+        If True (default), mask known UV emission lines.  Lyα itself
+        and any `abs_*` low-ionisation absorption features are
+        excluded from this mask — the broad Lyα damping wing is the
+        DLA signal, and `abs_*` features are foreground-gas
+        signatures aligned with the DLA.
     mask_width_A : float
-        Half-width of line masks (rest-frame Å).  Default 20 Å is
-        appropriate for NIRSpec PRISM resolution.
+        Half-width of the general emission-line mask (rest-frame Å).
+        Default 20 Å is appropriate for NIRSpec PRISM resolution.
+    mask_lya_emission_width_A : float
+        Half-width of the *narrow* Lyα-emission core mask in
+        rest-frame Å (default 8 Å).  Set this small enough not to eat
+        the damping wing.  Ignored when ``fit_lya=True``.
     fit_range_A : tuple
         Rest-frame fit window (default 1216–3000 Å, matching
         Pollock+26 — Lyα to just below the Balmer break).
@@ -1010,16 +1018,26 @@ def fit_NHI(
     lya_obs = _LAMBDA_LYA_A * (1.0 + z)
 
     # --- Emission line masking ---
+    # Lyα and any low-ionisation absorption (`abs_*`) lines are excluded
+    # from the general mask because: (a) the broad Lyα damping wing is
+    # the actual DLA signal — masking ±20 Å around 1216 Å hides exactly
+    # the pixels that constrain N_HI; (b) `abs_*` features are
+    # foreground neutral-gas signatures aligned with the DLA, not
+    # contamination.  Lyα emission, when present, gets a separate narrow
+    # mask controlled by ``mask_lya_emission_width_A``.
     if mask_lines and not _use_continuum:
-        _exclude = {"Lya"} if fit_lya else None
+        _exclude = {"Lya"}
+        for _name in REST_LINES_A:
+            if _name.startswith("abs_"):
+                _exclude.add(_name)
         line_mask = _mask_emission_lines(
             wave_A, z=z, width_A=mask_width_A, exclude=_exclude,
         )
         if not fit_lya:
-            lya_mask_width = max(mask_width_A, 8.0) * (1.0 + z)
+            lya_em_width = mask_lya_emission_width_A * (1.0 + z)
             line_mask &= (
-                (wave_A < lya_obs - lya_mask_width)
-                | (wave_A > lya_obs + lya_mask_width)
+                (wave_A < lya_obs - lya_em_width)
+                | (wave_A > lya_obs + lya_em_width)
             )
     else:
         line_mask = np.ones(len(wave_A), dtype=bool)
