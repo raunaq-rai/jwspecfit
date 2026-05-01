@@ -9,7 +9,10 @@ from jwspecfit.dla import (
     DLAResult,
     _evaluate_model,
     _mask_emission_lines,
+    compute_D_Lya,
+    fit_NHI,
     tau_DLA,
+    tau_IGM_DW,
     voigt_H,
 )
 
@@ -356,6 +359,138 @@ class TestResolutionConvolution:
 # ============================================================
 # Plot and summary methods
 # ============================================================
+
+class TestPollockJointFit:
+    """Pollock+26-style joint sampler: real posteriors on all 3 parameters."""
+
+    @pytest.fixture(scope="class")
+    def synth_dla(self):
+        """Synthetic clean DLA spectrum with high SNR."""
+        rng = np.random.default_rng(101)
+        wave = np.linspace(1216.0, 2400.0, 800)
+        true_NHI, true_beta, true_logF0 = 22.0, -2.5, -1.0
+        model = _evaluate_model(wave, true_logF0, true_beta, true_NHI,
+                                z=0.0, R=400.0)
+        sigma = float(np.median(model[wave > 1500])) / 30.0
+        flux = model + sigma * rng.standard_normal(len(wave))
+        err = np.full_like(wave, sigma)
+        return dict(wave=wave, flux=flux, err=err,
+                    true_NHI=true_NHI, true_beta=true_beta,
+                    true_logF0=true_logF0)
+
+    def test_joint_recovers_all_three_parameters(self, synth_dla):
+        """Joint fit should give real, non-zero errors on β and F0."""
+        d = synth_dla
+        r = fit_NHI(d["wave"], d["flux"], d["err"], z=0.0, R=400.0,
+                    mask_lines=False, fit_range_A=(1216, 2400),
+                    n_live=300, seed=42)
+        # Real posteriors — errors strictly > 0 (no more zero-by-construction).
+        assert max(r.beta_UV_err) > 0.0, "β_UV error should be a real posterior"
+        assert max(r.log_F0_err) > 0.0, "log_F0 error should be a real posterior"
+        # Recovery within 3σ.
+        assert abs(r.log_NHI - d["true_NHI"]) < 3 * max(r.log_NHI_err) + 0.1
+        assert abs(r.beta_UV - d["true_beta"]) < 3 * max(r.beta_UV_err) + 0.1
+        # And not flagged as upper limit (signal is strong).
+        assert not r.is_upper_limit
+
+
+class TestIGMDampingWing:
+    """Miralda-Escudé IGM damping wing (Pollock+26 / Heintz+25 framework)."""
+
+    def test_tau_monotonic_redward(self):
+        """τ_IGM should monotonically decrease redward of source Lyα."""
+        z_src = 7.0
+        wave = np.linspace(_LAMBDA_LYA_A * (1 + z_src) + 1.0,
+                           1500.0 * (1 + z_src), 100)
+        tau = tau_IGM_DW(wave, x_HI=1.0, z_source=z_src, z_min=5.3)
+        assert np.all(np.isfinite(tau))
+        assert np.all(tau >= 0)
+        assert np.all(np.diff(tau) <= 1e-12), "τ_IGM should decay redward"
+
+    def test_zero_when_x_HI_zero(self):
+        """No IGM contribution when x_HI = 0."""
+        wave = np.linspace(_LAMBDA_LYA_A * 8.5, _LAMBDA_LYA_A * 12.0, 50)
+        tau = tau_IGM_DW(wave, x_HI=0.0, z_source=7.0, z_min=5.3)
+        assert np.allclose(tau, 0.0)
+
+    def test_scales_linearly_with_x_HI(self):
+        """At fixed geometry, τ_IGM scales linearly with x_HI."""
+        wave = np.array([_LAMBDA_LYA_A * (1 + 7.5)])
+        t1 = tau_IGM_DW(wave, x_HI=0.3, z_source=7.0, z_min=5.3)
+        t2 = tau_IGM_DW(wave, x_HI=0.6, z_source=7.0, z_min=5.3)
+        np.testing.assert_allclose(t2, 2.0 * t1, rtol=1e-9)
+
+    def test_fit_recovers_x_HI(self):
+        """A spectrum with strong IGM (x_HI=1) should be recovered."""
+        rng = np.random.default_rng(202)
+        z_src = 7.0
+        wave = np.linspace(1216.0 * (1 + z_src),
+                           2800.0 * (1 + z_src), 1500)
+        true_logF0, true_beta, true_NHI, true_xHI = -0.5, -2.0, 18.5, 1.0
+        m = _evaluate_model(wave, true_logF0, true_beta, true_NHI,
+                            z=z_src, x_HI=true_xHI, R=400.0)
+        sigma = float(np.median(m[wave / (1 + z_src) > 1500])) / 25.0
+        flux = m + sigma * rng.standard_normal(len(wave))
+        err = np.full_like(wave, sigma)
+        r = fit_NHI(wave, flux, err, z=z_src, R=400.0, fit_x_HI=True,
+                    mask_lines=False, fit_range_A=(1216, 2800),
+                    n_live=400, seed=42)
+        assert abs(r.x_HI - true_xHI) < 3 * max(r.x_HI_err) + 0.1
+
+
+class TestUpperLimitFlag:
+    """Pollock+26 reports upper limits when N_HI is unconstrained."""
+
+    def test_pure_power_law_flagged(self):
+        """A pure power-law (no DLA) should set is_upper_limit=True."""
+        rng = np.random.default_rng(303)
+        wave = np.linspace(1216.0, 2400.0, 600)
+        intrinsic = 0.5 * (wave / 1500.0) ** -2.0
+        sigma = float(np.median(intrinsic)) / 30.0
+        flux = intrinsic + sigma * rng.standard_normal(len(wave))
+        err = np.full_like(wave, sigma)
+        r = fit_NHI(wave, flux, err, z=0.0, R=400.0, mask_lines=False,
+                    fit_range_A=(1216, 2400), n_live=200, seed=42)
+        assert r.is_upper_limit
+        # The 95th percentile should be safely below 21 — no spurious DLA.
+        assert r.log_NHI_upper95 < 21.0
+
+
+class TestDLyaStatistic:
+    """Heintz+25 D_Lyα equivalent-width statistic."""
+
+    def test_DLA_gives_positive_DLya(self):
+        """log N_HI = 22 should give D_Lyα ≈ 60 Å (Heintz+25)."""
+        rng = np.random.default_rng(404)
+        wave = np.linspace(1100.0, 2700.0, 1500)
+        m = _evaluate_model(wave, -1.0, -2.0, 22.0, z=0.0, R=400.0)
+        sigma = float(np.median(m[wave > 1500])) / 50.0
+        flux = m + sigma * rng.standard_normal(len(wave))
+        err = np.full_like(wave, sigma)
+        r = compute_D_Lya(wave, flux, err, z=0.0)
+        # Heintz+25 fig 2 shows D_Lyα ≈ 50–70 Å for log N_HI = 22.
+        assert 40.0 < r["D_Lya"] < 80.0
+        assert r["D_Lya_err"] > 0
+        # β recovered close to true value.
+        assert abs(r["beta_UV"] - (-2.0)) < 0.1
+
+    def test_pure_continuum_gives_near_zero_DLya(self):
+        """A pure power-law continuum should give D_Lyα ≈ 0."""
+        rng = np.random.default_rng(505)
+        wave = np.linspace(1180.0, 2700.0, 1500)
+        intrinsic = 0.5 * (wave / 1500.0) ** -2.0
+        sigma = float(np.median(intrinsic)) / 80.0
+        flux = intrinsic + sigma * rng.standard_normal(len(wave))
+        err = np.full_like(wave, sigma)
+        r = compute_D_Lya(wave, flux, err, z=0.0)
+        # Should be small in absolute value relative to the integration window
+        # (1180–1350 Å is 170 Å wide).
+        assert abs(r["D_Lya"]) < 5.0
+
+
+# Helper for tests that need _LAMBDA_LYA_A.
+from jwspecfit.dla import _LAMBDA_LYA_A  # noqa: E402
+
 
 class TestPlot:
     """Test that the plot and summary methods run."""

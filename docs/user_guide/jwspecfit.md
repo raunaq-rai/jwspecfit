@@ -112,60 +112,99 @@ result = jwspecfit.fit_lines(spec, z=6.0, lines=uv_lines)
 
 ## DLA fitting
 
-`jwspecfit.fit_NHI` fits the Lyα damping wing of a damped Lyα
-absorber (DLA) using nested sampling (`dynesty`) with an exact
-Voigt–Hjerting profile, and returns `log(N_HI)`, the UV slope
-`β_UV`, and a continuum normalisation. Install the optional
-dependency first:
+`jwspecfit.fit_NHI` performs a **joint Bayesian fit of the local DLA
+column density and the IGM damping wing**, following the methodology
+of Pollock et al. (2026) Eq. 4:
+
+$$F(\lambda) = \big[F_0 (\lambda/\lambda_\text{piv})^{\beta_\text{UV}}
++ \mathrm{Ly}\alpha(\lambda)\big]
+\;\exp(-\tau_\text{DLA})\;\exp(-\tau_\text{IGM})$$
+
+The posterior over `(log_F0, β_UV, log_NHI)` (and optionally `x_HI`,
+plus a Lyα emission profile) is sampled with `dynesty` nested
+sampling. The Voigt profile is exact (Faddeeva); the IGM term uses
+the Miralda-Escudé (1998) closed form integrated from `igm_z_min`
+(default 5.3, Bosman+22) up to the source redshift.
+
+Install the optional dependency first:
 
 ```bash
 pip install jwspecfit[dla]   # installs dynesty
 ```
 
-A typical call on a stacked rest-frame spectrum (such as a
-`stacking_project` NPZ output):
+### Standard call
 
 ```python
 import jwspecfit
 
-spec = jwspecfit.read_npz(
-    "binned_stack_arrays/birthrate_prism/"
-    "stack_b3myr_steady_Muv-21.0to-19.0_zgt6.0_prism.npz",
-    z=0.0,        # stack is already rest-frame
-    R=400.0,      # effective resolving power of the stack
-)
+spec = jwspecfit.read_npz("stack_zgt6_Muv19_21_prism.npz", z=0.0, R=400.0)
 
 result = jwspecfit.fit_NHI(
-    wave_A=spec.wave_A,
-    flux=spec.flux_ujy,
-    flux_err=spec.err_ujy,
-    z=0.0,
-    fit_range_A=(1100.0, 2000.0),   # rest-frame wavelength window
-    R=spec.R,                        # convolve model with LSF
-    n_live=200,                      # dynesty live points
-    seed=42,
+    spec.wave_A, spec.flux_ujy, spec.err_ujy,
+    z=0.0,                       # 0 for rest-frame stacks
+    R=spec.R,                    # LSF convolution
+    fit_x_HI=False,              # set True for individual z>6 spectra
+    n_live=400, seed=42,
 )
 print(result.summary())
-fig = result.plot()                  # data + best-fit + residuals
+result.plot()
 ```
 
-Useful options:
+The defaults match Pollock+26: priors `log_NHI ∈ [18, 24]`,
+`x_HI ∈ [0, 1]`, `β_UV ∈ [-4, 0]`, `log_F0` auto-centred ±3 dex
+around the data; fit window 1216–3000 Å rest-frame; emission lines
+masked with `mask_width_A=20 Å`; Lyα emission optionally added
+*inside* the exp(−τ) factor.
+
+### Useful options
 
 | Argument          | Purpose                                                       |
 | ----------------- | ------------------------------------------------------------- |
-| `z`               | Source redshift; pass `0.0` for rest-frame stacks             |
-| `fit_range_A`     | Rest-frame wavelength window used in the likelihood           |
-| `mask_lines`      | Mask known emission lines automatically                       |
-| `mask_regions_A`  | Extra rest-frame regions to ignore (e.g. residuals, IGM)      |
-| `Av`, `dust_law`  | Pre-correct the spectrum for foreground attenuation           |
-| `continuum`       | Fit to a smooth moving-average continuum (line-free wings)    |
-| `fit_lya`         | Jointly fit a Lyα emission profile with the DLA absorption    |
-| `n_live`, `seed`  | dynesty sampling controls                                     |
+| `fit_x_HI`        | Sample IGM neutral fraction jointly (Pollock+26 z > 6 mode)    |
+| `igm_z_min`       | Lower-z bound of the IGM integration (default 5.3)            |
+| `b_kms`           | Voigt Doppler parameter (default 30 km s⁻¹; insensitive at log N_HI > 20.3) |
+| `prior_log_NHI`, `prior_x_HI`, `prior_beta_UV`, `prior_log_F0` | Override the uniform prior bounds |
+| `mask_lines`, `mask_width_A` | Default `True`, 20 Å (PRISM-appropriate)              |
+| `fit_range_A`     | Default (1216, 3000) Å rest-frame                             |
+| `mask_regions_A`  | Extra rest-frame regions to ignore                             |
+| `Av`, `dust_law`  | Pre-correct the spectrum for foreground attenuation            |
+| `fit_lya`, `lya_params` | Joint or fixed Lyα emission profile                       |
+| `n_live`, `dlogz`, `seed` | dynesty controls                                       |
 
-The returned `DLAResult` exposes posteriors via `result.samples`
-(a dict of arrays for `log_NHI`, `beta_UV`, `log_F0`), Bayesian
-evidence as `result.log_evidence`, and a built-in `result.plot()`
-method.
+The returned `DLAResult` carries posterior samples for every free
+parameter (`result.samples` is a dict of arrays), median ± 16/84 %
+percentiles, log-evidence, and a 95th-percentile **upper limit** on
+`log_NHI` (`result.log_NHI_upper95`, `result.is_upper_limit=True`)
+for spectra where the wing is unconstrained — Pollock+26 do exactly
+this for 21 of their 48 sources.
+
+### D_Lyα equivalent-width statistic (Heintz+25)
+
+When the N_HI–β degeneracy bites at low spectral resolution, the more
+robust diagnostic is the rest-frame equivalent width of the Lyα
+absorption integrated 1180–1350 Å (Heintz+25, Eq. 1). It is
+β-prior–independent to first order and directly comparable across
+the high-z DLA literature.
+
+```python
+DLya = jwspecfit.compute_D_Lya(spec.wave_A, spec.flux_ujy, spec.err_ujy, z=0.0)
+print(f"D_Lyα = {DLya['D_Lya']:.1f} ± {DLya['D_Lya_err']:.1f} Å")
+# Interpretation (Heintz+25 §3.1):
+#   D_Lyα < 0    → Lyα emitter
+#   ~0 to 35 Å   → weak / no absorption
+#   35 to 50 Å   → IGM-dominated regime
+#   > 50 Å       → DLA-dominated (log N_HI ≳ 21.5)
+```
+
+### Caveats at PRISM resolution
+
+The N_HI–β posterior covariance is **r ≈ −0.96** at PRISM R~100
+(Keating+25), so log N_HI shifts by ~1 dex when the β prior is
+tightened from `[-4, 0]` to a star-forming-galaxy range like
+`[-3, -1.5]`. For a stack at z > 6 with PRISM data, **report D_Lyα
+as the primary statistic** and treat any specific log N_HI as a
+prior-conditioned posterior. Robust column densities require
+medium-resolution gratings (G140M / G235M, R ≳ 1000).
 
 ## Plotting
 

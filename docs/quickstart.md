@@ -113,8 +113,8 @@ print(abund.NO)               # log(N/O)
 
 ## 5. DLA fitting (optional)
 
-For high-redshift spectra showing damped Lyα absorption, fit the
-column density via nested sampling:
+For high-redshift spectra with damped Lyα absorption, fit the column
+density via Pollock+26-style joint nested sampling:
 
 ```bash
 pip install jwspecfit[dla]
@@ -122,20 +122,21 @@ pip install jwspecfit[dla]
 
 ```python
 result = jwspecfit.fit_NHI(
-    wave_A=spec.wave_A,
-    flux=spec.flux_ujy,
-    flux_err=spec.err_ujy,
-    z=0.0,                       # 0 for rest-frame stacks
-    fit_range_A=(1100., 2000.),
+    spec.wave_A, spec.flux_ujy, spec.err_ujy,
+    z=0.0,              # 0 for rest-frame stacks
     R=spec.R,
-    n_live=200,
+    fit_x_HI=False,     # True at z > 6 to add the IGM damping wing
 )
-print(result.summary())          # log(N_HI), beta_UV, Sigma_HI, log(Z)
-result.plot()
+print(result.summary())       # joint posteriors on log_NHI, β, F0, [x_HI]
+
+DLya = jwspecfit.compute_D_Lya(spec.wave_A, spec.flux_ujy, spec.err_ujy, z=0.0)
+print(f"D_Lyα = {DLya['D_Lya']:.1f} ± {DLya['D_Lya_err']:.1f} Å")  # Heintz+25
 ```
 
-See the [user guide](user_guide/jwspecfit.md#dla-fitting) for the full
-option list.
+The Heintz+25 D_Lyα equivalent-width statistic is more robust than
+log N_HI at PRISM resolution where N_HI is degenerate with β.
+See the [user guide](user_guide/jwspecfit.md#dla-fitting) for the
+full option list and caveats.
 
 ## Quick interactive view
 
