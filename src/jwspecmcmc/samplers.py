@@ -488,13 +488,16 @@ def run_nuts(
     rng_key = jax.random.PRNGKey(seed)
     mcmc.run(rng_key)
 
-    # Extract samples.
-    samples = mcmc.get_samples()["params"]  # (n_samples * n_chains, n_dim)
-    flat_chains = np.array(samples)
+    # Extract samples.  ``group_by_chain=True`` keeps the per-chain axis,
+    # which is needed for Gelman--Rubin R-hat, ESS, and trace plots.
+    samples_by_chain = mcmc.get_samples(group_by_chain=True)["params"]
+    chains = np.asarray(samples_by_chain)               # (n_chains, n_samples, n_dim)
+    flat_chains = chains.reshape(-1, chains.shape[-1])  # (n_chains * n_samples, n_dim)
 
     # Compute log-probabilities for each sample.
     log_prob_fn = jax.jit(lambda p: log_likelihood_jax(p) + log_prior_norm)
     flat_log_prob = np.array(jax.vmap(log_prob_fn)(jnp.array(flat_chains)))
+    log_prob_chains = flat_log_prob.reshape(chains.shape[:2])  # (n_chains, n_samples)
 
     # Extract diagnostics.
     extra_fields = mcmc.get_extra_fields()
@@ -510,8 +513,8 @@ def run_nuts(
     return {
         "flat_chains": flat_chains,
         "flat_log_prob": flat_log_prob,
-        "chains": None,
-        "log_prob_chains": None,
+        "chains": chains,
+        "log_prob_chains": log_prob_chains,
         "n_burn": 0,
         "sampler_name": "nuts",
         "sampler_meta": {

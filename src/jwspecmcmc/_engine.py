@@ -805,7 +805,7 @@ def _fit_lines_mcmc(
         )
 
     # ------------------------------------------------------------------
-    # 11. Convergence diagnostics (emcee only)
+    # 11. Convergence diagnostics (emcee + NUTS; nautilus has no chains)
     # ------------------------------------------------------------------
     convergence: dict[str, Any] = {}
     chains_raw = sampler_result.get("chains")

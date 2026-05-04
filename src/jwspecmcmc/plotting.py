@@ -119,10 +119,13 @@ def plot_traces(
     Raises
     ------
     ValueError
-        If chains are not available (e.g. nautilus result).
+        If per-chain samples are not available (e.g. nautilus result).
     """
     if result.chains is None:
-        raise ValueError("Trace plots require walker chains (not available for nautilus).")
+        raise ValueError(
+            "Trace plots require per-chain samples; the nautilus sampler "
+            "does not produce them. Use sampler='emcee' or 'nuts' instead."
+        )
 
     chains = result.chains  # (n_walkers, n_steps, n_dim)
     n_walkers, n_steps, n_dim = chains.shape
