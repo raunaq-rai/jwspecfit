@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+import jwspecfit
 
 from jwspecfit import fit_with_broad, read_fits
 from jwspecfit.broad import BroadFitResult, _balmer_pixel_mask
