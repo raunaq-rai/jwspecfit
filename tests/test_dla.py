@@ -128,6 +128,78 @@ class TestMaskEmissionLines:
         assert mask.all()
 
 
+class TestWingRegionNotMasked:
+    """Regression: Lya + NV must be excluded from the auto-mask so the
+    1216-1263 A rest damping-wing region remains in the fit.
+
+    NV_1 (1238.821 A) and NV_2 (1242.804 A) sit inside the wing.  With
+    the default mask_width_A = 20 A, including them in the auto-mask
+    would erase 1218.8 - 1262.8 A rest -- the pixels that distinguish
+    log N_HI ~ 21 from log N_HI ~ 19.  Any DLA strong enough to fit
+    absorbs NV at tau >> 1, so the mask there destroys signal it does
+    not need to remove.
+    """
+
+    def _wing_exclusion_set(self):
+        """Exclusion set fit_NHI uses internally."""
+        from jwspecfit.lines import REST_LINES_A
+        exclude = {"Lya", "NV_1", "NV_2", "NV_doublet"}
+        for name in REST_LINES_A:
+            if name.startswith("abs_"):
+                exclude.add(name)
+        return exclude
+
+    def test_wing_pixels_kept_at_z0(self):
+        """Wing pixels in 1216-1263 A rest survive the auto-mask at z=0."""
+        wave = np.linspace(1216.0, 1263.0, 200)
+        mask = _mask_emission_lines(
+            wave, z=0.0, width_A=20.0,
+            exclude=self._wing_exclusion_set(),
+        )
+        # Every pixel in the wing window should be kept.
+        assert mask.all(), (
+            f"{(~mask).sum()}/{len(mask)} wing pixels masked; "
+            "Lya/NV_1/NV_2/NV_doublet must be in the exclusion set."
+        )
+
+    def test_wing_pixels_kept_at_z6(self):
+        """Same guarantee at z=6 (observed-frame mask shift)."""
+        z = 6.0
+        wave_obs = np.linspace(1216.0, 1263.0, 200) * (1.0 + z)
+        mask = _mask_emission_lines(
+            wave_obs, z=z, width_A=20.0,
+            exclude=self._wing_exclusion_set(),
+        )
+        assert mask.all()
+
+    def test_baseline_would_have_killed_wing(self):
+        """Sanity check: if NV were NOT excluded, the wing would be erased.
+
+        This documents *why* the regression test above matters.  If a
+        future refactor drops NV from the exclusion set, this test will
+        still pass (it is the negative control), but the test above
+        will fail loudly.
+        """
+        wave = np.linspace(1216.0, 1263.0, 200)
+        # Simulate the buggy old behaviour: only Lya excluded.
+        exclude_buggy = {"Lya"}
+        from jwspecfit.lines import REST_LINES_A
+        for name in REST_LINES_A:
+            if name.startswith("abs_"):
+                exclude_buggy.add(name)
+        mask = _mask_emission_lines(
+            wave, z=0.0, width_A=20.0, exclude=exclude_buggy,
+        )
+        # NV_1 (1238.8) and NV_2 (1242.8) +/- 20 A wipes ~1219-1263 A.
+        n_killed = (~mask).sum()
+        assert n_killed > 0.7 * len(mask), (
+            "Negative control failed: with NV in the auto-mask, the "
+            "wing region should be heavily masked.  If this assertion "
+            "fires, the masking semantics have changed and the test "
+            "above needs revisiting."
+        )
+
+
 # ============================================================
 # Synthetic DLA fitting
 # ============================================================

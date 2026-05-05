@@ -914,11 +914,13 @@ def fit_NHI(
     R : float or None
         Spectral resolving power for LSF convolution.
     mask_lines : bool
-        If True (default), mask known UV emission lines.  Lyα itself
-        and any `abs_*` low-ionisation absorption features are
-        excluded from this mask — the broad Lyα damping wing is the
-        DLA signal, and `abs_*` features are foreground-gas
-        signatures aligned with the DLA.
+        If True (default), mask known UV emission lines.  Lyα, the
+        NV λλ1238.8, 1242.8 doublet, and any `abs_*` low-ionisation
+        absorption features are excluded from this mask: Lyα and NV
+        sit inside the damping wing (1216–1263 Å rest) where the N_HI
+        constraint lives, and any DLA strong enough to fit absorbs NV
+        at τ ≫ 1 (no emission left to contaminate); `abs_*` features
+        are foreground-gas signatures aligned with the DLA.
     mask_width_A : float
         Half-width of the general emission-line mask (rest-frame Å).
         Default 20 Å is appropriate for NIRSpec PRISM resolution.
@@ -1018,15 +1020,26 @@ def fit_NHI(
     lya_obs = _LAMBDA_LYA_A * (1.0 + z)
 
     # --- Emission line masking ---
-    # Lyα and any low-ionisation absorption (`abs_*`) lines are excluded
-    # from the general mask because: (a) the broad Lyα damping wing is
-    # the actual DLA signal — masking ±20 Å around 1216 Å hides exactly
-    # the pixels that constrain N_HI; (b) `abs_*` features are
-    # foreground neutral-gas signatures aligned with the DLA, not
-    # contamination.  Lyα emission, when present, gets a separate narrow
-    # mask controlled by ``mask_lya_emission_width_A``.
+    # Lyα, NV, and any low-ionisation absorption (`abs_*`) lines are
+    # excluded from the general mask because:
+    #   (a) the broad Lyα damping wing is the actual DLA signal —
+    #       masking ±20 Å around 1216 Å hides exactly the pixels that
+    #       constrain N_HI;
+    #   (b) NV λλ1238.8, 1242.8 sits at Δλ_rest ≈ 23–27 Å from Lyα,
+    #       inside the wing.  Any DLA strong enough to leave a
+    #       measurable absorption signature (log N_HI ≳ 20) absorbs the
+    #       NV doublet at τ ≫ 1 — there is no NV emission left to
+    #       contaminate, so masking it would only destroy the
+    #       wing-discriminating pixels (cf. fitter table: log N_HI = 21
+    #       gives a 40% wing depth at +30 Å rest, so masking ±20 Å
+    #       around NV erases the 1219–1263 Å window that distinguishes
+    #       log N_HI = 20 from 22);
+    #   (c) `abs_*` features are foreground neutral-gas signatures
+    #       aligned with the DLA, not contamination.
+    # Lyα emission, when present, gets a separate narrow mask controlled
+    # by ``mask_lya_emission_width_A``.
     if mask_lines and not _use_continuum:
-        _exclude = {"Lya"}
+        _exclude = {"Lya", "NV_1", "NV_2", "NV_doublet"}
         for _name in REST_LINES_A:
             if _name.startswith("abs_"):
                 _exclude.add(_name)
