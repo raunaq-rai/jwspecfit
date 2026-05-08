@@ -229,18 +229,25 @@ def tau_DLA(
     """
     NHI = 10.0 ** log_NHI
 
-    # Doppler width in frequency space.
+    # The Voigt absorption profile is a property of the absorber's rest
+    # frame.  An observed-frame photon at wave_A interacts with the gas
+    # at rest-frame wavelength wave_A / (1+z), so we evaluate everything
+    # in the rest frame of the gas.  Using observed-frame frequencies
+    # would inflate the wing optical depth by (1+z)^2 because both
+    # sigma_0 ~ 1/Delta_nu_D and a (= gamma/(4 pi Delta_nu_D)) scale
+    # with (1+z) when Delta_nu_D is built from the observed-frame
+    # Lyalpha frequency.
     b_cms = b_kms * 1e5  # km/s -> cm/s
-    lambda_0_cm = _LAMBDA_LYA_A * (1.0 + z) * 1e-8  # observed Lya in cm
-    nu_0 = _C_CGS / lambda_0_cm
-    delta_nu_D = (b_cms / _C_CGS) * nu_0
+    lambda_0_cm = _LAMBDA_LYA_A * 1e-8                    # rest-frame Lya in cm
+    nu_0 = _C_CGS / lambda_0_cm                            # rest-frame Lya freq
+    delta_nu_D = (b_cms / _C_CGS) * nu_0                   # rest-frame Doppler width
 
-    # Voigt damping parameter.
+    # Voigt damping parameter (rest-frame).
     a = _GAMMA_ALPHA / (4.0 * np.pi * delta_nu_D)
 
-    # Frequency offset u = (nu - nu_0) / delta_nu_D.
-    wave_cm = np.asarray(wave_A) * 1e-8
-    nu = _C_CGS / wave_cm
+    # Rest-frame frequency offset of each pixel.
+    wave_rest_cm = np.asarray(wave_A) / (1.0 + z) * 1e-8
+    nu = _C_CGS / wave_rest_cm
     u = (nu - nu_0) / delta_nu_D
 
     # Line-centre cross section.
