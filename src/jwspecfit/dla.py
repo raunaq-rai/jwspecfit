@@ -493,6 +493,9 @@ class DLAResult:
     # --- Upper-limit reporting for unconstrained sources ---
     log_NHI_upper95: float = 0.0
     is_upper_limit: bool = False
+    # --- Continuum pivot wavelength used in F0 * (lam/lam_pivot)^beta_UV ---
+    # None means the legacy default 1500 * (1+z) Å is in effect.
+    lam_pivot_A: float | None = None
 
     def summary(self) -> str:
         """Return a formatted summary string."""
@@ -614,7 +617,10 @@ class DLAResult:
         )
 
         # --- Component decomposition ---
-        lam_pivot = _LAMBDA_PIVOT_A * (1.0 + self.z)
+        lam_pivot = (
+            self.lam_pivot_A if self.lam_pivot_A is not None
+            else _LAMBDA_PIVOT_A * (1.0 + self.z)
+        )
         continuum = 10.0 ** self.log_F0 * (self.wave_fit / lam_pivot) ** self.beta_UV
         lya_obs = _LAMBDA_LYA_A * (1.0 + self.z)
         _R = getattr(self, '_R', None)
@@ -797,6 +803,7 @@ def _evaluate_model(
     lya_ujy_func: object | None = None,
     lya_free_params: tuple[float, float, float] | None = None,
     emission_lines: list[tuple[float, float, float]] | None = None,
+    lam_pivot_A: float | None = None,
 ) -> np.ndarray:
     """Evaluate the joint DLA + IGM damping-wing model.
 
@@ -850,7 +857,7 @@ def _evaluate_model(
     from .models import asymmetric_gaussian
 
     F0 = 10.0 ** log_F0
-    lam_pivot = _LAMBDA_PIVOT_A * (1.0 + z)
+    lam_pivot = lam_pivot_A if lam_pivot_A is not None else _LAMBDA_PIVOT_A * (1.0 + z)
     continuum = F0 * (wave_A / lam_pivot) ** beta_UV
 
     # Build the intrinsic spectrum: continuum + (optional) Lyα emission +
@@ -918,6 +925,7 @@ def fit_NHI(
     fit_lya: bool = False,
     lya_params: np.ndarray | list | None = None,
     emission_lines: list[tuple[float, float, float]] | None = None,
+    lam_pivot_A: float | None = None,
     prior_log_NHI: tuple[float, float] = (18.0, 24.0),
     prior_x_HI: tuple[float, float] = (0.0, 1.0),
     prior_beta_UV: tuple[float, float] = (-4.0, 0.0),
@@ -1179,6 +1187,7 @@ def fit_NHI(
             lya_ujy_func=_lya_ujy_func if not fit_lya else None,
             lya_free_params=lya_free,
             emission_lines=emission_lines,
+            lam_pivot_A=lam_pivot_A,
         )
         resid = f - m
         return -0.5 * float(np.sum(resid * resid * inv_var))
@@ -1243,6 +1252,7 @@ def fit_NHI(
         lya_ujy_func=_lya_ujy_func if not fit_lya else None,
         lya_free_params=lya_free_best,
         emission_lines=emission_lines,
+        lam_pivot_A=lam_pivot_A,
     )
 
     log_evidence = float(results.logz[-1])
@@ -1273,6 +1283,7 @@ def fit_NHI(
         igm_z_min=igm_z_min,
         log_NHI_upper95=log_NHI_upper95,
         is_upper_limit=is_upper_limit,
+        lam_pivot_A=lam_pivot_A,
     )
     result._R = R
     return result
