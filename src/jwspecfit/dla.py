@@ -727,6 +727,12 @@ class DLAResult:
         labels = [r"$\log(N_{\rm HI}/\mathrm{cm}^{-2})$"]
         truths = [self.log_NHI]
 
+        # Include x_HI if it was sampled (i.e. not fixed at 0).
+        if self.fit_x_HI and "x_HI" in self.samples and np.std(self.samples["x_HI"]) > 1e-10:
+            cols.append(self.samples["x_HI"])
+            labels.append(r"$x_{\rm HI}$")
+            truths.append(self.x_HI)
+
         # Only include beta/F0 if they have a real posterior (not fixed).
         beta_samples = self.samples["beta_UV"]
         if np.std(beta_samples) > 1e-10:
