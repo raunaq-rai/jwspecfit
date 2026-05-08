@@ -269,7 +269,7 @@ def tau_DLA(
 def _convolve_resolution(
     wave_A: np.ndarray,
     flux: np.ndarray,
-    R: float,
+    R,
 ) -> np.ndarray:
     """Convolve a spectrum with a Gaussian LSF at resolving power R.
 
@@ -279,32 +279,62 @@ def _convolve_resolution(
         Wavelength array (must be uniformly or near-uniformly spaced).
     flux : np.ndarray
         Flux array to convolve.
-    R : float
-        Spectral resolving power (lambda / FWHM).
+    R : float, callable, or array_like
+        Spectral resolving power (λ / FWHM).  If a callable, it is
+        invoked as ``R(lam_um)`` (wavelength in microns) and must
+        return an array the same shape as the input.  If an array,
+        it must already be evaluated on ``wave_A``.  If a scalar,
+        a single Gaussian kernel at the median wavelength is used.
 
     Returns
     -------
     np.ndarray
         Convolved flux array (same length as input).
     """
-    # Median pixel scale.
+    wave_A = np.asarray(wave_A, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+
+    # Resolve R into either a scalar or a per-pixel array.
+    if callable(R):
+        R_arr = np.asarray(R(wave_A * 1e-4), dtype=float)
+    elif np.isscalar(R):
+        R_arr = None
+    else:
+        R_arr = np.asarray(R, dtype=float)
+        if R_arr.shape != wave_A.shape:
+            raise ValueError(
+                "R array must have same shape as wave_A "
+                f"({R_arr.shape} != {wave_A.shape})"
+            )
+
+    if R_arr is None:
+        # Single-kernel fast path (constant R).
+        dlam = np.median(np.diff(wave_A))
+        lam_mid = np.median(wave_A)
+        sigma_A = (lam_mid / float(R)) / 2.3548
+        sigma_pix = sigma_A / dlam
+        hw = int(4.0 * sigma_pix) + 1
+        x = np.arange(-hw, hw + 1)
+        kernel = np.exp(-0.5 * (x / sigma_pix) ** 2)
+        kernel /= kernel.sum()
+        padded = np.pad(flux, hw, mode="edge")
+        convolved = np.convolve(padded, kernel, mode="same")
+        return convolved[hw:-hw]
+
+    # Wavelength-dependent kernel: build a per-pixel Gaussian and apply.
+    sigma_A = (wave_A / R_arr) / 2.3548
     dlam = np.median(np.diff(wave_A))
-    # FWHM at the midpoint wavelength.
-    lam_mid = np.median(wave_A)
-    fwhm_A = lam_mid / R
-    sigma_A = fwhm_A / 2.3548  # FWHM -> sigma
-
-    # Kernel half-width in pixels.
-    sigma_pix = sigma_A / dlam
-    hw = int(4.0 * sigma_pix) + 1
-    x = np.arange(-hw, hw + 1)
-    kernel = np.exp(-0.5 * (x / sigma_pix) ** 2)
-    kernel /= kernel.sum()
-
-    # Pad edges to avoid convolution artifacts.
-    padded = np.pad(flux, hw, mode="edge")
-    convolved = np.convolve(padded, kernel, mode="same")
-    return convolved[hw:-hw]
+    sigma_max = float(np.max(sigma_A))
+    hw = int(4.0 * sigma_max / dlam) + 1
+    out = np.empty_like(flux)
+    pad = np.pad(flux, hw, mode="edge")
+    # Offsets in wavelength relative to each pixel (uniform grid assumed).
+    offsets = np.arange(-hw, hw + 1) * dlam
+    for i in range(len(wave_A)):
+        kernel = np.exp(-0.5 * (offsets / sigma_A[i]) ** 2)
+        kernel /= kernel.sum()
+        out[i] = np.dot(pad[i:i + 2 * hw + 1], kernel)
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -760,12 +790,13 @@ def _evaluate_model(
     beta_UV: float,
     log_NHI: float,
     z: float,
-    R: float | None = None,
+    R=None,
     b_kms: float = _B_DEFAULT_KMS,
     x_HI: float = 0.0,
     igm_z_min: float = _IGM_Z_MIN_DEFAULT,
     lya_ujy_func: object | None = None,
     lya_free_params: tuple[float, float, float] | None = None,
+    emission_lines: list[tuple[float, float, float]] | None = None,
 ) -> np.ndarray:
     """Evaluate the joint DLA + IGM damping-wing model.
 
@@ -822,7 +853,9 @@ def _evaluate_model(
     lam_pivot = _LAMBDA_PIVOT_A * (1.0 + z)
     continuum = F0 * (wave_A / lam_pivot) ** beta_UV
 
-    # Build the intrinsic spectrum: continuum + (optional) Lyα emission.
+    # Build the intrinsic spectrum: continuum + (optional) Lyα emission +
+    # (optional) fixed Gaussian emission lines (Pollock+26 Eq. 4 convention:
+    # the lines are added *before* DLA+IGM attenuation).
     intrinsic = continuum.copy()
     if lya_ujy_func is not None:
         intrinsic = intrinsic + lya_ujy_func(wave_A)
@@ -832,6 +865,11 @@ def _evaluate_model(
         mu = _LAMBDA_LYA_A * (1.0 + z)
         lya_flam = asymmetric_gaussian(wave_A, A_peak, mu, sigma, alpha)
         intrinsic = intrinsic + _flam_to_ujy(lya_flam, wave_A * 1e-4)
+    if emission_lines is not None:
+        for A_peak, mu_obs, sigma_obs in emission_lines:
+            intrinsic = intrinsic + A_peak * np.exp(
+                -0.5 * ((wave_A - mu_obs) / sigma_obs) ** 2
+            )
 
     # DLA + IGM attenuation (Pollock+26 Eq. 4).
     tau_total = tau_DLA(wave_A, log_NHI, z=z, b_kms=b_kms)
@@ -871,7 +909,7 @@ def fit_NHI(
     Av: float = 0.0,
     dust_law: str = "cardelli",
     Rv: float = 3.1,
-    R: float | None = None,
+    R=None,
     mask_lines: bool = True,
     mask_width_A: float = 20.0,
     mask_lya_emission_width_A: float = 8.0,
@@ -879,6 +917,7 @@ def fit_NHI(
     mask_regions_A: list[tuple[float, float]] | None = None,
     fit_lya: bool = False,
     lya_params: np.ndarray | list | None = None,
+    emission_lines: list[tuple[float, float, float]] | None = None,
     prior_log_NHI: tuple[float, float] = (18.0, 24.0),
     prior_x_HI: tuple[float, float] = (0.0, 1.0),
     prior_beta_UV: tuple[float, float] = (-4.0, 0.0),
@@ -1139,6 +1178,7 @@ def fit_NHI(
             x_HI=x_HI, igm_z_min=igm_z_min,
             lya_ujy_func=_lya_ujy_func if not fit_lya else None,
             lya_free_params=lya_free,
+            emission_lines=emission_lines,
         )
         resid = f - m
         return -0.5 * float(np.sum(resid * resid * inv_var))
@@ -1202,6 +1242,7 @@ def fit_NHI(
         x_HI=x_HI_med, igm_z_min=igm_z_min,
         lya_ujy_func=_lya_ujy_func if not fit_lya else None,
         lya_free_params=lya_free_best,
+        emission_lines=emission_lines,
     )
 
     log_evidence = float(results.logz[-1])

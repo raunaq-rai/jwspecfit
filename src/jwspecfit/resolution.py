@@ -15,16 +15,21 @@ import numpy as np
 _FWHM_TO_SIGMA = 1.0 / 2.3548200
 
 
-def R_prism(lam_um: np.ndarray) -> np.ndarray:
-    """Resolving power R(λ) for NIRSpec PRISM/CLEAR.
+def R_prism(lam_um: np.ndarray, post_launch: bool = True) -> np.ndarray:
+    """Resolving power R(λ) for NIRSpec PRISM/CLEAR (Jakobsen+22 Fig. 6).
 
-    Heuristic polynomial approximation calibrated against the
-    NIRSpec instrument model.  Clipped to [30, 300].
+    Tabulated values from Jakobsen et al. 2022 (A&A 661, A80, Fig. 6 —
+    pre-launch instrument-model curve), interpolated linearly in λ.
+    When *post_launch=True* (default), the curve is multiplied by 1.3,
+    the correction factor adopted by Pollock+26 / de Graaff+25 to
+    reflect the post-launch on-orbit performance.
 
     Parameters
     ----------
     lam_um : array_like
         Wavelength in microns.
+    post_launch : bool
+        If ``True`` (default), apply the 1.3× post-launch correction.
 
     Returns
     -------
@@ -32,9 +37,19 @@ def R_prism(lam_um: np.ndarray) -> np.ndarray:
         Resolving power R at each wavelength.
     """
     lam_um = np.asarray(lam_um, dtype=float)
-    x = lam_um - 1.0
-    R = 50.0 + 50.0 * x + 15.0 * x**2
-    return np.clip(R, 30.0, 300.0)
+    # Jakobsen+22 Fig. 6 pre-launch PRISM curve.
+    _LAM_TBL = np.array([
+        0.60, 0.70, 0.80, 0.90, 1.00, 1.20, 1.40, 1.60, 1.80,
+        2.00, 2.40, 2.80, 3.20, 3.60, 4.00, 4.40, 4.80, 5.20, 5.30,
+    ])
+    _R_TBL = np.array([
+        38.0, 35.0, 32.0, 30.0, 28.0, 26.0, 30.0, 36.0, 44.0,
+        53.0, 73.0, 96.0, 121.0, 148.0, 178.0, 211.0, 248.0, 287.0, 297.0,
+    ])
+    R = np.interp(lam_um, _LAM_TBL, _R_TBL)
+    if post_launch:
+        R = 1.3 * R
+    return R
 
 
 def R_grating(name: str) -> float:
