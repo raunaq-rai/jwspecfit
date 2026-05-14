@@ -41,12 +41,11 @@ DEFAULT_LINES = [
     "Lya", "CIV_doublet", "HEII_1640", "CIII]",
     "OII_doublet", "NeIII_3869",
     "HBETA", "OIII_4959", "OIII_5007",
-    "Ha", "NII_6585",
-    "SII_6718", "SII_6732",
+    "Ha",
 ]
 ```
 
-All names are keys of `REST_LINES_A`. User can override with `lines=[...]`.
+All names are keys of `REST_LINES_A`. [NII] and [SII] are deliberately excluded because their close blending with Hα at PRISM resolution and possible absorption contamination at high z make them weaker anchors for z determination than the listed lines. User can override with `lines=[...]`.
 
 ### `RedshiftResult` (dataclass)
 

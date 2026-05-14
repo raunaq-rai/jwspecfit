@@ -40,9 +40,6 @@ DEFAULT_LINES: list[str] = [
     "OIII_4959",
     "OIII_5007",
     "Ha",
-    "NII_6585",
-    "SII_6718",
-    "SII_6732",
 ]
 
 

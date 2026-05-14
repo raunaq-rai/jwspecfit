@@ -197,15 +197,22 @@ class TestDecisiveness:
 
 class TestAliasing:
     def test_ha_nii_aliasing_peak_present(self):
-        """Halpha + [NII] alone admits an alias as [OIII] 4959/5007."""
-        # Build a G395M spectrum with only Halpha + [NII]6585 at z=6.1052.
-        # Lambda(Ha at z=6.1052) ~ 4.66 um, lambda([NII] at z=6.1052) ~ 4.69 um.
-        # These could be misread as [OIII]4959/5007 at some other z.
+        """Halpha + [NII] alone admits an alias as [OIII] 4959/5007.
+
+        [NII] is not in DEFAULT_LINES (deliberately, since it blends with
+        Halpha at PRISM resolution), so we pass it explicitly here.  This
+        is the classic spectroscopic z aliasing failure mode: a doublet at
+        the wrong rest-frame ratio can mimic [OIII] at some other z.
+        """
         spec = _make_spec(
             6.1052, grating="G395M",
             line_amps={"Ha": 4.0, "NII_6585": 0.8},
         )
-        res = fit_redshift(spec, verbose=False, refine_dchi2=50.0)
+        res = fit_redshift(
+            spec,
+            lines=["Ha", "NII_6585", "HBETA", "OIII_4959", "OIII_5007"],
+            verbose=False, refine_dchi2=50.0,
+        )
         # There should be more than one peak (truth + alias).
         assert len(res.peaks) >= 2
         # Truth is the strongest.
