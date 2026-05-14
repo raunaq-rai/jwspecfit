@@ -20,8 +20,8 @@ authors:
     given-names: "Raunaq"
     affiliation: "UCL Department of Physics & Astronomy"
     email: "raunaq.rai.22@ucl.ac.uk"
-version: "1.0.1"
-date-released: "2026-04-21"
+version: "1.0.2"
+date-released: "2026-05-14"
 license: MIT
 repository-code: "https://github.com/raunaq-rai/jwspecfit"
 url: "https://jwspecfit.readthedocs.io/"
