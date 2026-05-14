@@ -24,7 +24,7 @@ from scipy.optimize import lsq_linear
 
 from .io import Spectrum
 from .lines import REST_LINES_A
-from .resolution import resolve_R
+from .resolution import R_from_pixels, resolve_R
 
 logger = logging.getLogger(__name__)
 
@@ -174,17 +174,40 @@ def _evaluate_prior(prior, z: np.ndarray) -> np.ndarray:
 # --- Coarse-grid step ------------------------------------------------------
 
 
+def _resolve_R_callable(spec: Spectrum) -> Callable[[np.ndarray], np.ndarray]:
+    """Return ``R(lam_um) -> ndarray`` using the best resolution info available.
+
+    Fallback chain:
+      1. ``spec.R`` (scalar or callable) if set
+      2. ``spec.grating`` (Jakobsen+22 PRISM curve, or constant for medium /
+         high-res gratings) if set
+      3. :func:`R_from_pixels` — estimate from the data's own pixel spacing
+         (lambda / (2 * Delta_lambda))
+
+    This lets ``fit_redshift`` work on stacked or co-added spectra where
+    ``spec.grating`` is ``None``, by reading the resolution off the data
+    itself.  When grating/R are both set, the package's calibrated R is
+    used unchanged.
+    """
+    if spec.R is not None or spec.grating is not None:
+        return lambda lam_um: resolve_R(lam_um, grating=spec.grating, R=spec.R)
+    return R_from_pixels(spec.wave_um)
+
+
 def _default_dz_coarse(spec: Spectrum) -> float:
     """Coarse-grid step in z, tied to the spectral resolving power.
 
-    Picks dz so that a line moves roughly half a resolution element per
-    step at the middle of the band.  Floored at 1e-3 so that high-R
-    gratings do not force tens of thousands of grid evaluations.
+    Picks ``dz = 0.5 / R`` so that a line moves about 1.18 sigma of the LSF
+    per coarse step (Nyquist sampling of the per-line chi^2 peak).  Floored
+    at 1e-4 to keep G395H from being undersampled while still bounding the
+    grid size on extremely high-R user-supplied R callables.  The R used
+    here is the same one :func:`_resolve_R_callable` would use, so
+    grid-step and per-z line sigma are always consistent.
     """
     lam_mid_um = 0.5 * (spec.wave_um.min() + spec.wave_um.max())
-    R_mid = resolve_R(np.array([lam_mid_um]),
-                       grating=spec.grating, R=spec.R)[0]
-    return max(1.0e-3, 0.5 / float(R_mid))
+    R_call = _resolve_R_callable(spec)
+    R_mid = float(np.asarray(R_call(np.array([lam_mid_um])))[0])
+    return max(1.0e-4, 0.5 / R_mid)
 
 
 # --- Per-z chi^2 -----------------------------------------------------------
@@ -500,11 +523,11 @@ def fit_redshift(
     r_cont = cont_basis_w @ x_cont - data_w
     chi2_cont_only = float(np.dot(r_cont, r_cont))
 
-    # Line wavelengths and a resolution callable.
+    # Line wavelengths and a resolution callable.  R is sourced from the
+    # spectrum via the fallback chain (R -> grating -> pixel-spacing), so
+    # stacked spectra without a grating header still get a sensible R(lam).
     line_lambdas = np.array([REST_LINES_A[n] for n in lines], dtype=float)
-
-    def R_callable(lam_um: np.ndarray) -> np.ndarray:
-        return resolve_R(lam_um, grating=spec.grating, R=spec.R)
+    R_callable = _resolve_R_callable(spec)
 
     # Coarse grid.
     if dz_coarse is None:

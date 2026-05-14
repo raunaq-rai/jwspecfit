@@ -13,6 +13,7 @@ from jwspecfit.redshift import (
     RedshiftResult,
     _evaluate_prior,
     _find_local_minima,
+    _resolve_R_callable,
     fit_redshift,
 )
 
@@ -285,6 +286,66 @@ class TestResultObject:
         assert res.z_ci68[0] <= res.z_best <= res.z_ci68[1]
         assert res.z_ci95[0] <= res.z_ci68[0]
         assert res.z_ci68[1] <= res.z_ci95[1]
+
+
+# --- Automatic R resolution ----------------------------------------------
+
+
+class TestResolveR:
+    def test_spec_R_scalar_used(self):
+        spec = jw.Spectrum(
+            wave_um=np.linspace(2.0, 5.0, 100),
+            flux_ujy=np.zeros(100), err_ujy=np.ones(100),
+            grating=None, R=1500.0,
+        )
+        R_fn = _resolve_R_callable(spec)
+        np.testing.assert_allclose(R_fn(np.array([3.0])), [1500.0])
+
+    def test_grating_used_when_R_unset(self):
+        spec = jw.Spectrum(
+            wave_um=np.linspace(2.87, 5.27, 1661),
+            flux_ujy=np.zeros(1661), err_ujy=np.ones(1661),
+            grating="G395M",
+        )
+        R_fn = _resolve_R_callable(spec)
+        np.testing.assert_allclose(R_fn(np.array([4.0])), [1000.0])
+
+    def test_fallback_to_pixel_spacing(self):
+        """Stacked spectrum with no grating and no R should still work."""
+        spec = jw.Spectrum(
+            wave_um=np.linspace(2.0, 5.0, 1000),  # ~3 nm per pixel
+            flux_ujy=np.zeros(1000), err_ujy=np.ones(1000),
+            grating=None, R=None,
+        )
+        R_fn = _resolve_R_callable(spec)
+        # lambda / (2 Delta_lambda) ~ 3.5 / (2 * 3e-3) ~ 580
+        R_at_mid = float(R_fn(np.array([3.5]))[0])
+        assert 100 < R_at_mid < 2000, f"unexpected R from pixel spacing: {R_at_mid}"
+
+    def test_fit_redshift_works_without_grating(self):
+        """The full fit_redshift pipeline must work on a stacked spectrum
+        with no grating header — using the pixel-spacing R fallback."""
+        # Build a synthetic strong-line spectrum sampled finely enough that
+        # R_from_pixels gives ~1000.  (3700 pixels over 2.87-5.27 microns
+        # -> dlam ~ 6.5e-4 microns, R ~ lambda / 2dlam ~ 3000 at 4 um.)
+        z_true = 6.1052
+        wave_um = np.linspace(2.87, 5.27, 3700)
+        wave_A = wave_um * 1e4
+        flux = np.full_like(wave_A, 0.05)
+        for name, amp in [("HBETA", 0.6), ("OIII_4959", 1.5),
+                           ("OIII_5007", 4.5), ("Ha", 3.0)]:
+            mu = REST_LINES_A[name] * (1 + z_true)
+            sig = mu / (2.355 * 1500.0)
+            flux += amp * np.exp(-0.5 * ((wave_A - mu) / sig) ** 2)
+        rng = np.random.default_rng(0)
+        err = np.full_like(flux, 0.05)
+        flux += err * rng.standard_normal(len(flux))
+        spec = jw.Spectrum(
+            wave_um=wave_um, flux_ujy=flux, err_ujy=err,
+            grating=None, R=None,
+        )
+        res = fit_redshift(spec, z_min=5.0, z_max=7.5, verbose=False)
+        assert abs(res.z_best - z_true) < 5e-3
 
 
 # --- Local-minima helper ---------------------------------------------------
