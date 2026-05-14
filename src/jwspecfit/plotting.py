@@ -397,8 +397,14 @@ def _to_rgba(colour: str, alpha: float) -> str:
     return f"rgba(150,150,150,{alpha})"
 
 
+_MULTI_PALETTE = [
+    "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
+    "#9467bd", "#8c564b", "#e377c2", "#17becf",
+]
+
+
 def plot_spectrum_interactive(
-    source: "Spectrum | str | Path",
+    source: "Spectrum | str | Path | Sequence[Spectrum | str | Path]",
     *,
     z: float | None = None,
     wave_unit: str = "A",
@@ -406,38 +412,47 @@ def plot_spectrum_interactive(
     rest_frame: bool = False,
     exclude_wave_A: list[tuple[float, float]] | None = None,
     title: str | None = None,
+    labels: "str | Sequence[str] | None" = None,
     **read_kwargs,
 ) -> "go.Figure":
-    """Open and interactively plot a 1-D spectrum.
+    """Open and interactively plot one or more 1-D spectra.
 
-    Accepts either a :class:`~jwspecfit.io.Spectrum` object or a path to
-    a ``.fits`` / ``.npz`` file.  When given a path, the file is read
-    via :func:`~jwspecfit.io.read_fits` (or :func:`read_npz` for
-    ``.npz``) and any extra ``read_kwargs`` are forwarded to the
-    reader (e.g. ``hdu=``, ``wave_col=`` for FITS overrides).
+    Accepts a :class:`~jwspecfit.io.Spectrum` object, a path to a
+    ``.fits`` / ``.npz`` file, or a list / tuple of such items.  When
+    given a path, the file is read via :func:`~jwspecfit.io.read_fits`
+    (or :func:`read_npz` for ``.npz``) and any extra ``read_kwargs`` are
+    forwarded to the reader (e.g. ``hdu=``, ``wave_col=`` for FITS
+    overrides).
 
     Parameters
     ----------
-    source : Spectrum, str, or Path
-        Spectrum object or path to a FITS / NPZ file.
+    source : Spectrum, str, Path, or sequence of these
+        A single spectrum / file path, or a list / tuple of them to
+        overplot.
     z : float, optional
-        Source redshift.  Used only when *source* is a path; for an
-        existing :class:`Spectrum`, its own ``z`` is preserved.  When
-        non-``None``, also enables ``rest_frame`` axis labelling if
-        requested.
+        Source redshift.  Used only when a *source* item is a path; for
+        an existing :class:`Spectrum`, its own ``z`` is preserved.
+        Forwarded to every reader call.
     wave_unit : str
         ``"A"`` for Angstroms (default) or ``"um"`` for microns.
     flux_unit : str
         ``"fnu"`` for µJy (default) or ``"flam"`` for erg/s/cm²/Å.
     rest_frame : bool
-        If ``True`` and the spectrum has a redshift, divide wavelengths
-        by ``(1 + z)``.  Default ``False`` (observed frame).
+        If ``True`` and a spectrum has a redshift, divide wavelengths
+        by ``(1 + z)``.  Default ``False`` (observed frame).  Applied
+        per spectrum.
     exclude_wave_A : list of (float, float), optional
         Wavelength ranges in Angstroms to hide from the plot.
     title : str, optional
-        Figure title.  Defaults to filename + redshift if available.
+        Figure title.  When a single spectrum is supplied, defaults to
+        filename + redshift + grating if available; when multiple
+        spectra are supplied, defaults to no title.
+    labels : str or sequence of str, optional
+        Legend label(s).  When ``None`` (default), a single spectrum
+        uses ``"Data"`` and multiple spectra use each spectrum's
+        filename (or ``"Spectrum {i}"`` as a fallback).
     **read_kwargs
-        Forwarded to the file reader when *source* is a path.
+        Forwarded to the file reader when a *source* item is a path.
 
     Returns
     -------
@@ -446,91 +461,144 @@ def plot_spectrum_interactive(
     import plotly.graph_objects as go
     from .io import Spectrum, read_fits, read_npz, _ujy_to_flam
 
-    # Resolve the source to a Spectrum.
-    if isinstance(source, Spectrum):
-        spec = source
+    # Normalise sources / labels to parallel lists.
+    if isinstance(source, (list, tuple)):
+        sources_list = list(source)
     else:
-        path = Path(source)
-        suffix = path.suffix.lower()
-        if suffix in (".fits", ".fit", ".fz"):
-            spec = read_fits(path, z=z, **read_kwargs)
-        elif suffix == ".npz":
-            spec = read_npz(path, z=z, **read_kwargs)
+        sources_list = [source]
+
+    if labels is None:
+        labels_in = [None] * len(sources_list)
+    elif isinstance(labels, str):
+        labels_in = [labels]
+    else:
+        labels_in = list(labels)
+    if len(labels_in) != len(sources_list):
+        raise ValueError(
+            f"labels has length {len(labels_in)} but {len(sources_list)} "
+            f"sources were given."
+        )
+
+    multi = len(sources_list) > 1
+
+    # Resolve every source to a Spectrum.
+    specs: list[Spectrum] = []
+    for s in sources_list:
+        if isinstance(s, Spectrum):
+            specs.append(s)
         else:
-            raise ValueError(
-                f"Unsupported file extension {suffix!r}: pass a .fits or "
-                f".npz file, or a Spectrum object."
-            )
-
-    # Rest-frame scaling.
-    zp1 = 1.0
-    if rest_frame and spec.z is not None:
-        zp1 = 1.0 + spec.z
-    elif rest_frame and spec.z is None:
-        rest_frame = False  # Silently fall back; no z available.
-
-    if wave_unit == "A":
-        wave = spec.wave_A / zp1
-        xlabel = "Rest Wavelength [Å]" if rest_frame else "Wavelength [Å]"
-    else:
-        wave = spec.wave_um / zp1
-        xlabel = "Rest Wavelength [µm]" if rest_frame else "Wavelength [µm]"
+            path = Path(s)
+            suffix = path.suffix.lower()
+            if suffix in (".fits", ".fit", ".fz"):
+                specs.append(read_fits(path, z=z, **read_kwargs))
+            elif suffix == ".npz":
+                specs.append(read_npz(path, z=z, **read_kwargs))
+            else:
+                raise ValueError(
+                    f"Unsupported file extension {suffix!r}: pass a .fits "
+                    f"or .npz file, or a Spectrum object."
+                )
 
     use_flam = flux_unit.lower() == "flam"
-    if use_flam:
-        flux = _ujy_to_flam(spec.flux_ujy, spec.wave_um)
-        err = _ujy_to_flam(spec.err_ujy, spec.wave_um)
-        flux_label = "erg/s/cm²/Å"
-        ylabel = f"fλ [{flux_label}]"
-    else:
-        flux = spec.flux_ujy
-        err = spec.err_ujy
-        flux_label = "µJy"
-        ylabel = f"Flux density [{flux_label}]"
-
-    # For plotting, only require finite flux — be lenient about errors so
-    # spectra without an error array (e.g. image HDUs) still render.
-    valid = np.isfinite(flux)
-    keep = _build_exclude_mask(spec.wave_A, exclude_wave_A)
-    show = valid & keep
-    has_err = np.any(np.isfinite(err) & (err > 0))
-    err_show = show & np.isfinite(err) & (err > 0)
 
     fig = go.Figure()
+    all_flux_show: list[np.ndarray] = []
+    xlabel = ylabel = flux_label = None
 
-    # Error band — only when we actually have positive finite errors.
-    if has_err and np.any(err_show):
+    for i, spec in enumerate(specs):
+        # Rest-frame scaling (per spectrum).
+        rf = rest_frame
+        zp1 = 1.0
+        if rf and spec.z is not None:
+            zp1 = 1.0 + spec.z
+        elif rf and spec.z is None:
+            rf = False  # Silently fall back; no z available.
+
+        if wave_unit == "A":
+            wave = spec.wave_A / zp1
+            xlabel = "Rest Wavelength [Å]" if rf else "Wavelength [Å]"
+        else:
+            wave = spec.wave_um / zp1
+            xlabel = "Rest Wavelength [µm]" if rf else "Wavelength [µm]"
+
+        if use_flam:
+            flux = _ujy_to_flam(spec.flux_ujy, spec.wave_um)
+            err = _ujy_to_flam(spec.err_ujy, spec.wave_um)
+            flux_label = "erg/s/cm²/Å"
+            ylabel = f"fλ [{flux_label}]"
+        else:
+            flux = spec.flux_ujy
+            err = spec.err_ujy
+            flux_label = "µJy"
+            ylabel = f"Flux density [{flux_label}]"
+
+        # For plotting, only require finite flux — be lenient about errors so
+        # spectra without an error array (e.g. image HDUs) still render.
+        valid = np.isfinite(flux)
+        keep = _build_exclude_mask(spec.wave_A, exclude_wave_A)
+        show = valid & keep
+        has_err = np.any(np.isfinite(err) & (err > 0))
+        err_show = show & np.isfinite(err) & (err > 0)
+
+        # Per-trace colour and label.
+        if multi:
+            colour = _MULTI_PALETTE[i % len(_MULTI_PALETTE)]
+            band_fill = _to_rgba(colour, 0.18)
+        else:
+            colour = "black"
+            band_fill = "rgba(150,150,150,0.20)"
+
+        if labels_in[i] is not None:
+            name = labels_in[i]
+        elif multi:
+            fname = spec.meta.get("filename")
+            name = str(fname) if fname else f"Spectrum {i + 1}"
+        else:
+            name = "Data"
+
+        band_name = "±1σ" if not multi else f"{name} ±1σ"
+
+        # Error band — only when we actually have positive finite errors.
+        if has_err and np.any(err_show):
+            fig.add_trace(go.Scatter(
+                x=np.concatenate([wave[err_show], wave[err_show][::-1]]),
+                y=np.concatenate([(flux + err)[err_show], (flux - err)[err_show][::-1]]),
+                fill="toself", fillcolor=band_fill,
+                line=dict(width=0), showlegend=False, hoverinfo="skip",
+                name=band_name,
+            ))
+
+        # Data trace (histogram-step style).
         fig.add_trace(go.Scatter(
-            x=np.concatenate([wave[err_show], wave[err_show][::-1]]),
-            y=np.concatenate([(flux + err)[err_show], (flux - err)[err_show][::-1]]),
-            fill="toself", fillcolor="rgba(150,150,150,0.20)",
-            line=dict(width=0), showlegend=False, hoverinfo="skip",
-            name="±1σ",
+            x=wave[show], y=flux[show],
+            mode="lines", name=name,
+            line=dict(color=colour, width=0.9, shape="hvh"),
+            hovertemplate=f"λ=%{{x:.3f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
         ))
 
-    # Data trace (histogram-step style).
-    fig.add_trace(go.Scatter(
-        x=wave[show], y=flux[show],
-        mode="lines", name="Data",
-        line=dict(color="black", width=0.9, shape="hvh"),
-        hovertemplate=f"λ=%{{x:.3f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
-    ))
+        if np.any(show):
+            all_flux_show.append(flux[show])
 
     # Title.
     if title is None:
-        bits = []
-        fname = spec.meta.get("filename")
-        if fname:
-            bits.append(str(fname))
-        if spec.z is not None:
-            bits.append(f"z = {spec.z:.4f}")
-        if spec.grating:
-            bits.append(spec.grating)
-        title = "  |  ".join(bits)
+        if not multi:
+            spec = specs[0]
+            bits = []
+            fname = spec.meta.get("filename")
+            if fname:
+                bits.append(str(fname))
+            if spec.z is not None:
+                bits.append(f"z = {spec.z:.4f}")
+            if spec.grating:
+                bits.append(spec.grating)
+            title = "  |  ".join(bits)
+        else:
+            title = ""
 
-    # Y-limits — robust to outliers and negative values.
-    if np.any(show):
-        f_show = flux[show]
+    # Y-limits — robust to outliers and negative values, computed over all
+    # spectra so each one fits the same axis.
+    if all_flux_show:
+        f_show = np.concatenate(all_flux_show)
         finite = np.isfinite(f_show)
         if np.any(finite):
             lo, hi = np.nanpercentile(f_show[finite], [2, 98])
@@ -542,7 +610,15 @@ def plot_spectrum_interactive(
     else:
         y_lower, y_upper = -1.0, 1.0
 
-    fig.update_layout(
+    if multi:
+        legend = dict(orientation="h", x=0.5, xanchor="center",
+                      y=-0.22, yanchor="top")
+        bottom_margin = 110
+    else:
+        legend = dict(x=1.0, y=1.0, xanchor="right")
+        bottom_margin = None
+
+    layout_kwargs = dict(
         title=title,
         xaxis_title=xlabel,
         yaxis_title=ylabel,
@@ -551,10 +627,13 @@ def plot_spectrum_interactive(
         template="plotly_white",
         hovermode="x unified",
         dragmode="zoom",
-        legend=dict(x=1.0, y=1.0, xanchor="right"),
+        legend=legend,
         width=1000,
         height=500,
     )
+    if bottom_margin is not None:
+        layout_kwargs["margin"] = dict(b=bottom_margin)
+    fig.update_layout(**layout_kwargs)
     return fig
 
 
