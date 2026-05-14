@@ -19,20 +19,25 @@ from .io import (
 from .lines import REST_LINES_A, get_line_list, observable_lines
 from .lyman_alpha import igm_transmission, lya_model
 from .plotting import plot_fit, plot_fit_interactive, plot_spectrum_interactive
+from .redshift import DEFAULT_LINES, Peak, RedshiftResult, fit_redshift
 from .resolution import R_from_pixels, R_prism, resolve_R, sigma_inst_A
 
 __all__ = [
     "BroadFitResult",
+    "DEFAULT_LINES",
     "DLAResult",
     "FitResult",
     "LineResult",
+    "Peak",
     "REST_LINES_A",
     "R_from_pixels",
     "R_prism",
+    "RedshiftResult",
     "Spectrum",
     "compute_D_Lya",
     "fit_NHI",
     "fit_lines",
+    "fit_redshift",
     "tau_DLA",
     "tau_IGM_DW",
     "fit_with_broad",
