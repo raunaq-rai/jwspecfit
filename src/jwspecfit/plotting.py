@@ -595,14 +595,17 @@ def plot_spectrum_interactive(
         else:
             title = ""
 
-    # Y-limits — robust to outliers and negative values, computed over all
-    # spectra so each one fits the same axis.
+    # Y-limits — show the full vertical range so emission lines (including
+    # faint ones like [OIII]λ4363) are visible by default.  Lower bound is
+    # the 2nd percentile (floored at 0) to avoid noise outliers dominating
+    # the axis; upper bound is the data max with a small pad on top.
     if all_flux_show:
         f_show = np.concatenate(all_flux_show)
         finite = np.isfinite(f_show)
         if np.any(finite):
-            lo, hi = np.nanpercentile(f_show[finite], [2, 98])
-            pad = 0.15 * (hi - lo if hi > lo else max(abs(hi), 1.0))
+            lo = float(np.nanpercentile(f_show[finite], 2))
+            hi = float(np.nanmax(f_show[finite]))
+            pad = 0.05 * (hi - lo if hi > lo else max(abs(hi), 1.0))
             y_lower = min(0.0, lo - pad)
             y_upper = hi + pad
         else:
