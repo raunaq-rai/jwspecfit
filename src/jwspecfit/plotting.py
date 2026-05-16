@@ -413,6 +413,9 @@ def plot_spectrum_interactive(
     exclude_wave_A: list[tuple[float, float]] | None = None,
     title: str | None = None,
     labels: "str | Sequence[str] | None" = None,
+    lines: "Sequence[str] | bool | None" = None,
+    line_color: str = "darkred",
+    show_zero: bool = True,
     **read_kwargs,
 ) -> "go.Figure":
     """Open and interactively plot one or more 1-D spectra.
@@ -451,6 +454,20 @@ def plot_spectrum_interactive(
         Legend label(s).  When ``None`` (default), a single spectrum
         uses ``"Data"`` and multiple spectra use each spectrum's
         filename (or ``"Spectrum {i}"`` as a fallback).
+    lines : sequence of str, bool, or None
+        Emission lines to mark as vertical dashed lines at the supplied
+        redshift.  ``None`` (default) draws a curated list of common
+        UV/optical lines.  Pass an explicit list of keys from
+        :data:`jwspecfit.lines.REST_LINES_A` to override, or ``False``
+        to disable.  The effective redshift is taken from ``z`` if
+        given, else from a single spectrum's own ``spec.z``.  In
+        rest-frame mode the markers sit at the rest wavelengths.
+    line_color : str
+        Colour for the emission-line markers and their labels
+        (default ``"darkred"``).
+    show_zero : bool
+        Draw a light-grey dashed horizontal line at ``y = 0`` to make
+        continuum detection easier to gauge by eye (default ``True``).
     **read_kwargs
         Forwarded to the file reader when a *source* item is a path.
 
@@ -503,6 +520,8 @@ def plot_spectrum_interactive(
 
     fig = go.Figure()
     all_flux_show: list[np.ndarray] = []
+    x_mins: list[float] = []
+    x_maxs: list[float] = []
     xlabel = ylabel = flux_label = None
 
     for i, spec in enumerate(specs):
@@ -578,6 +597,8 @@ def plot_spectrum_interactive(
 
         if np.any(show):
             all_flux_show.append(flux[show])
+            x_mins.append(float(np.nanmin(wave[show])))
+            x_maxs.append(float(np.nanmax(wave[show])))
 
     # Title.
     if title is None:
@@ -637,6 +658,73 @@ def plot_spectrum_interactive(
     if bottom_margin is not None:
         layout_kwargs["margin"] = dict(b=bottom_margin)
     fig.update_layout(**layout_kwargs)
+
+    # --- Zero-flux reference (light grey dashed) ---
+    if show_zero:
+        fig.add_hline(
+            y=0,
+            line_width=1,
+            line_dash="dash",
+            line_color="lightgrey",
+            layer="below",
+        )
+
+    # --- Emission-line markers at supplied redshift ---
+    if lines is not False:
+        z_eff = z
+        if z_eff is None and not multi:
+            z_eff = specs[0].z
+
+        if rest_frame:
+            z_for_lines: float | None = 0.0
+        elif z_eff is not None:
+            z_for_lines = float(z_eff)
+        else:
+            z_for_lines = None
+
+        if z_for_lines is not None and x_mins and x_maxs:
+            from .lines import REST_LINES_A
+
+            default_names = [
+                "Lya", "CIV_doublet", "HEII_1640", "CIII]",
+                "OII_doublet", "NeIII_3869",
+                "HDELTA", "HGAMMA", "HBETA",
+                "OIII_4959", "OIII_5007",
+                "Ha", "SII_6718", "SII_6732",
+            ]
+            display = {
+                "Lya": "Lyα", "CIV_doublet": "CIV", "HEII_1640": "HeII",
+                "CIII]": "CIII]", "OII_doublet": "[OII]",
+                "NeIII_3869": "[NeIII]", "HDELTA": "Hδ", "HGAMMA": "Hγ",
+                "HBETA": "Hβ", "OIII_4959": "[OIII]4959",
+                "OIII_5007": "[OIII]5007", "Ha": "Hα",
+                "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
+            }
+            names = default_names if lines is None else list(lines)
+
+            x_lo = min(x_mins)
+            x_hi = max(x_maxs)
+            for nm in names:
+                rest_A = REST_LINES_A.get(nm)
+                if rest_A is None:
+                    continue
+                obs_A = rest_A * (1.0 + z_for_lines)
+                x = obs_A if wave_unit == "A" else obs_A * 1e-4
+                if x < x_lo or x > x_hi:
+                    continue
+                fig.add_vline(
+                    x=x,
+                    line_width=0.8,
+                    line_dash="dash",
+                    line_color=line_color,
+                    opacity=0.6,
+                    annotation_text=display.get(nm, nm),
+                    annotation_position="top",
+                    annotation_font_size=9,
+                    annotation_font_color=line_color,
+                    layer="below",
+                )
+
     return fig
 
 
