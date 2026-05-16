@@ -718,6 +718,10 @@ def plot_spectrum_interactive(
 
             x_lo = min(x_mins)
             x_hi = max(x_maxs)
+
+            # Collect in-range markers, then stagger labels onto rows so
+            # close-together labels don't overlap at the default zoom.
+            markers: list[tuple[float, str]] = []
             for nm in names:
                 rest_A = REST_LINES_A.get(nm)
                 if rest_A is None:
@@ -726,18 +730,45 @@ def plot_spectrum_interactive(
                 x = obs_A if wave_unit == "A" else obs_A * 1e-4
                 if x < x_lo or x > x_hi:
                     continue
+                markers.append((x, display.get(nm, nm)))
+
+            markers.sort(key=lambda m: m[0])
+            threshold = 0.03 * (x_hi - x_lo)
+            row_last_x: list[float] = []
+            rows: list[int] = []
+            for x, _ in markers:
+                placed = False
+                for r, last_x in enumerate(row_last_x):
+                    if x - last_x >= threshold:
+                        row_last_x[r] = x
+                        rows.append(r)
+                        placed = True
+                        break
+                if not placed:
+                    row_last_x.append(x)
+                    rows.append(len(row_last_x) - 1)
+
+            row_spacing_px = 14
+            for (x, label), r in zip(markers, rows):
                 fig.add_vline(
                     x=x,
                     line_width=0.8,
                     line_dash="dash",
                     line_color=line_color,
                     opacity=0.6,
-                    annotation_text=display.get(nm, nm),
+                    annotation_text=label,
                     annotation_position="top",
                     annotation_font_size=9,
                     annotation_font_color=line_color,
+                    annotation_yshift=r * row_spacing_px,
                     layer="below",
                 )
+
+            # Grow top margin so stacked rows fit above the plot.
+            if row_last_x:
+                n_rows = len(row_last_x)
+                desired_t = 60 + (n_rows - 1) * row_spacing_px + 14
+                fig.update_layout(margin=dict(t=desired_t))
 
     return fig
 
