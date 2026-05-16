@@ -414,6 +414,7 @@ def plot_spectrum_interactive(
     title: str | None = None,
     labels: "str | Sequence[str] | None" = None,
     lines: "Sequence[str] | bool | None" = None,
+    add_lines: dict[str, float] | None = None,
     line_color: str = "darkred",
     show_zero: bool = True,
     **read_kwargs,
@@ -462,6 +463,13 @@ def plot_spectrum_interactive(
         to disable.  The effective redshift is taken from ``z`` if
         given, else from a single spectrum's own ``spec.z``.  In
         rest-frame mode the markers sit at the rest wavelengths.
+    add_lines : dict[str, float], optional
+        Extra custom lines to overlay on top of *lines*.  Keys are the
+        display labels (already-formatted text); values are rest-frame
+        wavelengths in **Angstroms**.  Each entry is redshifted by
+        ``(1 + z)`` and staggered alongside the default markers.  Useful
+        for lines not present in :data:`jwspecfit.lines.REST_LINES_A`,
+        e.g. ``add_lines={"Mg II 2796": 2796.352, "Pa β": 12821.58}``.
     line_color : str
         Colour for the emission-line markers and their labels
         (default ``"darkred"``).
@@ -683,92 +691,98 @@ def plot_spectrum_interactive(
         )
 
     # --- Emission-line markers at supplied redshift ---
-    if lines is not False:
-        z_eff = z
-        if z_eff is None and not multi:
-            z_eff = specs[0].z
+    z_eff = z
+    if z_eff is None and not multi:
+        z_eff = specs[0].z
 
-        if rest_frame:
-            z_for_lines: float | None = 0.0
-        elif z_eff is not None:
-            z_for_lines = float(z_eff)
-        else:
-            z_for_lines = None
+    if rest_frame:
+        z_for_lines: float | None = 0.0
+    elif z_eff is not None:
+        z_for_lines = float(z_eff)
+    else:
+        z_for_lines = None
 
-        if z_for_lines is not None and x_mins and x_maxs:
-            from .lines import REST_LINES_A
+    if z_for_lines is not None and x_mins and x_maxs:
+        from .lines import REST_LINES_A
 
-            default_names = [
-                "Lya", "NIV_doublet", "CIV_doublet", "HEII_1640", "CIII]",
-                "OII_doublet", "NeIII_3869",
-                "HDELTA", "HGAMMA", "OIII_4363", "HBETA",
-                "OIII_4959", "OIII_5007",
-                "Ha", "SII_6718", "SII_6732",
-            ]
-            display = {
-                "Lya": "Lyα", "NIV_doublet": "NIV", "CIV_doublet": "CIV",
-                "HEII_1640": "HeII", "CIII]": "CIII]",
-                "OII_doublet": "[OII]", "NeIII_3869": "[NeIII]",
-                "HDELTA": "Hδ", "HGAMMA": "Hγ",
-                "OIII_4363": "[OIII]4363", "HBETA": "Hβ",
-                "OIII_4959": "[OIII]4959", "OIII_5007": "[OIII]5007",
-                "Ha": "Hα", "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
-            }
+        default_names = [
+            "Lya", "NIV_doublet", "CIV_doublet", "HEII_1640", "CIII]",
+            "OII_doublet", "NeIII_3869",
+            "HDELTA", "HGAMMA", "OIII_4363", "HBETA",
+            "OIII_4959", "OIII_5007",
+            "Ha", "SII_6718", "SII_6732",
+        ]
+        display = {
+            "Lya": "Lyα", "NIV_doublet": "NIV", "CIV_doublet": "CIV",
+            "HEII_1640": "HeII", "CIII]": "CIII]",
+            "OII_doublet": "[OII]", "NeIII_3869": "[NeIII]",
+            "HDELTA": "Hδ", "HGAMMA": "Hγ",
+            "OIII_4363": "[OIII]4363", "HBETA": "Hβ",
+            "OIII_4959": "[OIII]4959", "OIII_5007": "[OIII]5007",
+            "Ha": "Hα", "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
+        }
+
+        x_lo = min(x_mins)
+        x_hi = max(x_maxs)
+
+        # Collect markers from defaults / user list, then from add_lines.
+        markers: list[tuple[float, str]] = []
+
+        if lines is not False:
             names = default_names if lines is None else list(lines)
-
-            x_lo = min(x_mins)
-            x_hi = max(x_maxs)
-
-            # Collect in-range markers, then stagger labels onto rows so
-            # close-together labels don't overlap at the default zoom.
-            markers: list[tuple[float, str]] = []
             for nm in names:
                 rest_A = REST_LINES_A.get(nm)
                 if rest_A is None:
                     continue
                 obs_A = rest_A * (1.0 + z_for_lines)
                 x = obs_A if wave_unit == "A" else obs_A * 1e-4
-                if x < x_lo or x > x_hi:
-                    continue
                 markers.append((x, display.get(nm, nm)))
 
-            markers.sort(key=lambda m: m[0])
-            threshold = 0.03 * (x_hi - x_lo)
-            row_last_x: list[float] = []
-            rows: list[int] = []
-            for x, _ in markers:
-                placed = False
-                for r, last_x in enumerate(row_last_x):
-                    if x - last_x >= threshold:
-                        row_last_x[r] = x
-                        rows.append(r)
-                        placed = True
-                        break
-                if not placed:
-                    row_last_x.append(x)
-                    rows.append(len(row_last_x) - 1)
+        if add_lines:
+            for label, rest_A in add_lines.items():
+                obs_A = float(rest_A) * (1.0 + z_for_lines)
+                x = obs_A if wave_unit == "A" else obs_A * 1e-4
+                markers.append((x, str(label)))
 
-            row_spacing_px = 14
-            for (x, label), r in zip(markers, rows):
-                fig.add_vline(
-                    x=x,
-                    line_width=0.8,
-                    line_dash="dash",
-                    line_color=line_color,
-                    opacity=0.6,
-                    annotation_text=label,
-                    annotation_position="top",
-                    annotation_font_size=9,
-                    annotation_font_color=line_color,
-                    annotation_yshift=r * row_spacing_px,
-                    layer="below",
-                )
+        # Clip to plotted range, then stagger so close labels don't overlap.
+        markers = [(x, lab) for x, lab in markers if x_lo <= x <= x_hi]
+        markers.sort(key=lambda m: m[0])
+        threshold = 0.03 * (x_hi - x_lo)
+        row_last_x: list[float] = []
+        rows: list[int] = []
+        for x, _ in markers:
+            placed = False
+            for r, last_x in enumerate(row_last_x):
+                if x - last_x >= threshold:
+                    row_last_x[r] = x
+                    rows.append(r)
+                    placed = True
+                    break
+            if not placed:
+                row_last_x.append(x)
+                rows.append(len(row_last_x) - 1)
 
-            # Grow top margin so stacked rows fit above the plot.
-            if row_last_x:
-                n_rows = len(row_last_x)
-                desired_t = 60 + (n_rows - 1) * row_spacing_px + 14
-                fig.update_layout(margin=dict(t=desired_t))
+        row_spacing_px = 14
+        for (x, label), r in zip(markers, rows):
+            fig.add_vline(
+                x=x,
+                line_width=0.8,
+                line_dash="dash",
+                line_color=line_color,
+                opacity=0.6,
+                annotation_text=label,
+                annotation_position="top",
+                annotation_font_size=9,
+                annotation_font_color=line_color,
+                annotation_yshift=r * row_spacing_px,
+                layer="below",
+            )
+
+        # Grow top margin so stacked rows fit above the plot.
+        if row_last_x:
+            n_rows = len(row_last_x)
+            desired_t = 60 + (n_rows - 1) * row_spacing_px + 14
+            fig.update_layout(margin=dict(t=desired_t))
 
     return fig
 
