@@ -522,6 +522,7 @@ def plot_spectrum_interactive(
     all_flux_show: list[np.ndarray] = []
     x_mins: list[float] = []
     x_maxs: list[float] = []
+    err_legend_done = False
     xlabel = ylabel = flux_label = None
 
     for i, spec in enumerate(specs):
@@ -575,17 +576,29 @@ def plot_spectrum_interactive(
         else:
             name = "Data"
 
-        band_name = "±1σ" if not multi else f"{name} ±1σ"
-
-        # Error band — only when we actually have positive finite errors.
+        # Error band — step-shaped fill between ±1σ.  Uses two traces
+        # with `fill='tonexty'` so the upper/lower edges are drawn as
+        # step functions matching the data trace shape.  Legend entry
+        # appears once across all spectra.
         if has_err and np.any(err_show):
             fig.add_trace(go.Scatter(
-                x=np.concatenate([wave[err_show], wave[err_show][::-1]]),
-                y=np.concatenate([(flux + err)[err_show], (flux - err)[err_show][::-1]]),
-                fill="toself", fillcolor=band_fill,
-                line=dict(width=0), showlegend=False, hoverinfo="skip",
-                name=band_name,
+                x=wave[err_show],
+                y=(flux - err)[err_show],
+                mode="lines",
+                line=dict(width=0, shape="hvh"),
+                showlegend=False, hoverinfo="skip",
             ))
+            fig.add_trace(go.Scatter(
+                x=wave[err_show],
+                y=(flux + err)[err_show],
+                mode="lines",
+                line=dict(width=0, shape="hvh"),
+                fill="tonexty", fillcolor=band_fill,
+                name="±1σ",
+                showlegend=not err_legend_done,
+                hoverinfo="skip",
+            ))
+            err_legend_done = True
 
         # Data trace (histogram-step style).
         fig.add_trace(go.Scatter(
@@ -686,19 +699,20 @@ def plot_spectrum_interactive(
             from .lines import REST_LINES_A
 
             default_names = [
-                "Lya", "CIV_doublet", "HEII_1640", "CIII]",
+                "Lya", "NIV_doublet", "CIV_doublet", "HEII_1640", "CIII]",
                 "OII_doublet", "NeIII_3869",
-                "HDELTA", "HGAMMA", "HBETA",
+                "HDELTA", "HGAMMA", "OIII_4363", "HBETA",
                 "OIII_4959", "OIII_5007",
                 "Ha", "SII_6718", "SII_6732",
             ]
             display = {
-                "Lya": "Lyα", "CIV_doublet": "CIV", "HEII_1640": "HeII",
-                "CIII]": "CIII]", "OII_doublet": "[OII]",
-                "NeIII_3869": "[NeIII]", "HDELTA": "Hδ", "HGAMMA": "Hγ",
-                "HBETA": "Hβ", "OIII_4959": "[OIII]4959",
-                "OIII_5007": "[OIII]5007", "Ha": "Hα",
-                "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
+                "Lya": "Lyα", "NIV_doublet": "NIV", "CIV_doublet": "CIV",
+                "HEII_1640": "HeII", "CIII]": "CIII]",
+                "OII_doublet": "[OII]", "NeIII_3869": "[NeIII]",
+                "HDELTA": "Hδ", "HGAMMA": "Hγ",
+                "OIII_4363": "[OIII]4363", "HBETA": "Hβ",
+                "OIII_4959": "[OIII]4959", "OIII_5007": "[OIII]5007",
+                "Ha": "Hα", "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
             }
             names = default_names if lines is None else list(lines)
 
