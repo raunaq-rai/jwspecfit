@@ -16,7 +16,7 @@ from .fitter import fit_lines as _fit_lines_narrow
 from .io import (
     Spectrum, export_lines_txt, load_result, read_dict, read_fits, read_npz, save_result,
 )
-from .lines import REST_LINES_A, get_line_list, observable_lines
+from .lines import REST_LINES_A, get_line_list, observable_lines, show_lines
 from .lyman_alpha import igm_transmission, lya_model
 from .plotting import plot_fit, plot_fit_interactive, plot_spectrum_interactive
 from .redshift import DEFAULT_LINES, Peak, RedshiftResult, fit_redshift
@@ -55,6 +55,7 @@ __all__ = [
     "save_result",
     "load_result",
     "export_lines_txt",
+    "show_lines",
     "sigma_inst_A",
 ]
 

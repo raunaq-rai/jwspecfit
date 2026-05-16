@@ -414,7 +414,7 @@ def plot_spectrum_interactive(
     title: str | None = None,
     labels: "str | Sequence[str] | None" = None,
     lines: "Sequence[str] | bool | None" = None,
-    add_lines: dict[str, float] | None = None,
+    add_lines: "dict[str, float] | Sequence[str] | None" = None,
     line_color: str = "darkred",
     show_zero: bool = True,
     **read_kwargs,
@@ -463,13 +463,20 @@ def plot_spectrum_interactive(
         to disable.  The effective redshift is taken from ``z`` if
         given, else from a single spectrum's own ``spec.z``.  In
         rest-frame mode the markers sit at the rest wavelengths.
-    add_lines : dict[str, float], optional
-        Extra custom lines to overlay on top of *lines*.  Keys are the
-        display labels (already-formatted text); values are rest-frame
-        wavelengths in **Angstroms**.  Each entry is redshifted by
-        ``(1 + z)`` and staggered alongside the default markers.  Useful
-        for lines not present in :data:`jwspecfit.lines.REST_LINES_A`,
-        e.g. ``add_lines={"Mg II 2796": 2796.352, "Pa β": 12821.58}``.
+    add_lines : dict[str, float] or sequence of str, optional
+        Extra lines to overlay on top of *lines*.  Two accepted forms:
+
+        - **dict** — ``{label: rest_wavelength_A}``.  Free-form labels
+          with explicit rest-frame wavelengths in **Angstroms**.  Use
+          this for lines not in :data:`jwspecfit.lines.REST_LINES_A`,
+          e.g. ``add_lines={"Mg II 2796": 2796.352}``.
+        - **list of str** — names from :data:`REST_LINES_A` (e.g.
+          ``add_lines=["H8", "HEPSILON", "FeII_2382"]``).  The rest
+          wavelength is looked up automatically.  Call
+          :func:`jwspecfit.show_lines` to see what's available.
+
+        Each entry is redshifted by ``(1 + z)`` and staggered alongside
+        the default markers.
     line_color : str
         Colour for the emission-line markers and their labels
         (default ``"darkred"``).
@@ -739,7 +746,19 @@ def plot_spectrum_interactive(
                 markers.append((x, display.get(nm, nm)))
 
         if add_lines:
-            for label, rest_A in add_lines.items():
+            if isinstance(add_lines, dict):
+                add_items = list(add_lines.items())
+            else:
+                # Sequence of REST_LINES_A keys: look up rest wavelengths
+                # and apply the friendly display label where known.
+                add_items = []
+                for nm in add_lines:
+                    rest_A = REST_LINES_A.get(nm)
+                    if rest_A is None:
+                        continue
+                    label = display.get(nm, nm.replace("_", " "))
+                    add_items.append((label, rest_A))
+            for label, rest_A in add_items:
                 obs_A = float(rest_A) * (1.0 + z_for_lines)
                 x = obs_A if wave_unit == "A" else obs_A * 1e-4
                 markers.append((x, str(label)))

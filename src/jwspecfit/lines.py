@@ -313,3 +313,70 @@ def observed_wave_A(name: str, z: float) -> float:
 def observed_wave_um(name: str, z: float) -> float:
     """Return observed wavelength in microns for a line at redshift *z*."""
     return REST_LINES_A[name] * (1.0 + z) * 1e-4
+
+
+def show_lines(
+    *,
+    rest_min_A: float | None = None,
+    rest_max_A: float | None = None,
+    search: str | None = None,
+) -> None:
+    """Print the available emission/absorption lines in :data:`REST_LINES_A`.
+
+    The printed names are the keys you can pass to the ``lines=`` or
+    ``add_lines=`` arguments of
+    :func:`~jwspecfit.plotting.plot_spectrum_interactive` (and to the
+    fitter), grouped by wavelength region.
+
+    Parameters
+    ----------
+    rest_min_A, rest_max_A : float, optional
+        Restrict to lines with rest wavelengths in this range
+        (Angstroms).
+    search : str, optional
+        Case-insensitive substring filter on the line name.
+
+    Examples
+    --------
+    >>> import jwspecfit
+    >>> jwspecfit.show_lines(rest_min_A=4000, rest_max_A=5100)
+    >>> jwspecfit.show_lines(search="Fe")
+    """
+    rows = []
+    for name, rest_A in REST_LINES_A.items():
+        if rest_min_A is not None and rest_A < rest_min_A:
+            continue
+        if rest_max_A is not None and rest_A > rest_max_A:
+            continue
+        if search is not None and search.lower() not in name.lower():
+            continue
+        rows.append((name, rest_A))
+
+    if not rows:
+        print("No lines match the given filters.")
+        return
+
+    rows.sort(key=lambda r: r[1])
+
+    regions = [
+        ("UV (< 3000 Å)",          lambda w: w < 3000),
+        ("Optical (3000–7500 Å)",  lambda w: 3000 <= w < 7500),
+        ("Near-IR (≥ 7500 Å)",     lambda w: w >= 7500),
+    ]
+    name_w = max(len(n) for n, _ in rows)
+
+    print(f"{'name':<{name_w}}   rest λ (Å)")
+    print("-" * (name_w + 14))
+    for region_name, pred in regions:
+        sub = [r for r in rows if pred(r[1])]
+        if not sub:
+            continue
+        print(f"\n# {region_name}")
+        for name, rest_A in sub:
+            print(f"{name:<{name_w}}   {rest_A:10.3f}")
+    print(
+        "\nUse with: plot_spectrum_interactive(..., z=..., "
+        'add_lines=["NAME", ...])\n'
+        "    or:   plot_spectrum_interactive(..., z=..., "
+        "lines=[\"NAME\", ...])   # replaces defaults"
+    )
