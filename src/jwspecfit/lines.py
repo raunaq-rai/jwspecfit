@@ -75,6 +75,7 @@ REST_LINES_A: dict[str, float] = {
     # Sulphur
     "SII_6718": 6720.149693980653,
     "SII_6732": 6734.532561984591,
+    "HEI_7067": 7067.138,
     "ArIII_7138": 7137.770,
     # Blue diagnostic lines (4500–4750 Å region)
     "FeII_4584": 4584.11922116,   

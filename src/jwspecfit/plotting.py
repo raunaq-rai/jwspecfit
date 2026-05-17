@@ -723,7 +723,7 @@ def plot_spectrum_interactive(
             "HEI_5877", "OI_6302",
             "Ha", "NII_6585", "HEI_6680",
             "SII_6718", "SII_6732",
-            "ArIII_7138",
+            "HEI_7067", "ArIII_7138",
         ]
         display = {
             "Lya": "Lyα", "NIV_doublet": "NIV", "CIV_doublet": "CIV",
@@ -746,6 +746,7 @@ def plot_spectrum_interactive(
             "Ha": "Hα", "NII_6585": "[NII] 6585",
             "HEI_6680": "HeI 6680",
             "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
+            "HEI_7067": "HeI 7067",
             "ArIII_7138": "[ArIII] 7138",
         }
 
