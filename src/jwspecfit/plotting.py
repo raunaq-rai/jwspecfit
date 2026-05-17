@@ -713,20 +713,40 @@ def plot_spectrum_interactive(
         from .lines import REST_LINES_A
 
         default_names = [
-            "Lya", "NIV_doublet", "CIV_doublet", "HEII_1640", "CIII]",
+            "Lya", "NIV_doublet", "CIV_doublet", "HEII_1640",
+            "NIII_doublet", "CIII]",
             "OII_doublet", "NeIII_3869",
-            "HDELTA", "HGAMMA", "OIII_4363", "HBETA",
-            "OIII_4959", "OIII_5007",
-            "Ha", "SII_6718", "SII_6732",
+            "HEI_4027", "HDELTA", "HEI_4145", "HGAMMA", "OIII_4363",
+            "FeII_4584", "NIII_4642", "FeIII_4660", "HeII_4687",
+            "ArIV_4713", "FeII_4732", "ArIV_4741",
+            "HBETA", "OIII_4959", "OIII_5007",
+            "HEI_5877", "OI_6302",
+            "Ha", "NII_6585", "HEI_6680",
+            "SII_6718", "SII_6732",
+            "ArIII_7138",
         ]
         display = {
             "Lya": "Lyα", "NIV_doublet": "NIV", "CIV_doublet": "CIV",
-            "HEII_1640": "HeII", "CIII]": "CIII]",
+            "HEII_1640": "HeII 1640",
+            "NIII_doublet": "NIII 1750", "CIII]": "CIII]",
             "OII_doublet": "[OII]", "NeIII_3869": "[NeIII]",
-            "HDELTA": "Hδ", "HGAMMA": "Hγ",
-            "OIII_4363": "[OIII]4363", "HBETA": "Hβ",
+            "HEI_4027": "HeI 4027",
+            "HDELTA": "Hδ",
+            "HEI_4145": "HeI 4145",
+            "HGAMMA": "Hγ",
+            "OIII_4363": "[OIII]4363",
+            "FeII_4584": "FeII 4584", "NIII_4642": "NIII 4642",
+            "FeIII_4660": "FeIII 4660", "HeII_4687": "HeII 4687",
+            "ArIV_4713": "ArIV+HeI 4705",
+            "FeII_4732": "FeII 4732", "ArIV_4741": "ArIV 4741",
+            "HBETA": "Hβ",
             "OIII_4959": "[OIII]4959", "OIII_5007": "[OIII]5007",
-            "Ha": "Hα", "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
+            "HEI_5877": "HeI 5877",
+            "OI_6302": "[OI] 6302",
+            "Ha": "Hα", "NII_6585": "[NII] 6585",
+            "HEI_6680": "HeI 6680",
+            "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
+            "ArIII_7138": "[ArIII] 7138",
         }
 
         x_lo = min(x_mins)
