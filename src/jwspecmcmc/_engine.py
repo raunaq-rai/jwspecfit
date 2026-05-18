@@ -63,6 +63,8 @@ def _fit_lines_mcmc(
     progress: bool = True,
     seed: int = 42,
     sigma_factor: float = 1.0,
+    centroid_vmax: float = 500.0,
+    centroid_max_sigma: float = 1.0,
     moving_average: bool | int = False,
     tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
@@ -385,11 +387,20 @@ def _fit_lines_mcmc(
             lb[i] = 0.0
             ub[i] = 150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
 
-        # Centroid bounds.
+        # Centroid bounds — match jwspecfit.fitter logic so the LS seed
+        # and the MCMC priors agree.  Velocity-space cap for everyone,
+        # plus a resolution-aware cap (``centroid_max_sigma × σ_inst``)
+        # for narrow lines only; broad components keep velocity-only
+        # so real outflow blueshifts aren't clipped.
         _C_KMS_CENT = 299792.458
-        _CENT_V_MAX = 500.0
-        cent_margin_v = _CENT_V_MAX / _C_KMS_CENT * lam_obs_A
-        cent_margin = max(cent_margin_v, 2.0 * np.median(dlam))
+        local_sig = sig_inst[np.argmin(np.abs(spec.wave_A - lam_obs_A))]
+        cent_margin_v = centroid_vmax / _C_KMS_CENT * lam_obs_A
+        if "BROAD" in name:
+            cent_margin = cent_margin_v
+        else:
+            cent_margin_res = centroid_max_sigma * local_sig
+            cent_margin = min(cent_margin_v, cent_margin_res)
+        cent_margin = max(cent_margin, 2.0 * np.median(dlam))
 
         # Exclude same-rest-wavelength neighbours so broad components
         # (e.g. OIII_5007_BROAD) don't collapse to lb == ub on their
@@ -877,6 +888,8 @@ def _fit_with_broad_mcmc(
     progress: bool = True,
     seed: int = 42,
     sigma_factor: float = 1.0,
+    centroid_vmax: float = 500.0,
+    centroid_max_sigma: float = 1.0,
     moving_average: bool | int = False,
     tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
@@ -982,6 +995,8 @@ def _fit_with_broad_mcmc(
         hei_snr_threshold=hei_snr_threshold,
         bic_delta=bic_delta,
         sigma_factor=sigma_factor,
+        centroid_vmax=centroid_vmax,
+        centroid_max_sigma=centroid_max_sigma,
         moving_average=moving_average,
         tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
@@ -1039,6 +1054,8 @@ def _fit_with_broad_mcmc(
         progress=progress,
         seed=seed,
         sigma_factor=sigma_factor,
+        centroid_vmax=centroid_vmax,
+        centroid_max_sigma=centroid_max_sigma,
         moving_average=moving_average,
         tie_balmer_to_oiii=tie_balmer_to_oiii,
         tie_uv_doublets=tie_uv_doublets,

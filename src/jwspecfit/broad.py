@@ -303,6 +303,7 @@ def _bic_bootstrap_single(
     hei_baseline_broad: str | None = None,
     hei_baseline_oiii: str | None = None,
     hei_mask: np.ndarray | None = None,
+    centroid_max_sigma: float = 1.0,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
 
@@ -354,6 +355,7 @@ def _bic_bootstrap_single(
                 narrow_fit=narrow_fit if broad_type is not None else None,
                 n_jobs=1, sigma_factor=sigma_factor,
                 centroid_vmax=centroid_vmax,
+                centroid_max_sigma=centroid_max_sigma,
                 moving_average=moving_average,
                 tie_uv_doublets=tie_uv_doublets,
                 tie_uv_centroids=tie_uv_centroids,
@@ -404,6 +406,7 @@ def _bic_bootstrap_single(
                     narrow_fit=narrow_fit,
                     n_jobs=1, sigma_factor=sigma_factor,
                     centroid_vmax=centroid_vmax,
+                    centroid_max_sigma=centroid_max_sigma,
                     moving_average=moving_average,
                     tie_uv_doublets=tie_uv_doublets,
                     tie_uv_centroids=tie_uv_centroids,
@@ -450,6 +453,7 @@ def _bic_bootstrap_single(
                     narrow_fit=narrow_fit,
                     n_jobs=1, sigma_factor=sigma_factor,
                     centroid_vmax=centroid_vmax,
+                    centroid_max_sigma=centroid_max_sigma,
                     moving_average=moving_average,
                     tie_uv_doublets=tie_uv_doublets,
                     tie_uv_centroids=tie_uv_centroids,
@@ -588,6 +592,7 @@ def _fit_model_variant(
     ciii_doublet_ratio: float | None = None,
     oiii_broad_type: str | None = None,
     hei_broad_type: str | None = None,
+    centroid_max_sigma: float = 1.0,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -641,6 +646,7 @@ def _fit_model_variant(
     result = fit_lines(
         spec, z, grating=grating, R=R, lines=fit_lines_list, deg=deg, n_boot=n_boot,
         n_jobs=n_jobs, sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
+        centroid_max_sigma=centroid_max_sigma,
         moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
@@ -688,6 +694,7 @@ def fit_with_broad(
     bic_delta: float = BIC_DELTA_THRESHOLD,
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
+    centroid_max_sigma: float = 1.0,
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
@@ -798,6 +805,7 @@ def fit_with_broad(
         spectrum, z, narrow_lines, grating, R, continuum, deg,
         broad_type=None, n_boot=0, n_jobs=n_jobs,
         sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
+        centroid_max_sigma=centroid_max_sigma,
         moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,
         tie_uv_widths=tie_uv_widths,
@@ -822,6 +830,7 @@ def fit_with_broad(
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
                 broad_type=None, n_boot=n_boot, n_jobs=n_jobs,
                 sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
+                centroid_max_sigma=centroid_max_sigma,
                 moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
                 tie_uv_centroids=tie_uv_centroids,
                 tie_uv_widths=tie_uv_widths,
@@ -881,6 +890,7 @@ def fit_with_broad(
                 centroid_vmax, moving_average, tie_uv_doublets,
                 tie_uv_centroids, tie_uv_widths, sigma_overrides,
                 centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
+                centroid_max_sigma=centroid_max_sigma,
             )
             for i in range(n_boot_bic)
         )
@@ -1028,6 +1038,7 @@ def fit_with_broad(
                         sigma_overrides, centroid_overrides,
                         niv_doublet_ratio, ciii_doublet_ratio,
                         oiii_variants, baseline_broad, oiii_mask,
+                        centroid_max_sigma=centroid_max_sigma,
                     )
                     for i in range(n_boot_bic)
                 )
@@ -1051,6 +1062,7 @@ def fit_with_broad(
                             narrow_fit=fit_narrow,
                             n_jobs=n_jobs, sigma_factor=sigma_factor,
                             centroid_vmax=centroid_vmax,
+                            centroid_max_sigma=centroid_max_sigma,
                             moving_average=moving_average,
                             tie_uv_doublets=tie_uv_doublets,
                             tie_uv_centroids=tie_uv_centroids,
@@ -1159,6 +1171,7 @@ def fit_with_broad(
                         None, None, None,
                         hei_variants, baseline_broad, oiii_broad_type_sel,
                         hei_mask,
+                        centroid_max_sigma=centroid_max_sigma,
                     )
                     for i in range(n_boot_bic)
                 )
@@ -1181,6 +1194,7 @@ def fit_with_broad(
                             narrow_fit=fit_narrow,
                             n_jobs=n_jobs, sigma_factor=sigma_factor,
                             centroid_vmax=centroid_vmax,
+                            centroid_max_sigma=centroid_max_sigma,
                             moving_average=moving_average,
                             tie_uv_doublets=tie_uv_doublets,
                             tie_uv_centroids=tie_uv_centroids,
@@ -1254,6 +1268,7 @@ def fit_with_broad(
             narrow_fit=fit_narrow if any_broad_sel else None,
             n_jobs=n_jobs, sigma_factor=sigma_factor,
             centroid_vmax=centroid_vmax,
+            centroid_max_sigma=centroid_max_sigma,
             moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
             tie_uv_centroids=tie_uv_centroids,
             tie_uv_widths=tie_uv_widths,
@@ -1273,6 +1288,7 @@ def fit_with_broad(
             narrow_fit=fit_narrow,
             n_jobs=n_jobs, sigma_factor=sigma_factor,
             centroid_vmax=centroid_vmax,
+            centroid_max_sigma=centroid_max_sigma,
             moving_average=moving_average,
             tie_uv_doublets=tie_uv_doublets,
             tie_uv_centroids=tie_uv_centroids,

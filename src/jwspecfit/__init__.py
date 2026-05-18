@@ -162,6 +162,7 @@ def fit_lines(
     bic_delta: float = 6.0,
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
+    centroid_max_sigma: float = 1.0,
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
@@ -241,8 +242,18 @@ def fit_lines(
         Multiplicative factor on the upper line-width bound.
         Use values > 1 for stacked spectra (default 1.0).
     centroid_vmax : float
-        Maximum centroid offset in km/s (default 500).  Increase for
-        stacked spectra with larger velocity offsets between lines.
+        Maximum centroid offset in km/s (default 500).  Sets the
+        velocity-space ceiling on how far any line's centroid can
+        wander from systemic.  Increase for stacked spectra with
+        larger velocity offsets between lines.
+    centroid_max_sigma : float
+        Resolution-aware cap on narrow-line centroids: each narrow
+        line's centroid can drift at most ``centroid_max_sigma ×
+        σ_inst`` from systemic, where σ_inst is the instrumental
+        Gaussian σ evaluated at the line.  The effective bound is the
+        tighter of this and the velocity cap.  Broad components
+        (``_BROAD``/``_BROAD2``) bypass this so real outflow
+        blueshifts aren't clipped.  Default 1.0.
     moving_average : bool or int
         If ``False`` (default), use polynomial continuum.  If ``True``,
         use a median filter with a default window of 75 pixels.  If an
@@ -316,6 +327,7 @@ def fit_lines(
                     n_boot=n_boot, clip_sigma=clip_sigma,
                     n_jobs=n_jobs, sigma_factor=sigma_factor,
                     centroid_vmax=centroid_vmax,
+                    centroid_max_sigma=centroid_max_sigma,
                     moving_average=moving_average,
                     tie_uv_doublets=tie_uv_doublets,
                     tie_uv_centroids=tie_uv_centroids,
@@ -341,6 +353,7 @@ def fit_lines(
                     hei_snr_threshold=hei_snr_threshold,
                     bic_delta=bic_delta, sigma_factor=sigma_factor,
                     centroid_vmax=centroid_vmax,
+                    centroid_max_sigma=centroid_max_sigma,
                     moving_average=moving_average,
                     tie_uv_doublets=tie_uv_doublets,
                     tie_uv_centroids=tie_uv_centroids,
@@ -370,6 +383,7 @@ def fit_lines(
             n_jobs=n_jobs, save_path=save_path,
             sigma_factor=sigma_factor,
             centroid_vmax=centroid_vmax,
+            centroid_max_sigma=centroid_max_sigma,
             moving_average=moving_average,
             tie_uv_doublets=tie_uv_doublets,
             tie_uv_centroids=tie_uv_centroids,
@@ -397,6 +411,7 @@ def fit_lines(
         bic_delta=bic_delta,
         sigma_factor=sigma_factor,
         centroid_vmax=centroid_vmax,
+        centroid_max_sigma=centroid_max_sigma,
         moving_average=moving_average,
         tie_uv_doublets=tie_uv_doublets,
         tie_uv_centroids=tie_uv_centroids,

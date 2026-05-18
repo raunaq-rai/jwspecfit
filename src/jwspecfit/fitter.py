@@ -271,6 +271,7 @@ def fit_lines(
     save_path: str | Path | None = None,
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
+    centroid_max_sigma: float = 1.0,
     moving_average: bool | int = False,
     tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
@@ -318,8 +319,19 @@ def fit_lines(
         Use values > 1 for stacked spectra where redshift scatter
         broadens lines beyond the instrumental resolution (default 1.0).
     centroid_vmax : float
-        Maximum centroid offset in km/s (default 500).  Increase for
-        stacked spectra with larger velocity offsets between lines.
+        Maximum centroid offset in km/s (default 500).  Sets the
+        velocity ceiling on how far any line's centroid can wander
+        from its systemic prediction.  Increase for stacked spectra
+        with larger velocity offsets between lines.
+    centroid_max_sigma : float
+        Resolution-aware cap on narrow-line centroids: each narrow
+        line's centroid can drift at most ``centroid_max_sigma ×
+        σ_inst`` from its systemic prediction, where σ_inst is the
+        instrumental Gaussian σ evaluated at the line.  The actual
+        bound is ``min(centroid_vmax/c × λ_obs, centroid_max_sigma ×
+        σ_inst)``.  Broad components (``_BROAD``/``_BROAD2``) bypass
+        this cap so real outflow blueshifts aren't clipped.  Default
+        1.0 (≈ ±130 km/s at G395M OIII; ≈ ±60 km/s at G395H).
     moving_average : bool or int
         If ``False`` (default), use polynomial continuum.  If ``True``,
         use a median filter with a default window of 75 pixels.  If an
@@ -645,17 +657,24 @@ def fit_lines(
             lb[i] = 0.0
             ub[i] = 150.0 * max(peak_flam, 1e-30) * _SQRT2PI * sig_hi
 
-        # Centroid bounds — expressed as a velocity offset (km/s) converted
-        # to Å at the observed wavelength.  For stacked spectra the redshift
-        # alignment can introduce ~100–300 km/s systematic offsets; individual
-        # spectra typically need less.  The margin is capped at half the
-        # separation to the nearest line so centroids cannot blend.
+        # Centroid bounds — combine a physical-velocity cap with a
+        # resolution-aware cap of ``centroid_max_sigma × σ_inst`` at the
+        # line so narrow lines can't wander further than ~1 instrumental
+        # σ from systemic at high R.  Broad components keep the
+        # velocity-only cap so real outflow blueshifts aren't clipped.
+        # The margin is then floored at 2 pixel widths (coarse
+        # sampling) and capped at half the distance to the nearest
+        # neighbour so centroids cannot blend.
         local_sig = sig_inst[np.argmin(np.abs(spec.wave_A - lam_obs_A))]
         _C_KMS_CENT = 299792.458
-        _CENT_V_MAX = centroid_vmax  # km/s — max centroid offset
-        cent_margin_v = _CENT_V_MAX / _C_KMS_CENT * lam_obs_A
+        cent_margin_v = centroid_vmax / _C_KMS_CENT * lam_obs_A
+        if "BROAD" in name:
+            cent_margin = cent_margin_v
+        else:
+            cent_margin_res = centroid_max_sigma * local_sig
+            cent_margin = min(cent_margin_v, cent_margin_res)
         # Floor: at least 2 pixel widths for coarsely sampled spectra.
-        cent_margin = max(cent_margin_v, 2.0 * np.median(dlam))
+        cent_margin = max(cent_margin, 2.0 * np.median(dlam))
 
         # Cap at half the distance to the nearest neighbour to prevent
         # lines from drifting into each other.
