@@ -127,6 +127,21 @@ class ConstraintSet:
             if broad_name in idx and narrow_name in idx:
                 p[nL + idx[broad_name]] = p[nL + idx[narrow_name]]
 
+        # --- Tie [OIII] broad doublet kinematics ---
+        # Both components come from the same outflowing gas, so they
+        # share velocity (Δv) and dispersion (σ_v).  In observed-λ
+        # space both scale with rest wavelength.  Anchor on
+        # OIII_5007_BROAD; OIII_4959_BROAD is derived.  Amplitudes stay
+        # free so the data can determine the line ratio.
+        if "OIII_5007_BROAD" in idx and "OIII_4959_BROAD" in idx:
+            i_5007b = idx["OIII_5007_BROAD"]
+            i_4959b = idx["OIII_4959_BROAD"]
+            lam_ratio = (
+                REST_LINES_A["OIII_4959"] / REST_LINES_A["OIII_5007"]
+            )
+            p[nL + i_4959b] = p[nL + i_5007b] * lam_ratio
+            p[2 * nL + i_4959b] = p[2 * nL + i_5007b] * lam_ratio
+
         # --- [NII] doublet constraint (after Balmer tying so NII_6585 σ is set) ---
         if self.tie_nii and "NII_6549" in idx and "NII_6585" in idx:
             i49 = idx["NII_6549"]
@@ -282,6 +297,13 @@ class ConstraintSet:
         for broad_name, narrow_name in _BROAD_PAIRS:
             if broad_name in idx and narrow_name in idx:
                 free[nL + idx[broad_name]] = False
+
+        # OIII broad doublet: 4959_BROAD centroid and width derived
+        # from 5007_BROAD (same outflowing gas).
+        if "OIII_5007_BROAD" in idx and "OIII_4959_BROAD" in idx:
+            i_4959b = idx["OIII_4959_BROAD"]
+            free[nL + i_4959b] = False
+            free[2 * nL + i_4959b] = False
 
         # UV doublet constraints.
         if self.tie_uv_doublets:
