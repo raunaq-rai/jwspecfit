@@ -16,6 +16,51 @@ if TYPE_CHECKING:
     from .io import Spectrum
 
 
+# Default emission-line markers (keys into REST_LINES_A) and their
+# preferred display labels.  Shared between plot_spectrum_interactive
+# and plot_2d_1d so labels stay consistent.
+_DEFAULT_MARKER_NAMES: list[str] = [
+    "Lya", "NIV_doublet", "CIV_doublet", "HEII_1640",
+    "NIII_doublet", "CIII]",
+    "OII_doublet", "NeIII_3869",
+    "HEI_4027", "HDELTA", "HEI_4145", "HGAMMA", "OIII_4363",
+    "FeII_4584", "NIII_4642", "FeIII_4660", "HeII_4687",
+    "ArIV_4713", "FeII_4732", "ArIV_4741",
+    "HBETA", "OIII_4959", "OIII_5007",
+    "CIV_5803", "CIV_5814",
+    "HEI_5877", "OI_6302",
+    "Ha", "NII_6585", "HEI_6680",
+    "SII_6718", "SII_6732",
+    "HEI_7067", "ArIII_7138",
+]
+
+_DEFAULT_MARKER_LABELS: dict[str, str] = {
+    "Lya": "Lyα", "NIV_doublet": "NIV", "CIV_doublet": "CIV",
+    "HEII_1640": "HeII 1640",
+    "NIII_doublet": "NIII 1750", "CIII]": "CIII]",
+    "OII_doublet": "[OII]", "NeIII_3869": "[NeIII]",
+    "HEI_4027": "HeI 4027",
+    "HDELTA": "Hδ",
+    "HEI_4145": "HeI 4145",
+    "HGAMMA": "Hγ",
+    "OIII_4363": "[OIII]4363",
+    "FeII_4584": "FeII 4584", "NIII_4642": "NIII 4642",
+    "FeIII_4660": "FeIII 4660", "HeII_4687": "HeII 4687",
+    "ArIV_4713": "ArIV+HeI 4705",
+    "FeII_4732": "FeII 4732", "ArIV_4741": "ArIV 4741",
+    "HBETA": "Hβ",
+    "OIII_4959": "[OIII]4959", "OIII_5007": "[OIII]5007",
+    "CIV_5803": "CIV 5803", "CIV_5814": "CIV 5814",
+    "HEI_5877": "HeI 5877",
+    "OI_6302": "[OI] 6302",
+    "Ha": "Hα", "NII_6585": "[NII] 6585",
+    "HEI_6680": "HeI 6680",
+    "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
+    "HEI_7067": "HeI 7065",
+    "ArIII_7138": "[ArIII] 7138",
+}
+
+
 def _build_exclude_mask(
     wave_A: np.ndarray,
     exclude_wave_A: list[tuple[float, float]] | None,
@@ -731,45 +776,8 @@ def plot_spectrum_interactive(
     if z_for_lines is not None and x_mins and x_maxs:
         from .lines import REST_LINES_A
 
-        default_names = [
-            "Lya", "NIV_doublet", "CIV_doublet", "HEII_1640",
-            "NIII_doublet", "CIII]",
-            "OII_doublet", "NeIII_3869",
-            "HEI_4027", "HDELTA", "HEI_4145", "HGAMMA", "OIII_4363",
-            "FeII_4584", "NIII_4642", "FeIII_4660", "HeII_4687",
-            "ArIV_4713", "FeII_4732", "ArIV_4741",
-            "HBETA", "OIII_4959", "OIII_5007",
-            "CIV_5803", "CIV_5814",
-            "HEI_5877", "OI_6302",
-            "Ha", "NII_6585", "HEI_6680",
-            "SII_6718", "SII_6732",
-            "HEI_7067", "ArIII_7138",
-        ]
-        display = {
-            "Lya": "Lyα", "NIV_doublet": "NIV", "CIV_doublet": "CIV",
-            "HEII_1640": "HeII 1640",
-            "NIII_doublet": "NIII 1750", "CIII]": "CIII]",
-            "OII_doublet": "[OII]", "NeIII_3869": "[NeIII]",
-            "HEI_4027": "HeI 4027",
-            "HDELTA": "Hδ",
-            "HEI_4145": "HeI 4145",
-            "HGAMMA": "Hγ",
-            "OIII_4363": "[OIII]4363",
-            "FeII_4584": "FeII 4584", "NIII_4642": "NIII 4642",
-            "FeIII_4660": "FeIII 4660", "HeII_4687": "HeII 4687",
-            "ArIV_4713": "ArIV+HeI 4705",
-            "FeII_4732": "FeII 4732", "ArIV_4741": "ArIV 4741",
-            "HBETA": "Hβ",
-            "OIII_4959": "[OIII]4959", "OIII_5007": "[OIII]5007",
-            "CIV_5803": "CIV 5803", "CIV_5814": "CIV 5814",
-            "HEI_5877": "HeI 5877",
-            "OI_6302": "[OI] 6302",
-            "Ha": "Hα", "NII_6585": "[NII] 6585",
-            "HEI_6680": "HeI 6680",
-            "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
-            "HEI_7067": "HeI 7065",
-            "ArIII_7138": "[ArIII] 7138",
-        }
+        default_names = _DEFAULT_MARKER_NAMES
+        display = _DEFAULT_MARKER_LABELS
 
         x_lo = min(x_mins)
         x_hi = max(x_maxs)
@@ -1336,3 +1344,211 @@ def plot_fit_interactive(
         )
 
     return fig
+
+
+def plot_2d_1d(
+    path: str | Path,
+    z: float | None = None,
+    *,
+    sci_ext: str = "SCI",
+    hdu: str | int | None = None,
+    wave_col: str | None = None,
+    flux_col: str | None = None,
+    err_col: str | None = None,
+    flux_scale: float = 1e3,
+    flux_label: str = r"$F_\nu$ [nJy]",
+    xlabel: str = r"$\lambda_{\rm obs}\,[\mu{\rm m}]$",
+    cmap: str = "plasma",
+    vmin_pct: float = 5.0,
+    vmax_pct: float = 99.5,
+    y_crop: tuple[float, float] = (0.25, 0.75),
+    xlim: tuple[float, float] | None = None,
+    ylim: tuple[float, float] | None = None,
+    colour: str = "#6a0dad",
+    figsize: tuple[float, float] = (8, 4),
+    title: str | None = None,
+    lines: list[str] | bool | None = None,
+    add_lines: list[str] | dict[str, float] | None = None,
+    height_ratios: tuple[float, float] = (0.35, 1.0),
+) -> tuple["Figure", tuple["Axes", "Axes"]]:
+    """Plot a JWST/NIRSpec 2D + 1D spectrum from a ``.spec.fits`` file.
+
+    Reads the 2D image from ``sci_ext`` and the 1D extraction from
+    ``SPEC1D`` via :func:`jwspecfit.read_fits`, then renders a stacked
+    figure (2D pcolormesh above, 1D flux below) with optional emission-
+    line markers at the supplied redshift.
+
+    Parameters
+    ----------
+    path
+        Path to the ``.spec.fits`` file.
+    z
+        Redshift used to place observed-frame line markers.  If
+        ``None``, no markers are drawn.
+    sci_ext
+        Name of the 2D image extension (default ``"SCI"``).
+    hdu, wave_col, flux_col, err_col
+        Forwarded to :func:`read_fits` for 1D extraction (override the
+        default SPEC1D / column auto-detection).
+    flux_scale, flux_label
+        Multiplier and y-axis label applied to the 1D flux
+        (default converts µJy → nJy).
+    xlabel
+        Shared x-axis label (default observed wavelength in µm).
+    cmap
+        Colormap for the 2D panel.
+    vmin_pct, vmax_pct
+        Percentile clip for the 2D colour scale.
+    y_crop
+        ``(y_lo_frac, y_hi_frac)`` fractional crop of the 2D vertical
+        extent (default keeps the middle 50 % rows).
+    xlim, ylim
+        Optional axis limits.  ``xlim`` applies to both panels.
+    colour
+        Line and error-band colour for the 1D trace.
+    figsize, height_ratios
+        Matplotlib figure size and 2D-vs-1D height ratio.
+    title
+        Optional title placed above the 2D panel.
+    lines
+        Default-marker control: ``None`` uses the package defaults;
+        a list of :data:`REST_LINES_A` keys restricts to those names;
+        ``False`` disables defaults entirely.
+    add_lines
+        Extra markers: either REST_LINES_A keys, or a
+        ``{label: rest_wavelength_A}`` dict.
+
+    Returns
+    -------
+    fig, (ax_2d, ax_1d)
+        Matplotlib figure and the two axes.
+    """
+    import matplotlib.pyplot as plt
+    from astropy.io import fits
+
+    from .io import read_fits
+    from .lines import REST_LINES_A
+
+    path = Path(path)
+
+    spec = read_fits(
+        path, hdu=hdu, wave_col=wave_col, flux_col=flux_col, err_col=err_col,
+    )
+    with fits.open(path) as hdul:
+        ext_names = [h.name for h in hdul]
+        if sci_ext not in ext_names:
+            raise KeyError(
+                f"Extension {sci_ext!r} not found in {path.name} "
+                f"(available: {ext_names})"
+            )
+        sci2d = np.asarray(hdul[sci_ext].data)
+
+    if sci2d.ndim != 2:
+        raise ValueError(
+            f"Expected 2D array in {sci_ext!r}, got shape {sci2d.shape}"
+        )
+
+    wave = np.asarray(spec.wave_um)
+    flux = np.asarray(spec.flux_ujy)
+    err = np.asarray(spec.err_ujy) if spec.err_ujy is not None else None
+
+    # 2D wavelength axis must match the 1D wave grid in length.
+    if sci2d.shape[1] != wave.size:
+        raise ValueError(
+            f"SCI wavelength axis ({sci2d.shape[1]} pix) does not match "
+            f"SPEC1D wave length ({wave.size})."
+        )
+
+    fig, (ax2d, ax1d) = plt.subplots(
+        2, 1,
+        figsize=figsize,
+        gridspec_kw={"height_ratios": list(height_ratios), "hspace": 0.05},
+        sharex=True,
+    )
+
+    # --- 2D panel --------------------------------------------------
+    dw = float(np.median(np.diff(wave)))
+    wave_edges = np.concatenate([
+        [wave[0] - dw / 2.0],
+        0.5 * (wave[1:] + wave[:-1]),
+        [wave[-1] + dw / 2.0],
+    ])
+    ny = sci2d.shape[0]
+    y_edges = np.arange(ny + 1)
+    vmin, vmax = np.nanpercentile(sci2d, [vmin_pct, vmax_pct])
+    ax2d.pcolormesh(
+        wave_edges, y_edges, sci2d,
+        shading="auto", cmap=cmap, vmin=vmin, vmax=vmax,
+    )
+    ax2d.set_ylim(ny * y_crop[0], ny * y_crop[1])
+    ax2d.tick_params(labelbottom=False, labelleft=False)
+    ax2d.set_ylabel("Spatial pix", fontsize=9)
+    if title is not None:
+        ax2d.set_title(title, fontsize=10)
+
+    # --- 1D panel --------------------------------------------------
+    f_scaled = flux * flux_scale
+    ax1d.plot(wave, f_scaled, color=colour, lw=1.0)
+    if err is not None:
+        ax1d.fill_between(
+            wave,
+            (flux - err) * flux_scale,
+            (flux + err) * flux_scale,
+            color=colour, alpha=0.25, lw=0,
+        )
+    ax1d.axhline(0, color="k", lw=0.8, ls="--", alpha=0.6)
+    ax1d.tick_params(direction="in", top=True, right=True, labelsize=8)
+    ax1d.set_xlabel(xlabel, fontsize=10)
+    ax1d.set_ylabel(flux_label, fontsize=10)
+
+    if xlim is not None:
+        ax1d.set_xlim(*xlim)
+        ax2d.set_xlim(*xlim)
+    if ylim is not None:
+        ax1d.set_ylim(*ylim)
+
+    # --- Emission-line markers ------------------------------------
+    if z is not None:
+        x_lo, x_hi = ax1d.get_xlim()
+
+        markers: list[tuple[float, str]] = []
+        if lines is not False:
+            names = _DEFAULT_MARKER_NAMES if lines is None else list(lines)
+            for nm in names:
+                rest_A = REST_LINES_A.get(nm)
+                if rest_A is None:
+                    continue
+                obs_um = float(rest_A) * (1.0 + z) / 1e4
+                if x_lo < obs_um < x_hi:
+                    label = _DEFAULT_MARKER_LABELS.get(nm, nm)
+                    markers.append((obs_um, label))
+
+        if add_lines:
+            if isinstance(add_lines, dict):
+                add_items = list(add_lines.items())
+            else:
+                add_items = []
+                for nm in add_lines:
+                    rest_A = REST_LINES_A.get(nm)
+                    if rest_A is None:
+                        continue
+                    label = _DEFAULT_MARKER_LABELS.get(nm, nm.replace("_", " "))
+                    add_items.append((label, rest_A))
+            for label, rest_A in add_items:
+                obs_um = float(rest_A) * (1.0 + z) / 1e4
+                if x_lo < obs_um < x_hi:
+                    markers.append((obs_um, str(label)))
+
+        y_top = ax1d.get_ylim()[1]
+        for x_obs, label in markers:
+            for ax in (ax2d, ax1d):
+                ax.axvline(x_obs, color="gray", ls="--", lw=0.7, alpha=0.6)
+            ax1d.text(
+                x_obs, y_top * 0.95, label,
+                color="gray", rotation=90,
+                ha="center", va="top", fontsize=7,
+            )
+
+    fig.subplots_adjust(left=0.10, right=0.97, top=0.94, bottom=0.12)
+
+    return fig, (ax2d, ax1d)

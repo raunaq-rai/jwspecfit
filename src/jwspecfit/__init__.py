@@ -18,7 +18,12 @@ from .io import (
 )
 from .lines import REST_LINES_A, get_line_list, observable_lines, show_lines
 from .lyman_alpha import igm_transmission, lya_model
-from .plotting import plot_fit, plot_fit_interactive, plot_spectrum_interactive
+from .plotting import (
+    plot_2d_1d,
+    plot_fit,
+    plot_fit_interactive,
+    plot_spectrum_interactive,
+)
 from .redshift import DEFAULT_LINES, Peak, RedshiftResult, fit_redshift
 from .resolution import R_from_pixels, R_prism, resolve_R, sigma_inst_A
 
@@ -45,6 +50,7 @@ __all__ = [
     "igm_transmission",
     "lya_model",
     "observable_lines",
+    "plot_2d_1d",
     "plot_fit",
     "plot_fit_interactive",
     "plot_spectrum_interactive",
