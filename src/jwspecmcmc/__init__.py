@@ -88,6 +88,8 @@ def fit_lines(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    fit_oiii_broad: bool = False,
+    oiii_snr_threshold: float = 5.0,
 ) -> MCMCResult | MCMCBroadFitResult:
     """Fit emission lines using MCMC sampling.
 
@@ -157,6 +159,14 @@ def fit_lines(
         If ``False`` (default), use polynomial continuum.  If ``True``,
         use a median filter with a default window of 75 pixels.  If an
         ``int``, use that as the median-filter window size.
+    fit_oiii_broad : bool
+        If ``True``, run an independent BIC test for a broad component
+        on [OIII] 5007/4959 (outflow signature).  Decoupled from the
+        Balmer broad selection — both can be selected, only one, or
+        neither.  Default ``False``.
+    oiii_snr_threshold : float
+        Minimum [OIII] 5007 SNR to attempt the OIII broad fit
+        (default 5.0).  Only used when ``fit_oiii_broad=True``.
     tie_uv_doublets : bool
         Tie UV doublet kinematics and fix resonance-line flux ratios.
         Recommended for stacked spectra where doublets are poorly
@@ -243,6 +253,8 @@ def fit_lines(
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
+        fit_oiii_broad=fit_oiii_broad,
+        oiii_snr_threshold=oiii_snr_threshold,
     )
 
 
@@ -285,6 +297,8 @@ def fit_with_broad(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    fit_oiii_broad: bool = False,
+    oiii_snr_threshold: float = 5.0,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
 
@@ -346,6 +360,14 @@ def fit_with_broad(
         If ``False`` (default), use polynomial continuum.  If ``True``,
         use a median filter with a default window of 75 pixels.  If an
         ``int``, use that as the median-filter window size.
+    fit_oiii_broad : bool
+        If ``True``, run an independent BIC test for a broad component
+        on [OIII] 5007/4959 (outflow signature).  Decoupled from the
+        Balmer broad selection — both can be selected, only one, or
+        neither.  Default ``False``.
+    oiii_snr_threshold : float
+        Minimum [OIII] 5007 SNR to attempt the OIII broad fit
+        (default 5.0).  Only used when ``fit_oiii_broad=True``.
     tie_uv_doublets : bool
         Tie UV doublet kinematics and fix resonance-line flux ratios.
         Recommended for stacked spectra where doublets are poorly
@@ -392,6 +414,8 @@ def fit_with_broad(
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
+        fit_oiii_broad=fit_oiii_broad,
+        oiii_snr_threshold=oiii_snr_threshold,
     )
 
 

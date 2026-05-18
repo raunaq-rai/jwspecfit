@@ -53,12 +53,20 @@ BROAD_CANDIDATES = ["Ha", "HBETA", "HDELTA", "HGAMMA"]
 # to guard against the broad component leaking into NII.
 HA_NII_COMPLEX = ["Ha", "NII_6549", "NII_6585"]
 
+# Forbidden [OIII] lines eligible for an independent broad (outflow)
+# component.  Independent of the Balmer BIC test: an outflow can be
+# present in [OIII] without showing in Hα and vice versa.
+OIII_BROAD_CANDIDATES = ["OIII_5007", "OIII_4959"]
+
 
 # Speed of light in km/s for velocity calculations.
 _C_KMS = 2.99792458e5
 
 # Velocity half-window for Balmer pixel mask (km/s).
 _BALMER_MASK_DV = 3000.0
+
+# Velocity half-window for [OIII] pixel mask (km/s).
+_OIII_MASK_DV = 3000.0
 
 
 @dataclass
@@ -94,6 +102,11 @@ class BroadFitResult:
     bic_both: float
     all_fits: dict[str, FitResult]
     bic_bootstrap: dict[str, np.ndarray] = field(default_factory=dict)
+    # --- Independent [OIII] outflow component selection ---
+    oiii_broad_selected: bool = False
+    bic_oiii_off: float = float("nan")
+    bic_oiii_on: float = float("nan")
+    bic_oiii_bootstrap: dict[str, np.ndarray] = field(default_factory=dict)
 
     # Delegate common FitResult attributes to best_fit for API compatibility.
 
@@ -193,6 +206,23 @@ def _balmer_pixel_mask(
     return mask
 
 
+def _oiii_pixel_mask(
+    wave_um: np.ndarray,
+    z: float,
+    dv: float = _OIII_MASK_DV,
+) -> np.ndarray:
+    """Boolean mask selecting pixels within ±dv km/s of [OIII] 5007 and 4959."""
+    mask = np.zeros(len(wave_um), dtype=bool)
+    for line_name in OIII_BROAD_CANDIDATES:
+        if line_name not in REST_LINES_A:
+            continue
+        lam_obs_um = REST_LINES_A[line_name] * (1.0 + z) * 1e-4
+        lam_lo = lam_obs_um * (1.0 - dv / _C_KMS)
+        lam_hi = lam_obs_um * (1.0 + dv / _C_KMS)
+        mask |= (wave_um >= lam_lo) & (wave_um <= lam_hi)
+    return mask
+
+
 def _bic_bootstrap_single(
     noise: np.ndarray,
     spec: Spectrum,
@@ -215,6 +245,9 @@ def _bic_bootstrap_single(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    oiii_variants: list[str] | None = None,
+    oiii_baseline_broad: str | None = None,
+    oiii_mask: np.ndarray | None = None,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
 
@@ -295,21 +328,74 @@ def _bic_bootstrap_single(
 
         results[variant] = _compute_bic(resid, flam_err, valid, n_free)
 
+    # ------------------------------------------------------------------
+    # Optional second-stage [OIII] broad BIC test.  Independent of the
+    # Balmer comparison above: variants here are ``"oiii_off"`` and
+    # ``"oiii_on"``, both built on top of ``oiii_baseline_broad`` (the
+    # Balmer model picked in stage 1).  BIC is evaluated on OIII pixels
+    # only so the test is sensitive to outflow signatures regardless of
+    # what happens in the Balmer complex.
+    # ------------------------------------------------------------------
+    if oiii_variants and oiii_mask is not None:
+        flam_err = _ujy_to_flam(perturbed.err_ujy, perturbed.wave_um)
+        for variant in oiii_variants:
+            add_oiii = variant == "oiii_on"
+            try:
+                fit_v, _ = _fit_model_variant(
+                    perturbed, z, narrow_lines, grating, R, continuum, deg,
+                    broad_type=oiii_baseline_broad, n_boot=0,
+                    narrow_fit=narrow_fit,
+                    n_jobs=1, sigma_factor=sigma_factor,
+                    centroid_vmax=centroid_vmax,
+                    moving_average=moving_average,
+                    tie_uv_doublets=tie_uv_doublets,
+                    tie_uv_centroids=tie_uv_centroids,
+                    tie_uv_widths=tie_uv_widths,
+                    sigma_overrides=sigma_overrides,
+                    centroid_overrides=centroid_overrides,
+                    niv_doublet_ratio=niv_doublet_ratio,
+                    ciii_doublet_ratio=ciii_doublet_ratio,
+                    oiii_broad=add_oiii,
+                )
+            except (ValueError, RuntimeError):
+                results[variant] = np.nan
+                continue
+
+            flam_data = _ujy_to_flam(
+                perturbed.flux_ujy - fit_v.continuum, perturbed.wave_um
+            )
+            flam_model = _ujy_to_flam(fit_v.model_flux, perturbed.wave_um)
+            valid = perturbed.mask_valid() & oiii_mask
+            resid = flam_data - flam_model
+
+            if fit_v.constraints is not None:
+                n_free = int(np.sum(fit_v.constraints.free_mask()))
+            else:
+                n_free = len(fit_v.params)
+
+            results[variant] = _compute_bic(resid, flam_err, valid, n_free)
+
     return results
 
 
 def _add_broad_lines(
     line_names: list[str],
-    broad_type: str,
+    broad_type: str | None,
+    *,
+    oiii_broad: bool = False,
 ) -> list[str]:
-    """Add broad Balmer entries to line list.
+    """Add broad Balmer (and optionally [OIII]) entries to a line list.
 
     Parameters
     ----------
     line_names : list of str
         Base narrow line names.
-    broad_type : str
-        ``"broad1"``, ``"broad2"``, or ``"both"``.
+    broad_type : {"broad1", "broad2", "both", None}
+        Balmer broad variant.  ``None`` skips Balmer broad lines.
+    oiii_broad : bool
+        If ``True``, also append ``OIII_5007_BROAD`` and ``OIII_4959_BROAD``
+        for any [OIII] candidate present in *line_names*.  Uses BROAD1
+        velocity bounds (outflow regime) via the ``_BROAD`` suffix.
 
     Returns
     -------
@@ -317,16 +403,25 @@ def _add_broad_lines(
         Extended line list with broad entries.
     """
     extended = list(line_names)
-    for base in BROAD_CANDIDATES:
-        if base not in line_names:
-            continue
-        if broad_type in ("broad1", "both"):
+    if broad_type is not None:
+        for base in BROAD_CANDIDATES:
+            if base not in line_names:
+                continue
+            if broad_type in ("broad1", "both"):
+                bname = f"{base}_BROAD"
+                if bname not in extended:
+                    extended.append(bname)
+                    REST_LINES_A[bname] = REST_LINES_A[base]
+            if broad_type in ("broad2", "both"):
+                bname = f"{base}_BROAD2"
+                if bname not in extended:
+                    extended.append(bname)
+                    REST_LINES_A[bname] = REST_LINES_A[base]
+    if oiii_broad:
+        for base in OIII_BROAD_CANDIDATES:
+            if base not in line_names:
+                continue
             bname = f"{base}_BROAD"
-            if bname not in extended:
-                extended.append(bname)
-                REST_LINES_A[bname] = REST_LINES_A[base]
-        if broad_type in ("broad2", "both"):
-            bname = f"{base}_BROAD2"
             if bname not in extended:
                 extended.append(bname)
                 REST_LINES_A[bname] = REST_LINES_A[base]
@@ -366,6 +461,7 @@ def _fit_model_variant(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    oiii_broad: bool = False,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -382,14 +478,16 @@ def _fit_model_variant(
     tuple
         ``(FitResult, BIC)``.
     """
-    if broad_type is not None:
-        fit_lines_list = _add_broad_lines(line_names, broad_type)
+    if broad_type is not None or oiii_broad:
+        fit_lines_list = _add_broad_lines(
+            line_names, broad_type, oiii_broad=oiii_broad,
+        )
     else:
         fit_lines_list = list(line_names)
 
     # Build parameter hints from narrow-only fit to seed narrow lines.
     p0_hint = None
-    if narrow_fit is not None and broad_type is not None:
+    if narrow_fit is not None and (broad_type is not None or oiii_broad):
         p0_hint = {}
         nL_narrow = len(narrow_fit.line_names)
         for i, name in enumerate(narrow_fit.line_names):
@@ -399,7 +497,10 @@ def _fit_model_variant(
                 narrow_fit.params[2 * nL_narrow + i],    # sigma
             )
 
-    variant_label = broad_type or "narrow"
+    if broad_type is None:
+        variant_label = "oiii_broad" if oiii_broad else "narrow"
+    else:
+        variant_label = f"{broad_type}+oiii_broad" if oiii_broad else broad_type
     result = fit_lines(
         spec, z, grating=grating, R=R, lines=fit_lines_list, deg=deg, n_boot=n_boot,
         n_jobs=n_jobs, sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
@@ -454,6 +555,8 @@ def fit_with_broad(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    fit_oiii_broad: bool = False,
+    oiii_snr_threshold: float = 5.0,
     _print_R: bool = True,
 ) -> BroadFitResult:
     """Fit emission lines with optional broad Balmer components.
@@ -550,7 +653,8 @@ def fit_with_broad(
     bic_boot_dist: dict[str, np.ndarray] = {}
 
     if mode == "off":
-        # Re-fit with bootstrap for the narrow model.
+        # No broad of any kind — short-circuit before the OIII stage too,
+        # because `mode="off"` is an explicit user request for narrow only.
         if n_boot > 0:
             fit_narrow, bic_narrow = _fit_model_variant(
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
@@ -582,44 +686,27 @@ def fit_with_broad(
 
     attempt_broad = (mode != "off") and (mode != "auto" or ha_snr >= snr_threshold)
 
-    if not attempt_broad and mode == "auto":
-        logger.info("Hα SNR=%.1f < %.1f; skipping broad fitting.", ha_snr, snr_threshold)
-        # Re-fit with bootstrap for the narrow model.
-        if n_boot > 0:
-            fit_narrow, bic_narrow = _fit_model_variant(
-                spectrum, z, narrow_lines, grating, R, continuum, deg,
-                broad_type=None, n_boot=n_boot, n_jobs=n_jobs,
-                sigma_factor=sigma_factor, centroid_vmax=centroid_vmax,
-                moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
-                tie_uv_centroids=tie_uv_centroids,
-                tie_uv_widths=tie_uv_widths,
-                sigma_overrides=sigma_overrides,
-                centroid_overrides=centroid_overrides,
-                niv_doublet_ratio=niv_doublet_ratio,
-                ciii_doublet_ratio=ciii_doublet_ratio,
-            )
-            all_fits["narrow"] = fit_narrow
-        return BroadFitResult(
-            best_fit=fit_narrow,
-            selected_model="narrow",
-            bic_narrow=bic_narrow,
-            bic_broad1=bic_b1,
-            bic_broad2=bic_b2,
-            bic_both=bic_both,
-            all_fits=all_fits,
+    skip_balmer_bic = (not attempt_broad and mode == "auto")
+    if skip_balmer_bic:
+        logger.info(
+            "Hα SNR=%.1f < %.1f; skipping Balmer broad fitting "
+            "(OIII broad still tested if requested).",
+            ha_snr, snr_threshold,
         )
+        best_name = "narrow"
 
     # Determine which variants to fit.
     variants_to_fit: list[str] = ["narrow"]
-    if mode in ("auto", "broad1", "both"):
-        variants_to_fit.append("broad1")
-    if mode in ("auto", "broad2", "both"):
-        variants_to_fit.append("broad2")
-    if mode in ("auto", "both"):
-        variants_to_fit.append("both")
+    if not skip_balmer_bic:
+        if mode in ("auto", "broad1", "both"):
+            variants_to_fit.append("broad1")
+        if mode in ("auto", "broad2", "both"):
+            variants_to_fit.append("broad2")
+        if mode in ("auto", "both"):
+            variants_to_fit.append("both")
 
     # --- Phase 2: BIC model selection ---
-    if n_boot_bic > 0 and mode == "auto":
+    if not skip_balmer_bic and n_boot_bic > 0 and mode == "auto":
         # Bootstrap BIC on Balmer pixels only.
         from joblib import Parallel, delayed
         from tqdm import tqdm
@@ -704,8 +791,11 @@ def fit_with_broad(
                 elif variant == "both":
                     bic_both = bic_v
 
-    # --- Phase 3: select best model by BIC ---
-    if mode == "auto":
+    # --- Phase 3: select best Balmer model by BIC ---
+    if skip_balmer_bic:
+        # best_name already set to "narrow" above.
+        pass
+    elif mode == "auto":
         candidates = {
             "narrow": bic_narrow,
             "broad1": bic_b1,
@@ -735,13 +825,142 @@ def fit_with_broad(
     else:
         best_name = "narrow"
 
+    # --- Phase 3.5: independent [OIII] outflow BIC test ---
+    oiii_selected = False
+    bic_oiii_off = float("nan")
+    bic_oiii_on = float("nan")
+    bic_oiii_boot: dict[str, np.ndarray] = {}
+
+    baseline_broad = None if best_name == "narrow" else best_name
+    oiii_candidates_present = [
+        n for n in OIII_BROAD_CANDIDATES if n in narrow_lines
+    ]
+
+    if fit_oiii_broad and oiii_candidates_present:
+        # Need OIII_5007 (or 4959) SNR from the Stage-1 baseline fit.
+        baseline_fit = all_fits.get(best_name, fit_narrow)
+        oiii_snr = 0.0
+        for cand in oiii_candidates_present:
+            lr = baseline_fit.lines.get(cand)
+            if lr is not None and lr.snr > oiii_snr:
+                oiii_snr = lr.snr
+
+        if oiii_snr < oiii_snr_threshold:
+            logger.info(
+                "[OIII] SNR=%.1f < %.1f; skipping OIII broad test.",
+                oiii_snr, oiii_snr_threshold,
+            )
+        else:
+            from joblib import Parallel, delayed
+            from tqdm import tqdm
+
+            oiii_mask = _oiii_pixel_mask(spectrum.wave_um, z)
+            balmer_mask_for_oiii = _balmer_pixel_mask(spectrum.wave_um, z)
+            oiii_variants = ["oiii_off", "oiii_on"]
+
+            if n_boot_bic > 0:
+                rng = np.random.default_rng()
+                noise_vectors = rng.standard_normal(
+                    (n_boot_bic, len(spectrum.wave_um))
+                )
+                oiii_records: list[dict[str, float]] = Parallel(
+                    n_jobs=n_jobs, return_as="generator"
+                )(
+                    delayed(_bic_bootstrap_single)(
+                        noise_vectors[i],
+                        spectrum, z, narrow_lines, grating, R, continuum, deg,
+                        fit_narrow, balmer_mask_for_oiii,
+                        [],  # skip Balmer variants in this pass
+                        sigma_factor, centroid_vmax, moving_average,
+                        tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
+                        sigma_overrides, centroid_overrides,
+                        niv_doublet_ratio, ciii_doublet_ratio,
+                        oiii_variants, baseline_broad, oiii_mask,
+                    )
+                    for i in range(n_boot_bic)
+                )
+                oiii_records = list(tqdm(
+                    oiii_records, total=n_boot_bic, desc="OIII BIC bootstrap",
+                ))
+                for v in oiii_variants:
+                    bic_oiii_boot[v] = np.array(
+                        [rec.get(v, np.nan) for rec in oiii_records]
+                    )
+                bic_oiii_off = float(np.nanmedian(bic_oiii_boot["oiii_off"]))
+                bic_oiii_on = float(np.nanmedian(bic_oiii_boot["oiii_on"]))
+            else:
+                # Single-point BIC on real data.
+                fit_off, _ = _fit_model_variant(
+                    spectrum, z, narrow_lines, grating, R, continuum, deg,
+                    broad_type=baseline_broad, n_boot=0,
+                    narrow_fit=fit_narrow,
+                    n_jobs=n_jobs, sigma_factor=sigma_factor,
+                    centroid_vmax=centroid_vmax,
+                    moving_average=moving_average,
+                    tie_uv_doublets=tie_uv_doublets,
+                    tie_uv_centroids=tie_uv_centroids,
+                    tie_uv_widths=tie_uv_widths,
+                    sigma_overrides=sigma_overrides,
+                    centroid_overrides=centroid_overrides,
+                    niv_doublet_ratio=niv_doublet_ratio,
+                    ciii_doublet_ratio=ciii_doublet_ratio,
+                    oiii_broad=False,
+                )
+                fit_on, _ = _fit_model_variant(
+                    spectrum, z, narrow_lines, grating, R, continuum, deg,
+                    broad_type=baseline_broad, n_boot=0,
+                    narrow_fit=fit_narrow,
+                    n_jobs=n_jobs, sigma_factor=sigma_factor,
+                    centroid_vmax=centroid_vmax,
+                    moving_average=moving_average,
+                    tie_uv_doublets=tie_uv_doublets,
+                    tie_uv_centroids=tie_uv_centroids,
+                    tie_uv_widths=tie_uv_widths,
+                    sigma_overrides=sigma_overrides,
+                    centroid_overrides=centroid_overrides,
+                    niv_doublet_ratio=niv_doublet_ratio,
+                    ciii_doublet_ratio=ciii_doublet_ratio,
+                    oiii_broad=True,
+                )
+                flam_err = _ujy_to_flam(spectrum.err_ujy, spectrum.wave_um)
+                for fit_v, key in ((fit_off, "oiii_off"), (fit_on, "oiii_on")):
+                    flam_data = _ujy_to_flam(
+                        spectrum.flux_ujy - fit_v.continuum, spectrum.wave_um
+                    )
+                    flam_model = _ujy_to_flam(fit_v.model_flux, spectrum.wave_um)
+                    valid = spectrum.mask_valid() & oiii_mask
+                    resid = flam_data - flam_model
+                    nf = (
+                        int(np.sum(fit_v.constraints.free_mask()))
+                        if fit_v.constraints is not None
+                        else len(fit_v.params)
+                    )
+                    bic_val = _compute_bic(resid, flam_err, valid, nf)
+                    if key == "oiii_off":
+                        bic_oiii_off = bic_val
+                    else:
+                        bic_oiii_on = bic_val
+
+            delta_oiii = bic_oiii_off - bic_oiii_on
+            oiii_selected = (
+                np.isfinite(bic_oiii_off)
+                and np.isfinite(bic_oiii_on)
+                and delta_oiii >= bic_delta
+            )
+            bic_src = "median" if n_boot_bic > 0 else "single-point"
+            logger.info(
+                "[OIII] broad BIC (%s): off=%.1f, on=%.1f, ΔBIC=%.1f → %s",
+                bic_src, bic_oiii_off, bic_oiii_on, delta_oiii,
+                "ON" if oiii_selected else "OFF",
+            )
+
     # --- Phase 4: re-fit only the selected model with bootstrap ---
     if n_boot > 0:
         broad_type = None if best_name == "narrow" else best_name
         best_fit, _ = _fit_model_variant(
             spectrum, z, narrow_lines, grating, R, continuum, deg,
             broad_type=broad_type, n_boot=n_boot,
-            narrow_fit=fit_narrow if broad_type is not None else None,
+            narrow_fit=fit_narrow if (broad_type is not None or oiii_selected) else None,
             n_jobs=n_jobs, sigma_factor=sigma_factor,
             centroid_vmax=centroid_vmax,
             moving_average=moving_average, tie_uv_doublets=tie_uv_doublets,
@@ -751,11 +970,60 @@ def fit_with_broad(
             centroid_overrides=centroid_overrides,
             niv_doublet_ratio=niv_doublet_ratio,
             ciii_doublet_ratio=ciii_doublet_ratio,
+            oiii_broad=oiii_selected,
         )
-        all_fits[best_name] = best_fit
+        key = best_name + ("+oiii_broad" if oiii_selected else "")
+        all_fits[key] = best_fit
+        selected_key = key
+    else:
+        # No bootstrap requested.  If OIII selected but Phase 2 didn't
+        # produce a fit with OIII broad lines, build one now (no bootstrap).
+        if oiii_selected and best_name not in (
+            "narrow",
+        ) and f"{best_name}+oiii_broad" not in all_fits:
+            best_fit, _ = _fit_model_variant(
+                spectrum, z, narrow_lines, grating, R, continuum, deg,
+                broad_type=None if best_name == "narrow" else best_name,
+                n_boot=0,
+                narrow_fit=fit_narrow,
+                n_jobs=n_jobs, sigma_factor=sigma_factor,
+                centroid_vmax=centroid_vmax,
+                moving_average=moving_average,
+                tie_uv_doublets=tie_uv_doublets,
+                tie_uv_centroids=tie_uv_centroids,
+                tie_uv_widths=tie_uv_widths,
+                sigma_overrides=sigma_overrides,
+                centroid_overrides=centroid_overrides,
+                niv_doublet_ratio=niv_doublet_ratio,
+                ciii_doublet_ratio=ciii_doublet_ratio,
+                oiii_broad=True,
+            )
+            all_fits[f"{best_name}+oiii_broad"] = best_fit
+            selected_key = f"{best_name}+oiii_broad"
+        elif oiii_selected and best_name == "narrow":
+            best_fit, _ = _fit_model_variant(
+                spectrum, z, narrow_lines, grating, R, continuum, deg,
+                broad_type=None, n_boot=0,
+                narrow_fit=fit_narrow,
+                n_jobs=n_jobs, sigma_factor=sigma_factor,
+                centroid_vmax=centroid_vmax,
+                moving_average=moving_average,
+                tie_uv_doublets=tie_uv_doublets,
+                tie_uv_centroids=tie_uv_centroids,
+                tie_uv_widths=tie_uv_widths,
+                sigma_overrides=sigma_overrides,
+                centroid_overrides=centroid_overrides,
+                niv_doublet_ratio=niv_doublet_ratio,
+                ciii_doublet_ratio=ciii_doublet_ratio,
+                oiii_broad=True,
+            )
+            all_fits["narrow+oiii_broad"] = best_fit
+            selected_key = "narrow+oiii_broad"
+        else:
+            selected_key = best_name
 
     return BroadFitResult(
-        best_fit=all_fits[best_name],
+        best_fit=all_fits[selected_key],
         selected_model=best_name,
         bic_narrow=bic_narrow,
         bic_broad1=bic_b1,
@@ -763,4 +1031,8 @@ def fit_with_broad(
         bic_both=bic_both,
         all_fits=all_fits,
         bic_bootstrap=bic_boot_dist,
+        oiii_broad_selected=oiii_selected,
+        bic_oiii_off=bic_oiii_off,
+        bic_oiii_on=bic_oiii_on,
+        bic_oiii_bootstrap=bic_oiii_boot,
     )

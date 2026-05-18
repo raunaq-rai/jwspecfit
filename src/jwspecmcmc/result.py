@@ -408,6 +408,12 @@ class MCMCBroadFitResult:
     bic_broad1: float
     bic_broad2: float
     bic_both: float
+    # Independent [OIII] outflow component selection.  When
+    # ``oiii_broad_selected`` is True, the MCMC chains include
+    # ``OIII_5007_BROAD``/``OIII_4959_BROAD`` posteriors.
+    oiii_broad_selected: bool = False
+    bic_oiii_off: float = float("nan")
+    bic_oiii_on: float = float("nan")
 
     # Delegate all MCMCResult attributes for full API compatibility.
 

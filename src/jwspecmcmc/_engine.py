@@ -877,6 +877,8 @@ def _fit_with_broad_mcmc(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    fit_oiii_broad: bool = False,
+    oiii_snr_threshold: float = 5.0,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
 
@@ -966,6 +968,8 @@ def _fit_with_broad_mcmc(
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
+        fit_oiii_broad=fit_oiii_broad,
+        oiii_snr_threshold=oiii_snr_threshold,
     )
 
     selected_model = bic_result.selected_model
@@ -1033,4 +1037,7 @@ def _fit_with_broad_mcmc(
         bic_broad1=bic_result.bic_broad1,
         bic_broad2=bic_result.bic_broad2,
         bic_both=bic_result.bic_both,
+        oiii_broad_selected=bic_result.oiii_broad_selected,
+        bic_oiii_off=bic_result.bic_oiii_off,
+        bic_oiii_on=bic_result.bic_oiii_on,
     )

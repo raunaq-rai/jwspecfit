@@ -659,10 +659,16 @@ def fit_lines(
 
         # Cap at half the distance to the nearest neighbour to prevent
         # lines from drifting into each other.
+        # Exclude the narrow counterpart of a broad line: it sits at the
+        # same rest wavelength, so naive nearest-neighbour distance would
+        # be 0 Å and collapse the centroid bounds.  For Balmer broads
+        # this is masked by the centroid tie in ConstraintSet, but
+        # untied broads (e.g. OIII outflow components) need this filter.
+        own_rest = REST_LINES_A[name]
         other_obs = [
             REST_LINES_A[n] * (1.0 + z)
             for j, n in enumerate(line_names)
-            if j != i and "BROAD" not in n
+            if j != i and "BROAD" not in n and REST_LINES_A[n] != own_rest
         ]
         if other_obs:
             min_sep = min(abs(lam_obs_A - o) for o in other_obs)
