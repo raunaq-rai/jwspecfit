@@ -7,7 +7,7 @@ flux posteriors, convergence diagnostics, and BIC metadata.
 Example
 -------
 >>> import jwspecmcmc
->>> result = jwspecmcmc.fit_lines(spec, z=6.0, mode="off")
+>>> result = jwspecmcmc.fit_lines(spec, z=6.0, fit_balmer_broad=False, fit_oiii_broad=False)
 >>> jwspecmcmc.save_mcmc_result(result, "mcmc.npz")
 >>> loaded = jwspecmcmc.load_mcmc_result("mcmc.npz")
 """

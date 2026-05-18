@@ -1,17 +1,25 @@
 """jwspecmcmc — MCMC emission-line fitting for JWST NIRSpec spectra.
 
 A companion to ``jwspecfit`` that replaces bootstrap uncertainties with
-full Bayesian posterior sampling via **emcee** or **nautilus**.
+full Bayesian posterior sampling via **emcee**, **nautilus**, or **NUTS**.
 
-By default, ``fit_lines()`` performs BIC-based broad Balmer component
-selection before MCMC sampling.  Set ``mode="off"`` for narrow-only.
+By default, ``fit_lines()`` performs two independent BIC-based broad
+component selections before MCMC sampling:
+
+- ``fit_balmer_broad=True`` — Balmer broad (narrow vs. intermediate /
+  very-broad / both, on Balmer pixels).
+- ``fit_oiii_broad=True``   — [OIII] outflow broad (on OIII pixels).
+
+Set either flag to ``False`` to skip that test; set both to ``False``
+for narrow-only.
 
 Example
 -------
 >>> import jwspecfit, jwspecmcmc
 >>> spec = jwspecfit.read_fits("spectrum.fits")
->>> result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="emcee", n_steps=2000)
->>> result.selected_model          # "narrow", "broad1", "broad2", or "both"
+>>> result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="nuts")
+>>> result.selected_model          # "narrow" | "broad1" | "broad2" | "both"
+>>> result.oiii_broad_selected     # bool — independent of selected_model
 >>> result.lines["OIII_5007"].flux_err  # asymmetric 68% CI
 >>> ratio = result.flux_ratio_posterior("OIII_5007", "HBETA")
 """
@@ -73,10 +81,12 @@ def fit_lines(
     max_tree_depth: int = 10,
     progress: bool = True,
     seed: int = 42,
-    mode: str = "auto",
+    fit_balmer_broad: bool = True,
+    fit_oiii_broad: bool = True,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
+    oiii_snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
     sigma_factor: float = 1.0,
     moving_average: bool | int = False,
@@ -88,14 +98,16 @@ def fit_lines(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
-    fit_oiii_broad: bool = False,
-    oiii_snr_threshold: float = 5.0,
 ) -> MCMCResult | MCMCBroadFitResult:
     """Fit emission lines using MCMC sampling.
 
-    By default (``mode="auto"``), performs BIC-based broad Balmer
-    component selection before MCMC.  Set ``mode="off"`` for
-    narrow-only fitting.
+    Two independent BIC-based broad component tests can be enabled:
+
+    - ``fit_balmer_broad=True`` (default) — Balmer broad selection.
+    - ``fit_oiii_broad=True`` (default)   — [OIII] outflow selection.
+
+    Both can be selected, only one, or neither.  Set both to
+    ``False`` for a narrow-only MCMC fit.
 
     Parameters
     ----------
@@ -136,20 +148,24 @@ def fit_lines(
         Show progress bar.
     seed : int
         Random seed.
-    mode : str
-        Broad component mode (default ``"auto"``):
-        - ``"auto"``: BIC-based selection.
-        - ``"off"``: Narrow-only (no broad component search).
-        - ``"broad1"``: Force intermediate broad.
-        - ``"broad2"``: Force very broad.
-        - ``"both"``: Force both broad components.
+    fit_balmer_broad : bool
+        If ``True`` (default), run BIC selection for a broad Balmer
+        component (narrow vs. intermediate vs. very-broad vs. both),
+        gated by Hα SNR.
+    fit_oiii_broad : bool
+        If ``True`` (default), run an independent BIC test for a broad
+        component on [OIII] 5007/4959 (outflow signature), gated by
+        [OIII] 5007 SNR.
     n_boot_bic : int
         Bootstrap iterations for BIC model selection (default 100).
-        Only used when ``mode != "off"``.
+        Only used when at least one of the broad flags is True.
     n_jobs : int
         Parallel jobs for BIC bootstrap (default ``-1``).
     snr_threshold : float
-        Minimum Ha SNR to attempt broad fitting (default 5.0).
+        Minimum Hα SNR to attempt Balmer broad fitting (default 5.0).
+    oiii_snr_threshold : float
+        Minimum [OIII] 5007/4959 SNR to attempt OIII broad fitting
+        (default 5.0).
     bic_delta : float
         ΔBIC threshold for model selection (default 6.0).
     sigma_factor : float
@@ -159,14 +175,6 @@ def fit_lines(
         If ``False`` (default), use polynomial continuum.  If ``True``,
         use a median filter with a default window of 75 pixels.  If an
         ``int``, use that as the median-filter window size.
-    fit_oiii_broad : bool
-        If ``True``, run an independent BIC test for a broad component
-        on [OIII] 5007/4959 (outflow signature).  Decoupled from the
-        Balmer broad selection — both can be selected, only one, or
-        neither.  Default ``False``.
-    oiii_snr_threshold : float
-        Minimum [OIII] 5007 SNR to attempt the OIII broad fit
-        (default 5.0).  Only used when ``fit_oiii_broad=True``.
     tie_uv_doublets : bool
         Tie UV doublet kinematics and fix resonance-line flux ratios.
         Recommended for stacked spectra where doublets are poorly
@@ -175,12 +183,12 @@ def fit_lines(
     Returns
     -------
     MCMCBroadFitResult
-        When ``mode != "off"``.  Delegates all :class:`MCMCResult`
-        attributes via properties.
+        When at least one broad flag is True.  Delegates all
+        :class:`MCMCResult` attributes via properties.
     MCMCResult
-        When ``mode="off"``.
+        When both broad flags are False.
     """
-    if mode == "off":
+    if not fit_balmer_broad and not fit_oiii_broad:
         return _fit_lines_mcmc(
             spectrum, z,
             sampler=sampler,
@@ -225,10 +233,12 @@ def fit_lines(
         wave_range_A=wave_range_A,
         deg=deg,
         clip_sigma=clip_sigma,
-        mode=mode,
+        fit_balmer_broad=fit_balmer_broad,
+        fit_oiii_broad=fit_oiii_broad,
         n_boot_bic=n_boot_bic,
         n_jobs=n_jobs,
         snr_threshold=snr_threshold,
+        oiii_snr_threshold=oiii_snr_threshold,
         bic_delta=bic_delta,
         prior_overrides=prior_overrides,
         n_walkers=n_walkers,
@@ -253,8 +263,6 @@ def fit_lines(
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
-        fit_oiii_broad=fit_oiii_broad,
-        oiii_snr_threshold=oiii_snr_threshold,
     )
 
 
@@ -269,10 +277,12 @@ def fit_with_broad(
     wave_range_A: tuple[float, float] | None = None,
     deg: int = 2,
     clip_sigma: float = 2.5,
-    mode: str = "auto",
+    fit_balmer_broad: bool = True,
+    fit_oiii_broad: bool = True,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
+    oiii_snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
     prior_overrides: dict[str, Any] | None = None,
     n_walkers: int | str = "auto",
@@ -297,14 +307,11 @@ def fit_with_broad(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
-    fit_oiii_broad: bool = False,
-    oiii_snr_threshold: float = 5.0,
 ) -> MCMCBroadFitResult:
-    """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
+    """Fit emission lines with BIC-based broad selection, then MCMC.
 
     Phase 1 uses :func:`jwspecfit.fit_with_broad` (fast least-squares)
-    for BIC model selection.  Phase 2 runs MCMC on the winning model's
-    line list.
+    for BIC model selection.  Phase 2 runs MCMC on the winning model.
 
     Parameters
     ----------
@@ -314,64 +321,18 @@ def fit_with_broad(
         Source redshift.
     sampler : str
         ``"nuts"`` (default), ``"emcee"``, or ``"nautilus"``.
-    grating : str, optional
-        Grating name.
-    R : float or callable, optional
-        Resolving power.
-    lines : list of str, optional
-        Narrow line list (broad entries added automatically).
-    wave_range_A : tuple, optional
-        Observed wavelength range (Angstrom).
-    deg : int
-        Continuum polynomial degree.
-    clip_sigma : float
-        Continuum sigma-clipping threshold.
-    mode : str
-        Broad component mode: ``"auto"`` (BIC, default), ``"off"``,
-        ``"broad1"``, ``"broad2"``, ``"both"``.
-    n_boot_bic : int
-        Bootstrap iterations for BIC selection (default 100).
-    n_jobs : int
-        Parallel jobs for BIC bootstrap (default ``-1``).
+    fit_balmer_broad : bool
+        Run BIC selection for Balmer broad (default ``True``).
+    fit_oiii_broad : bool
+        Run independent BIC test for [OIII] broad (default ``True``).
     snr_threshold : float
-        Minimum Ha SNR for broad fitting (default 5.0).
+        Minimum Hα SNR for Balmer broad (default 5.0).
+    oiii_snr_threshold : float
+        Minimum [OIII] 5007 SNR for OIII broad (default 5.0).
     bic_delta : float
         ΔBIC threshold (default 6.0).
-    prior_overrides : dict, optional
-        Per-parameter prior overrides for MCMC.
-    n_walkers : int
-        Emcee walkers.  ``"auto"`` (default) picks based on n_dim and CPU cores.
-    n_steps : int
-        Emcee steps (default 2000).
-    n_burn : int or None
-        Emcee burn-in (auto if ``None``).
-    n_live : int
-        Nautilus live points (default 2000).
-    n_eff : int
-        Nautilus target effective samples (default 10000).
-    progress : bool
-        Show progress bar.
-    seed : int
-        Random seed.
-    sigma_factor : float
-        Multiplicative factor on the upper line-width bound.
-        Use values > 1 for stacked spectra (default 1.0).
-    moving_average : bool or int
-        If ``False`` (default), use polynomial continuum.  If ``True``,
-        use a median filter with a default window of 75 pixels.  If an
-        ``int``, use that as the median-filter window size.
-    fit_oiii_broad : bool
-        If ``True``, run an independent BIC test for a broad component
-        on [OIII] 5007/4959 (outflow signature).  Decoupled from the
-        Balmer broad selection — both can be selected, only one, or
-        neither.  Default ``False``.
-    oiii_snr_threshold : float
-        Minimum [OIII] 5007 SNR to attempt the OIII broad fit
-        (default 5.0).  Only used when ``fit_oiii_broad=True``.
-    tie_uv_doublets : bool
-        Tie UV doublet kinematics and fix resonance-line flux ratios.
-        Recommended for stacked spectra where doublets are poorly
-        resolved (default ``False``).
+
+    See :func:`fit_lines` for the full parameter list.
 
     Returns
     -------
@@ -386,10 +347,12 @@ def fit_with_broad(
         wave_range_A=wave_range_A,
         deg=deg,
         clip_sigma=clip_sigma,
-        mode=mode,
+        fit_balmer_broad=fit_balmer_broad,
+        fit_oiii_broad=fit_oiii_broad,
         n_boot_bic=n_boot_bic,
         n_jobs=n_jobs,
         snr_threshold=snr_threshold,
+        oiii_snr_threshold=oiii_snr_threshold,
         bic_delta=bic_delta,
         prior_overrides=prior_overrides,
         n_walkers=n_walkers,
@@ -414,8 +377,6 @@ def fit_with_broad(
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
-        fit_oiii_broad=fit_oiii_broad,
-        oiii_snr_threshold=oiii_snr_threshold,
     )
 
 

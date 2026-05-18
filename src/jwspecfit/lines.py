@@ -66,6 +66,10 @@ REST_LINES_A: dict[str, float] = {
     "OIII_5007": 5009.636990676784,
     # Nitrogen, Helium
     "NII_5756": 5757.786514027234,
+    # CIV optical doublet (Wolf-Rayet / AGN feature):
+    # 2p²P° → 3s²S transition, vacuum wavelengths.
+    "CIV_5803": 5802.97,
+    "CIV_5814": 5813.62,
     "HEI_5877": 5878.88092174501,
     "OI_6302": 6302.046,
     "NII_6549": 6551.669402278604,
@@ -197,6 +201,8 @@ _GRATING_LINES = [
     "OIII_4959",
     "OIII_5007",
     "NII_5756",
+    "CIV_5803",
+    "CIV_5814",
     "HEI_5877",
     "NII_6549",
     "Ha",

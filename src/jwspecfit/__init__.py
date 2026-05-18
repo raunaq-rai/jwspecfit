@@ -152,9 +152,11 @@ def fit_lines(
     clip_sigma: float = 2.5,
     n_jobs: int = -1,
     save_path: str | Path | None = None,
-    mode: str = "auto",
+    fit_balmer_broad: bool = True,
+    fit_oiii_broad: bool = True,
     n_boot_bic: int = 100,
     snr_threshold: float = 5.0,
+    oiii_snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
@@ -170,9 +172,13 @@ def fit_lines(
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
-    By default (``mode="auto"``), performs BIC-based broad Balmer
-    component selection via :func:`fit_with_broad`.  Set ``mode="off"``
-    for narrow-only fitting.
+    By default, runs two BIC-based broad component selections via
+    :func:`fit_with_broad`:
+
+    - ``fit_balmer_broad=True`` — Balmer broad component selection.
+    - ``fit_oiii_broad=True`` — independent [OIII] outflow selection.
+
+    Set both flags to ``False`` for a narrow-only fit.
 
     Parameters
     ----------
@@ -207,18 +213,20 @@ def fit_lines(
         Parallel jobs for bootstrap (default ``-1``).
     save_path : str or Path, optional
         Path to save the result.
-    mode : str
-        Broad component mode (default ``"auto"``):
-        - ``"auto"``: BIC-based selection.
-        - ``"off"``: Narrow-only (no broad component search).
-        - ``"broad1"``: Force intermediate broad.
-        - ``"broad2"``: Force very broad.
-        - ``"both"``: Force both broad components.
+    fit_balmer_broad : bool
+        If ``True`` (default), run BIC selection for Balmer broad
+        components.
+    fit_oiii_broad : bool
+        If ``True`` (default), run independent BIC test for [OIII]
+        outflow broad components.
     n_boot_bic : int
         Bootstrap iterations for BIC model selection (default 100).
-        Only used when ``mode != "off"``.
+        Only used when at least one broad flag is True.
     snr_threshold : float
-        Minimum Ha SNR to attempt broad fitting (default 5.0).
+        Minimum Hα SNR to attempt Balmer broad fitting (default 5.0).
+    oiii_snr_threshold : float
+        Minimum [OIII] 5007/4959 SNR to attempt OIII broad fitting
+        (default 5.0).
     bic_delta : float
         ΔBIC threshold for model selection (default 6.0).
     sigma_factor : float
@@ -239,13 +247,13 @@ def fit_lines(
     Returns
     -------
     BroadFitResult
-        When ``mode != "off"`` and *wave_windows_A* is ``None``.
-        Delegates all :class:`FitResult` attributes (``lines``,
-        ``params``, ``model_flux``, etc.) via properties, so it can be
-        used as a drop-in replacement.
+        When at least one broad flag is True and *wave_windows_A* is
+        ``None``.  Delegates all :class:`FitResult` attributes
+        (``lines``, ``params``, ``model_flux``, etc.) via properties,
+        so it can be used as a drop-in replacement.
     FitResult
-        When ``mode="off"`` or when *wave_windows_A* is specified
-        (merged result).
+        When both broad flags are False, or when *wave_windows_A* is
+        specified (merged result).
     """
     # --- Multi-window fitting ---
     if wave_windows_A is not None:
@@ -293,7 +301,7 @@ def fit_lines(
             win_label = f"Window {i + 1}/{len(wave_windows_A)}"
             print(f"--- {win_label}: {lo:.0f}\u2013{hi:.0f} \u00c5 ---")
 
-            if mode == "off":
+            if not fit_balmer_broad and not fit_oiii_broad:
                 res = _fit_lines_narrow(
                     cropped, z,
                     grating=grating, R=R, lines=lines, deg=deg,
@@ -315,9 +323,12 @@ def fit_lines(
                 res = fit_with_broad(
                     cropped, z,
                     grating=grating, R=R, lines=lines,
-                    deg=deg, mode=mode,
+                    deg=deg,
+                    fit_balmer_broad=fit_balmer_broad,
+                    fit_oiii_broad=fit_oiii_broad,
                     n_boot=n_boot, n_boot_bic=n_boot_bic,
                     n_jobs=n_jobs, snr_threshold=snr_threshold,
+                    oiii_snr_threshold=oiii_snr_threshold,
                     bic_delta=bic_delta, sigma_factor=sigma_factor,
                     centroid_vmax=centroid_vmax,
                     moving_average=moving_average,
@@ -340,7 +351,7 @@ def fit_lines(
         return merged
 
     # --- Single-window fitting (default) ---
-    if mode == "off":
+    if not fit_balmer_broad and not fit_oiii_broad:
         return _fit_lines_narrow(
             spectrum, z,
             grating=grating, R=R, lines=lines,
@@ -363,11 +374,14 @@ def fit_lines(
     return fit_with_broad(
         spectrum, z,
         grating=grating, R=R, lines=lines,
-        deg=deg, mode=mode,
+        deg=deg,
+        fit_balmer_broad=fit_balmer_broad,
+        fit_oiii_broad=fit_oiii_broad,
         n_boot=n_boot,
         n_boot_bic=n_boot_bic,
         n_jobs=n_jobs,
         snr_threshold=snr_threshold,
+        oiii_snr_threshold=oiii_snr_threshold,
         bic_delta=bic_delta,
         sigma_factor=sigma_factor,
         centroid_vmax=centroid_vmax,

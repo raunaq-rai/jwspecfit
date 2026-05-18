@@ -845,10 +845,12 @@ def _fit_with_broad_mcmc(
     wave_range_A: tuple[float, float] | None = None,
     deg: int = 2,
     clip_sigma: float = 2.5,
-    mode: str = "auto",
+    fit_balmer_broad: bool = True,
+    fit_oiii_broad: bool = True,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
+    oiii_snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
     prior_overrides: dict[str, Any] | None = None,
     # emcee options
@@ -877,10 +879,8 @@ def _fit_with_broad_mcmc(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
-    fit_oiii_broad: bool = False,
-    oiii_snr_threshold: float = 5.0,
 ) -> MCMCBroadFitResult:
-    """Fit emission lines with BIC-based broad Balmer selection, then MCMC.
+    """Fit emission lines with BIC-based broad selection, then MCMC.
 
     Phase 1 uses :func:`jwspecfit.fit_with_broad` (fast least-squares)
     for BIC model selection.  Phase 2 runs MCMC on the winning model's
@@ -906,16 +906,22 @@ def _fit_with_broad_mcmc(
         Continuum polynomial degree.
     clip_sigma : float
         Continuum sigma-clipping threshold.
-    mode : str
-        Broad component mode: ``"auto"`` (BIC selection, default),
-        ``"off"`` (narrow only), ``"broad1"``, ``"broad2"``, ``"both"``.
+    fit_balmer_broad : bool
+        If ``True`` (default), run BIC selection for a broad Balmer
+        component (narrow vs. intermediate vs. very-broad vs. both).
+    fit_oiii_broad : bool
+        If ``True`` (default), run an independent BIC test for a broad
+        component on [OIII] 5007/4959 (outflow signature).
     n_boot_bic : int
         Bootstrap iterations for BIC model selection (default 100).
         Set to 0 for single-point BIC.
     n_jobs : int
         Parallel jobs for BIC bootstrap (default ``-1`` = all cores).
     snr_threshold : float
-        Minimum Ha SNR to attempt broad fitting (default 5.0).
+        Minimum Ha SNR to attempt Balmer broad fitting (default 5.0).
+    oiii_snr_threshold : float
+        Minimum [OIII] 5007/4959 SNR to attempt OIII broad fitting
+        (default 5.0).
     bic_delta : float
         ΔBIC threshold for accepting a more complex model (default 6.0).
     prior_overrides : dict, optional
@@ -948,16 +954,22 @@ def _fit_with_broad_mcmc(
     # ------------------------------------------------------------------
     # Phase 1: BIC model selection via fast least-squares
     # ------------------------------------------------------------------
-    logger.info("Phase 1: BIC model selection via jwspecfit.fit_with_broad(mode=%r)", mode)
+    logger.info(
+        "Phase 1: BIC selection via jwspecfit.fit_with_broad "
+        "(balmer=%s, oiii=%s)", fit_balmer_broad, fit_oiii_broad,
+    )
 
     bic_result = _fit_with_broad_mle(
         spectrum, z,
         grating=grating, R=R, lines=lines,
-        deg=deg, mode=mode,
+        deg=deg,
+        fit_balmer_broad=fit_balmer_broad,
+        fit_oiii_broad=fit_oiii_broad,
         n_boot=0,
         n_boot_bic=n_boot_bic,
         n_jobs=n_jobs,
         snr_threshold=snr_threshold,
+        oiii_snr_threshold=oiii_snr_threshold,
         bic_delta=bic_delta,
         sigma_factor=sigma_factor,
         moving_average=moving_average,
@@ -968,8 +980,6 @@ def _fit_with_broad_mcmc(
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
-        fit_oiii_broad=fit_oiii_broad,
-        oiii_snr_threshold=oiii_snr_threshold,
     )
 
     selected_model = bic_result.selected_model

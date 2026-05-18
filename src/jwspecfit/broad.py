@@ -539,11 +539,13 @@ def fit_with_broad(
     R: float | Callable | None = None,
     lines: list[str] | None = None,
     deg: int = 2,
-    mode: str = "auto",
+    fit_balmer_broad: bool = True,
+    fit_oiii_broad: bool = True,
     n_boot: int = 1000,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
+    oiii_snr_threshold: float = 5.0,
     bic_delta: float = BIC_DELTA_THRESHOLD,
     sigma_factor: float = 1.0,
     centroid_vmax: float = 500.0,
@@ -555,11 +557,22 @@ def fit_with_broad(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
-    fit_oiii_broad: bool = False,
-    oiii_snr_threshold: float = 5.0,
     _print_R: bool = True,
 ) -> BroadFitResult:
-    """Fit emission lines with optional broad Balmer components.
+    """Fit emission lines with optional BIC-selected broad components.
+
+    Two independent BIC tests can be enabled:
+
+    - **Balmer broad** (``fit_balmer_broad``): tests narrow vs.
+      narrow + intermediate broad (FWHM 500–2000 km/s) vs.
+      narrow + very broad (FWHM 2000–5000 km/s) vs. narrow + both.
+      Gated by ``snr_threshold`` on Hα.
+    - **[OIII] broad** (``fit_oiii_broad``): tests baseline vs.
+      baseline + broad [OIII] 5007/4959 (outflow signature).  Gated
+      by ``oiii_snr_threshold`` on [OIII] 5007 / 4959.
+
+    The two tests are independent — both can be selected, only one,
+    or neither.
 
     Parameters
     ----------
@@ -575,13 +588,13 @@ def fit_with_broad(
         Narrow line list. If ``None``, auto-detected.
     deg : int
         Continuum polynomial degree.
-    mode : str
-        Broad component mode:
-        - ``"auto"``: BIC-based selection (default).
-        - ``"off"``: Narrow-only.
-        - ``"broad1"``: Force intermediate broad.
-        - ``"broad2"``: Force very broad.
-        - ``"both"``: Force both broad components.
+    fit_balmer_broad : bool
+        If ``True`` (default), run BIC model selection for a broad
+        Balmer component (intermediate / very-broad / both).  If
+        ``False``, skip the Balmer broad test entirely.
+    fit_oiii_broad : bool
+        If ``True`` (default), run an independent BIC test for a broad
+        component on [OIII] 5007/4959.  Decoupled from the Balmer test.
     n_boot : int
         Number of bootstrap iterations for flux uncertainties (default 1000).
     n_boot_bic : int
@@ -591,9 +604,12 @@ def fit_with_broad(
         Number of parallel jobs for bootstrap. ``-1`` uses all cores,
         ``1`` runs sequentially. Default ``-1``.
     snr_threshold : float
-        Minimum Hα SNR to attempt broad fitting (default 5.0).
+        Minimum Hα SNR to attempt the Balmer broad fit (default 5.0).
+    oiii_snr_threshold : float
+        Minimum [OIII] 5007 / 4959 SNR to attempt the OIII broad fit
+        (default 5.0).
     bic_delta : float
-        ΔBIC threshold for model selection (default 6.0).
+        ΔBIC threshold for accepting a more complex model (default 6.0).
 
     Returns
     -------
@@ -652,9 +668,9 @@ def fit_with_broad(
 
     bic_boot_dist: dict[str, np.ndarray] = {}
 
-    if mode == "off":
-        # No broad of any kind — short-circuit before the OIII stage too,
-        # because `mode="off"` is an explicit user request for narrow only.
+    if not fit_balmer_broad and not fit_oiii_broad:
+        # Narrow-only: skip every BIC stage and just return the (optionally
+        # bootstrapped) narrow fit.
         if n_boot > 0:
             fit_narrow, bic_narrow = _fit_model_variant(
                 spectrum, z, narrow_lines, grating, R, continuum, deg,
@@ -679,34 +695,28 @@ def fit_with_broad(
             all_fits=all_fits,
         )
 
-    # Check Hα SNR before attempting broad fits (analytic errors are fine here).
+    # Check Hα SNR before attempting Balmer broad fits.
     ha_snr = 0.0
     if "Ha" in fit_narrow.lines:
         ha_snr = fit_narrow.lines["Ha"].snr
 
-    attempt_broad = (mode != "off") and (mode != "auto" or ha_snr >= snr_threshold)
-
-    skip_balmer_bic = (not attempt_broad and mode == "auto")
+    skip_balmer_bic = (not fit_balmer_broad) or (ha_snr < snr_threshold)
     if skip_balmer_bic:
-        logger.info(
-            "Hα SNR=%.1f < %.1f; skipping Balmer broad fitting "
-            "(OIII broad still tested if requested).",
-            ha_snr, snr_threshold,
-        )
+        if fit_balmer_broad:
+            logger.info(
+                "Hα SNR=%.1f < %.1f; skipping Balmer broad fitting "
+                "(OIII broad still tested if requested).",
+                ha_snr, snr_threshold,
+            )
         best_name = "narrow"
 
-    # Determine which variants to fit.
+    # Determine which Balmer variants to fit.
     variants_to_fit: list[str] = ["narrow"]
     if not skip_balmer_bic:
-        if mode in ("auto", "broad1", "both"):
-            variants_to_fit.append("broad1")
-        if mode in ("auto", "broad2", "both"):
-            variants_to_fit.append("broad2")
-        if mode in ("auto", "both"):
-            variants_to_fit.append("both")
+        variants_to_fit.extend(["broad1", "broad2", "both"])
 
     # --- Phase 2: BIC model selection ---
-    if not skip_balmer_bic and n_boot_bic > 0 and mode == "auto":
+    if not skip_balmer_bic and n_boot_bic > 0:
         # Bootstrap BIC on Balmer pixels only.
         from joblib import Parallel, delayed
         from tqdm import tqdm
@@ -764,8 +774,8 @@ def fit_with_broad(
                 fit_v, _ = fut.result()
                 all_fits[variant] = fit_v
 
-    else:
-        # Legacy single-point BIC (n_boot_bic=0 or forced mode).
+    elif not skip_balmer_bic:
+        # Single-point BIC (n_boot_bic=0).
         from concurrent.futures import ThreadPoolExecutor
 
         broad_variants = [v for v in variants_to_fit if v != "narrow"]
@@ -792,10 +802,7 @@ def fit_with_broad(
                     bic_both = bic_v
 
     # --- Phase 3: select best Balmer model by BIC ---
-    if skip_balmer_bic:
-        # best_name already set to "narrow" above.
-        pass
-    elif mode == "auto":
+    if not skip_balmer_bic:
         candidates = {
             "narrow": bic_narrow,
             "broad1": bic_b1,
@@ -816,14 +823,6 @@ def fit_with_broad(
             "BIC selection (%s): narrow=%.1f, broad1=%.1f, broad2=%.1f, both=%.1f → %s",
             bic_src, bic_narrow, bic_b1, bic_b2, bic_both, best_name,
         )
-    elif mode == "broad1":
-        best_name = "broad1"
-    elif mode == "broad2":
-        best_name = "broad2"
-    elif mode == "both":
-        best_name = "both"
-    else:
-        best_name = "narrow"
 
     # --- Phase 3.5: independent [OIII] outflow BIC test ---
     oiii_selected = False
