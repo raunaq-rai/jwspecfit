@@ -1369,6 +1369,7 @@ def plot_2d_1d(
     err_colour: str = "steelblue",
     err_alpha: float = 0.1,
     figsize: tuple[float, float] = (8, 4),
+    dpi: float = 300,
     title: str | None = None,
     lines: list[str] | bool | None = None,
     add_lines: list[str] | dict[str, float] | None = None,
@@ -1411,8 +1412,9 @@ def plot_2d_1d(
         Colour and line width of the 1D flux trace.
     err_colour, err_alpha
         Fill colour and alpha for the ``±1σ`` error band.
-    figsize, height_ratios
-        Matplotlib figure size and 2D-vs-1D height ratio.
+    figsize, dpi, height_ratios
+        Matplotlib figure size, resolution (default 300), and 2D-vs-1D
+        height ratio.
     title
         Optional title placed above the 2D panel.
     lines
@@ -1467,6 +1469,7 @@ def plot_2d_1d(
     fig, (ax2d, ax1d) = plt.subplots(
         2, 1,
         figsize=figsize,
+        dpi=dpi,
         gridspec_kw={"height_ratios": list(height_ratios), "hspace": 0.05},
         sharex=True,
     )
