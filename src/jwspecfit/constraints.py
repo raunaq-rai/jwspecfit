@@ -142,6 +142,28 @@ class ConstraintSet:
                 p[nL + idx[sec]] = p[nL + idx[pri]] * oiii_lam_ratio
                 p[2 * nL + idx[sec]] = p[2 * nL + idx[pri]] * oiii_lam_ratio
 
+        # --- Tie He I broad kinematics ---
+        # All HeI emission lines come from the He+ recombination zone
+        # (IP ~24.6 eV) so within each broad tier they trace one gas
+        # component and share σ_v / Δv.  Anchor on the first HeI broad
+        # present (by HEI_BROAD_CANDIDATES order); derive all others.
+        # Amplitudes are free (no fixed atomic ratio between HeI lines).
+        from .broad import HEI_BROAD_CANDIDATES as _HEI_BC
+        for suffix in ("_BROAD", "_BROAD2"):
+            present = [
+                f"{n}{suffix}" for n in _HEI_BC
+                if f"{n}{suffix}" in idx
+            ]
+            if len(present) < 2:
+                continue
+            anchor = present[0]
+            lam_anchor = REST_LINES_A[anchor]
+            i_anchor = idx[anchor]
+            for tgt in present[1:]:
+                ratio = REST_LINES_A[tgt] / lam_anchor
+                p[nL + idx[tgt]] = p[nL + i_anchor] * ratio
+                p[2 * nL + idx[tgt]] = p[2 * nL + i_anchor] * ratio
+
         # --- [NII] doublet constraint (after Balmer tying so NII_6585 σ is set) ---
         if self.tie_nii and "NII_6549" in idx and "NII_6585" in idx:
             i49 = idx["NII_6549"]
@@ -305,6 +327,18 @@ class ConstraintSet:
             if pri in idx and sec in idx:
                 free[nL + idx[sec]] = False
                 free[2 * nL + idx[sec]] = False
+
+        # HeI broad lines (both tiers): all non-anchor HeI broad
+        # centroids + widths are derived (same gas, single σ_v / Δv).
+        from .broad import HEI_BROAD_CANDIDATES as _HEI_BC
+        for suffix in ("_BROAD", "_BROAD2"):
+            present = [
+                f"{n}{suffix}" for n in _HEI_BC
+                if f"{n}{suffix}" in idx
+            ]
+            for tgt in present[1:]:
+                free[nL + idx[tgt]] = False
+                free[2 * nL + idx[tgt]] = False
 
         # UV doublet constraints.
         if self.tie_uv_doublets:

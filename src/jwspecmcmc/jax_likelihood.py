@@ -96,6 +96,26 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
             ops.append((nL + i_sec, nL + i_pri, oiii_lam_ratio))         # centroid
             ops.append((2 * nL + i_sec, 2 * nL + i_pri, oiii_lam_ratio))  # sigma
 
+    # --- HeI broad kinematics (same recombination zone gas) ---
+    # All HeI broads in each tier share one σ_v and Δv (anchored on
+    # the first present); each line's σ_λ / Δλ scales with rest λ.
+    from jwspecfit.broad import HEI_BROAD_CANDIDATES as _HEI_BC
+    for suffix in ("_BROAD", "_BROAD2"):
+        present = [
+            f"{n}{suffix}" for n in _HEI_BC
+            if f"{n}{suffix}" in idx
+        ]
+        if len(present) < 2:
+            continue
+        anchor = present[0]
+        i_anchor = idx[anchor]
+        lam_anchor = REST_LINES_A[anchor]
+        for tgt in present[1:]:
+            ratio = REST_LINES_A[tgt] / lam_anchor
+            i_tgt = idx[tgt]
+            ops.append((nL + i_tgt, nL + i_anchor, ratio))         # centroid
+            ops.append((2 * nL + i_tgt, 2 * nL + i_anchor, ratio))  # sigma
+
     # --- NII doublet ---
     if cs.tie_nii and "NII_6549" in idx and "NII_6585" in idx:
         i49 = idx["NII_6549"]

@@ -418,11 +418,24 @@ class MCMCBroadFitResult:
     bic_oiii_broad1: float = float("nan")
     bic_oiii_broad2: float = float("nan")
     bic_oiii_both: float = float("nan")
+    # He I broad component selection — same shape as OIII.  Within each
+    # tier, all observable HeI broads share kinematics (anchored on the
+    # first present in HEI_BROAD_CANDIDATES).
+    hei_selected: str = "off"
+    bic_hei_off: float = float("nan")
+    bic_hei_broad1: float = float("nan")
+    bic_hei_broad2: float = float("nan")
+    bic_hei_both: float = float("nan")
 
     @property
     def oiii_broad_selected(self) -> bool:
         """Convenience: True if any OIII broad component was selected."""
         return self.oiii_selected != "off"
+
+    @property
+    def hei_broad_selected(self) -> bool:
+        """Convenience: True if any HeI broad component was selected."""
+        return self.hei_selected != "off"
 
     # Delegate all MCMCResult attributes for full API compatibility.
 

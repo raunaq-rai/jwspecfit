@@ -852,10 +852,12 @@ def _fit_with_broad_mcmc(
     clip_sigma: float = 2.5,
     fit_balmer_broad: bool = False,
     fit_oiii_broad: bool = False,
+    fit_hei_broad: bool = False,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
     oiii_snr_threshold: float = 5.0,
+    hei_snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
     prior_overrides: dict[str, Any] | None = None,
     # emcee options
@@ -961,7 +963,8 @@ def _fit_with_broad_mcmc(
     # ------------------------------------------------------------------
     logger.info(
         "Phase 1: BIC selection via jwspecfit.fit_with_broad "
-        "(balmer=%s, oiii=%s)", fit_balmer_broad, fit_oiii_broad,
+        "(balmer=%s, oiii=%s, hei=%s)",
+        fit_balmer_broad, fit_oiii_broad, fit_hei_broad,
     )
 
     bic_result = _fit_with_broad_mle(
@@ -970,11 +973,13 @@ def _fit_with_broad_mcmc(
         deg=deg,
         fit_balmer_broad=fit_balmer_broad,
         fit_oiii_broad=fit_oiii_broad,
+        fit_hei_broad=fit_hei_broad,
         n_boot=0,
         n_boot_bic=n_boot_bic,
         n_jobs=n_jobs,
         snr_threshold=snr_threshold,
         oiii_snr_threshold=oiii_snr_threshold,
+        hei_snr_threshold=hei_snr_threshold,
         bic_delta=bic_delta,
         sigma_factor=sigma_factor,
         moving_average=moving_average,
@@ -1057,4 +1062,9 @@ def _fit_with_broad_mcmc(
         bic_oiii_broad1=bic_result.bic_oiii_broad1,
         bic_oiii_broad2=bic_result.bic_oiii_broad2,
         bic_oiii_both=bic_result.bic_oiii_both,
+        hei_selected=bic_result.hei_selected,
+        bic_hei_off=bic_result.bic_hei_off,
+        bic_hei_broad1=bic_result.bic_hei_broad1,
+        bic_hei_broad2=bic_result.bic_hei_broad2,
+        bic_hei_both=bic_result.bic_hei_both,
     )

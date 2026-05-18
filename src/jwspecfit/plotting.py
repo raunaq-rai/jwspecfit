@@ -402,6 +402,25 @@ _MULTI_PALETTE = [
     "#9467bd", "#8c564b", "#e377c2", "#17becf",
 ]
 
+# Component colours for plot_fit_interactive: every narrow line shares
+# one colour, every _BROAD shares another, every _BROAD2 a third, so
+# the eye groups them by kinematic class rather than by line identity.
+_COMP_COLOUR_NARROW = "rgba(31,119,180,0.85)"   # plotly C0 blue
+_COMP_COLOUR_BROAD = "rgba(255,127,14,0.75)"    # plotly C1 orange
+_COMP_COLOUR_BROAD2 = "rgba(214,39,40,0.75)"    # plotly C3 red
+_COMP_COLOUR_ABS = "rgba(70,130,180,0.8)"       # steel blue
+
+
+def _component_colour(name: str, is_abs: bool) -> str:
+    """Pick the fixed colour for a fitted component by class."""
+    if is_abs:
+        return _COMP_COLOUR_ABS
+    if "_BROAD2" in name:
+        return _COMP_COLOUR_BROAD2
+    if "_BROAD" in name:
+        return _COMP_COLOUR_BROAD
+    return _COMP_COLOUR_NARROW
+
 
 def plot_spectrum_interactive(
     source: "Spectrum | str | Path | Sequence[Spectrum | str | Path]",
@@ -1012,12 +1031,7 @@ def plot_fit_interactive(
             cont_fine_masked[~keep_fine] = np.nan
 
             is_broad = "BROAD" in name
-            if is_abs:
-                colour = "rgba(70,130,180,0.8)"  # steel blue for absorption
-            elif is_broad:
-                colour = "rgba(255,140,0,0.6)"
-            else:
-                colour = palette[i % len(palette)]
+            colour = _component_colour(name, is_abs)
             display_name = name.replace("abs_", "").replace("_", " ")
             dash = "dot" if is_broad else "solid"
 
@@ -1075,7 +1089,7 @@ def plot_fit_interactive(
             from .models import asymmetric_gaussian as _ag
 
             _A_pk, _mu_lya, _sig_lya, _alpha_lya = _lya_p
-            comp_col = palette[0]
+            comp_col = _COMP_COLOUR_NARROW
 
             # Fine wavelength grid around the line.
             w_lo_c = max(_mu_lya - 8 * _sig_lya, spec.wave_A.min())
@@ -1144,28 +1158,68 @@ def plot_fit_interactive(
             x_peak_c = mu_pk / zp1 if wave_unit == "A" else mu_pk * 1e-4 / zp1
             peak_info.append(("Lyα", x_peak_c, float(y_peak_c), comp_col, False))
 
-        # Line name annotations.
-        for name, x_peak, y_peak, colour, is_abs in peak_info:
-            display_name = name.replace("abs_", "").replace("_", " ")
-            is_broad = "BROAD" in name
-            # Full opacity for readable text.
-            if "rgba" in colour:
-                ann_colour = colour.rsplit(",", 1)[0] + ",1.0)"
-            else:
-                ann_colour = colour
-            # Absorption labels below the trough; emission labels above the peak.
-            fig.add_annotation(
-                x=x_peak,
-                y=y_peak,
-                xref="x",
-                yref="y",
-                text=f"<b>{display_name}</b>" if is_broad else display_name,
-                showarrow=False,
-                yshift=-12 if is_abs else 10,
-                font=dict(size=9, color=ann_colour),
-                xanchor="center",
-                yanchor="top" if is_abs else "bottom",
-            )
+        # --- Line-name annotations with row staggering to avoid overlap ---
+        # Separate emission and absorption labels so each side staggers
+        # independently (emission rises above peaks, absorption drops
+        # below troughs).  Within each side, sort by x and place each
+        # label in the first row where it sits ≥ `threshold` away from
+        # the last label in that row.
+        emission_lbls = [info for info in peak_info if not info[4]]
+        absorption_lbls = [info for info in peak_info if info[4]]
+        row_spacing_px = 14
+
+        if peak_info:
+            x_positions = [info[1] for info in peak_info]
+            x_range = max(x_positions) - min(x_positions)
+            threshold = 0.025 * x_range if x_range > 0 else 0.0
+        else:
+            threshold = 0.0
+
+        def _assign_rows(labels, thr):
+            labels_sorted = sorted(labels, key=lambda info: info[1])
+            row_last_x: list[float] = []
+            rows: list[int] = []
+            for _, x, _, _, _ in labels_sorted:
+                placed = False
+                for r, last_x in enumerate(row_last_x):
+                    if x - last_x >= thr:
+                        row_last_x[r] = x
+                        rows.append(r)
+                        placed = True
+                        break
+                if not placed:
+                    row_last_x.append(x)
+                    rows.append(len(row_last_x) - 1)
+            return labels_sorted, rows
+
+        for labels_group, sign in ((emission_lbls, +1), (absorption_lbls, -1)):
+            if not labels_group:
+                continue
+            labels_sorted, rows = _assign_rows(labels_group, threshold)
+            base_yshift = 10 if sign > 0 else -12
+            yanchor = "bottom" if sign > 0 else "top"
+            for (name, x_peak, y_peak, colour, _is_abs), row in zip(
+                labels_sorted, rows,
+            ):
+                display_name = name.replace("abs_", "").replace("_", " ")
+                is_broad = "BROAD" in name
+                if "rgba" in colour:
+                    ann_colour = colour.rsplit(",", 1)[0] + ",1.0)"
+                else:
+                    ann_colour = colour
+                yshift = base_yshift + sign * row * row_spacing_px
+                fig.add_annotation(
+                    x=x_peak,
+                    y=y_peak,
+                    xref="x",
+                    yref="y",
+                    text=f"<b>{display_name}</b>" if is_broad else display_name,
+                    showarrow=False,
+                    yshift=yshift,
+                    font=dict(size=9, color=ann_colour),
+                    xanchor="center",
+                    yanchor=yanchor,
+                )
 
     # Data (steps).
     _add(go.Scatter(

@@ -82,10 +82,12 @@ def fit_lines(
     seed: int = 42,
     fit_balmer_broad: bool = False,
     fit_oiii_broad: bool = False,
+    fit_hei_broad: bool = False,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
     oiii_snr_threshold: float = 5.0,
+    hei_snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
     sigma_factor: float = 1.0,
     moving_average: bool | int = False,
@@ -100,13 +102,15 @@ def fit_lines(
 ) -> MCMCResult | MCMCBroadFitResult:
     """Fit emission lines using MCMC sampling.
 
-    Narrow-only MCMC fit by default.  Two independent BIC-based
+    Narrow-only MCMC fit by default.  Three independent BIC-based
     broad component tests can be opted in to:
 
     - ``fit_balmer_broad=True`` — Balmer broad selection.
     - ``fit_oiii_broad=True``   — [OIII] outflow selection.
+    - ``fit_hei_broad=True``    — He I broad selection (shared
+      kinematics across all observable HeI lines).
 
-    Either or both can be enabled.
+    Any combination can be enabled.
 
     Parameters
     ----------
@@ -155,6 +159,11 @@ def fit_lines(
         If ``True``, run an independent BIC test for a broad
         component on [OIII] 5007/4959 (outflow signature), gated by
         [OIII] 5007 SNR.  Default ``False`` (narrow-only).
+    fit_hei_broad : bool
+        If ``True``, run an independent BIC test for a broad He I
+        component on all observable He I lines (5877/6680/4472/...),
+        with all broad HeI lines sharing kinematics within each tier.
+        Gated by the best narrow HeI SNR.  Default ``False``.
     n_boot_bic : int
         Bootstrap iterations for BIC model selection (default 100).
         Only used when at least one of the broad flags is True.
@@ -187,7 +196,7 @@ def fit_lines(
     MCMCResult
         When both broad flags are False.
     """
-    if not fit_balmer_broad and not fit_oiii_broad:
+    if not fit_balmer_broad and not fit_oiii_broad and not fit_hei_broad:
         return _fit_lines_mcmc(
             spectrum, z,
             sampler=sampler,
@@ -234,10 +243,12 @@ def fit_lines(
         clip_sigma=clip_sigma,
         fit_balmer_broad=fit_balmer_broad,
         fit_oiii_broad=fit_oiii_broad,
+        fit_hei_broad=fit_hei_broad,
         n_boot_bic=n_boot_bic,
         n_jobs=n_jobs,
         snr_threshold=snr_threshold,
         oiii_snr_threshold=oiii_snr_threshold,
+        hei_snr_threshold=hei_snr_threshold,
         bic_delta=bic_delta,
         prior_overrides=prior_overrides,
         n_walkers=n_walkers,
@@ -278,10 +289,12 @@ def fit_with_broad(
     clip_sigma: float = 2.5,
     fit_balmer_broad: bool = False,
     fit_oiii_broad: bool = False,
+    fit_hei_broad: bool = False,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
     oiii_snr_threshold: float = 5.0,
+    hei_snr_threshold: float = 5.0,
     bic_delta: float = 6.0,
     prior_overrides: dict[str, Any] | None = None,
     n_walkers: int | str = "auto",
@@ -324,6 +337,9 @@ def fit_with_broad(
         Run BIC selection for Balmer broad (default ``False``).
     fit_oiii_broad : bool
         Run independent BIC test for [OIII] broad (default ``False``).
+    fit_hei_broad : bool
+        Run independent BIC test for HeI broad with shared kinematics
+        across all observable HeI lines (default ``False``).
     snr_threshold : float
         Minimum Hα SNR for Balmer broad (default 5.0).
     oiii_snr_threshold : float
@@ -348,10 +364,12 @@ def fit_with_broad(
         clip_sigma=clip_sigma,
         fit_balmer_broad=fit_balmer_broad,
         fit_oiii_broad=fit_oiii_broad,
+        fit_hei_broad=fit_hei_broad,
         n_boot_bic=n_boot_bic,
         n_jobs=n_jobs,
         snr_threshold=snr_threshold,
         oiii_snr_threshold=oiii_snr_threshold,
+        hei_snr_threshold=hei_snr_threshold,
         bic_delta=bic_delta,
         prior_overrides=prior_overrides,
         n_walkers=n_walkers,
