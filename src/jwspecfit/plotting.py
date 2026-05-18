@@ -858,6 +858,7 @@ def plot_fit_interactive(
     y_pad: float = 1.3,
     exclude_wave_A: list[tuple[float, float]] | None = None,
     rest_frame: bool = False,
+    z: float | None = None,
 ) -> "go.Figure":
     """Interactive plotly plot of a spectral fit with zoom and hover.
 
@@ -879,8 +880,12 @@ def plot_fit_interactive(
         Wavelength ranges in Angstroms to hide from the plot.
     rest_frame : bool
         If ``True``, plot wavelengths in the rest frame by dividing by
-        ``(1 + z)`` using the redshift stored in the spectrum.  Default
-        ``False`` (observed frame).
+        ``(1 + z)``.  Default ``False`` (observed frame).
+    z : float, optional
+        Redshift override used for rest-frame conversion.  When
+        ``None`` (default), ``result.spectrum.z`` is used.  Raises
+        ``ValueError`` if ``rest_frame=True`` and neither source
+        provides a redshift.
 
     Returns
     -------
@@ -896,10 +901,17 @@ def plot_fit_interactive(
 
     spec = result.spectrum
 
-    # Rest-frame scaling factor.
-    zp1 = 1.0
-    if rest_frame and spec.z is not None:
-        zp1 = 1.0 + spec.z
+    # Rest-frame scaling factor.  Fail loudly if rest_frame is requested
+    # but no z is available — silently falling back to zp1=1 produced a
+    # plot that looked observed-frame with no warning.
+    z_used = z if z is not None else spec.z
+    if rest_frame and z_used is None:
+        raise ValueError(
+            "rest_frame=True but no redshift available: result.spectrum.z "
+            "is None and no z= override was supplied.  Pass z=... or set "
+            "spec.z before calling."
+        )
+    zp1 = (1.0 + float(z_used)) if rest_frame else 1.0
 
     if wave_unit == "A":
         wave = spec.wave_A / zp1
@@ -1278,9 +1290,13 @@ def plot_fit_interactive(
     y_lower_cont = np.nanmin(cont[show]) * 1.1 if np.any(show) else -0.1
     y_lower = min(0.0, y_lower_cont, model_trough - abs(model_trough) * 0.15)
 
-    title = ""
-    if spec.z is not None:
-        title = f"z = {spec.z:.4f}  |  χ²/dof = {result.chi2:.2f}"
+    title_bits = []
+    if z_used is not None:
+        title_bits.append(f"z = {float(z_used):.4f}")
+    title_bits.append(f"χ²/dof = {result.chi2:.2f}")
+    if rest_frame:
+        title_bits.append("rest frame")
+    title = "  |  ".join(title_bits)
 
     ylabel = f"fλ [{flux_label}]" if use_flam else f"Flux density [{flux_label}]"
 
@@ -1295,7 +1311,9 @@ def plot_fit_interactive(
             height=650,
         )
         fig.update_xaxes(title_text=xlabel, exponentformat="none", row=2, col=1)
-        fig.update_xaxes(exponentformat="none", row=1, col=1)
+        # Also annotate the top panel's x-axis so the rest-frame/observed
+        # label is visible without scrolling to the residual panel.
+        fig.update_xaxes(title_text=xlabel, exponentformat="none", row=1, col=1)
         fig.update_yaxes(title_text=ylabel, range=[y_lower, y_upper], row=1, col=1)
         # Clip residual y-axis to ±5× median error so noise spikes
         # don't dominate the panel height.
