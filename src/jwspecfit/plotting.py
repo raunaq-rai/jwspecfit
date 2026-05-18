@@ -1365,7 +1365,7 @@ def plot_2d_1d(
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
     line_colour: str = "k",
-    line_width: float = 0.8,
+    line_width: float = 0.5,
     err_colour: str = "steelblue",
     err_alpha: float = 0.1,
     figsize: tuple[float, float] = (8, 4),
