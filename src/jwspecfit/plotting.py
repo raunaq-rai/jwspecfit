@@ -1358,13 +1358,16 @@ def plot_2d_1d(
     flux_scale: float = 1e3,
     flux_label: str = r"$F_\nu$ [nJy]",
     xlabel: str = r"$\lambda_{\rm obs}\,[\mu{\rm m}]$",
-    cmap: str = "plasma",
+    cmap: str = "Greys",
     vmin_pct: float = 5.0,
     vmax_pct: float = 99.5,
     y_crop: tuple[float, float] = (0.25, 0.75),
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
-    colour: str = "#6a0dad",
+    line_colour: str = "k",
+    line_width: float = 0.8,
+    err_colour: str = "steelblue",
+    err_alpha: float = 0.1,
     figsize: tuple[float, float] = (8, 4),
     title: str | None = None,
     lines: list[str] | bool | None = None,
@@ -1404,8 +1407,10 @@ def plot_2d_1d(
         extent (default keeps the middle 50 % rows).
     xlim, ylim
         Optional axis limits.  ``xlim`` applies to both panels.
-    colour
-        Line and error-band colour for the 1D trace.
+    line_colour, line_width
+        Colour and line width of the 1D flux trace.
+    err_colour, err_alpha
+        Fill colour and alpha for the ``±1σ`` error band.
     figsize, height_ratios
         Matplotlib figure size and 2D-vs-1D height ratio.
     title
@@ -1488,13 +1493,13 @@ def plot_2d_1d(
 
     # --- 1D panel --------------------------------------------------
     f_scaled = flux * flux_scale
-    ax1d.plot(wave, f_scaled, color=colour, lw=1.0)
+    ax1d.plot(wave, f_scaled, color=line_colour, lw=line_width)
     if err is not None:
         ax1d.fill_between(
             wave,
             (flux - err) * flux_scale,
             (flux + err) * flux_scale,
-            color=colour, alpha=0.25, lw=0,
+            color=err_colour, alpha=err_alpha, lw=0,
         )
     ax1d.axhline(0, color="k", lw=0.8, ls="--", alpha=0.6)
     ax1d.tick_params(direction="in", top=True, right=True, labelsize=8)
