@@ -185,7 +185,9 @@ _GRATING_LINES = [
     "NeIII_3869",
     "H8",               # HeI 3889 blended with H8 (Δ=0.4 Å); unresolvable at any NIRSpec R
     "HEPSILON",
+    "HEI_4027",
     "HDELTA",
+    "HEI_4145",
     "HGAMMA",
     "OIII_4363",
     "HEI_4472",
@@ -204,11 +206,15 @@ _GRATING_LINES = [
     "CIV_5803",
     "CIV_5814",
     "HEI_5877",
+    "OI_6302",
     "NII_6549",
     "Ha",
     "NII_6585",
+    "HEI_6680",
     "SII_6718",
     "SII_6732",
+    "HEI_7067",
+    "ArIII_7138",
 ]
 
 
