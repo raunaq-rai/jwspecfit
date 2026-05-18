@@ -408,12 +408,21 @@ class MCMCBroadFitResult:
     bic_broad1: float
     bic_broad2: float
     bic_both: float
-    # Independent [OIII] outflow component selection.  When
-    # ``oiii_broad_selected`` is True, the MCMC chains include
-    # ``OIII_5007_BROAD``/``OIII_4959_BROAD`` posteriors.
-    oiii_broad_selected: bool = False
+    # Independent [OIII] outflow component selection.  Mirrors the
+    # Balmer fields: oiii_selected is one of "off" / "broad1" /
+    # "broad2" / "both"; the matching OIII broad lines (e.g.
+    # ``OIII_5007_BROAD``, ``OIII_4959_BROAD2``) appear in the MCMC
+    # posteriors when selected.
+    oiii_selected: str = "off"
     bic_oiii_off: float = float("nan")
-    bic_oiii_on: float = float("nan")
+    bic_oiii_broad1: float = float("nan")
+    bic_oiii_broad2: float = float("nan")
+    bic_oiii_both: float = float("nan")
+
+    @property
+    def oiii_broad_selected(self) -> bool:
+        """Convenience: True if any OIII broad component was selected."""
+        return self.oiii_selected != "off"
 
     # Delegate all MCMCResult attributes for full API compatibility.
 

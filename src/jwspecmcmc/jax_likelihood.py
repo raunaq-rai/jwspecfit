@@ -87,12 +87,14 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
             ops.append((nL + idx[broad_name], nL + idx[narrow_name], 1.0))
 
     # --- OIII broad doublet kinematics (same outflowing gas) ---
-    if "OIII_5007_BROAD" in idx and "OIII_4959_BROAD" in idx:
-        i_5007b = idx["OIII_5007_BROAD"]
-        i_4959b = idx["OIII_4959_BROAD"]
-        lam_ratio = REST_LINES_A["OIII_4959"] / REST_LINES_A["OIII_5007"]
-        ops.append((nL + i_4959b, nL + i_5007b, lam_ratio))      # centroid
-        ops.append((2 * nL + i_4959b, 2 * nL + i_5007b, lam_ratio))  # sigma
+    # Apply to both broad tiers (BROAD = outflow, BROAD2 = fast wind).
+    oiii_lam_ratio = REST_LINES_A["OIII_4959"] / REST_LINES_A["OIII_5007"]
+    for suffix in ("_BROAD", "_BROAD2"):
+        pri, sec = f"OIII_5007{suffix}", f"OIII_4959{suffix}"
+        if pri in idx and sec in idx:
+            i_pri, i_sec = idx[pri], idx[sec]
+            ops.append((nL + i_sec, nL + i_pri, oiii_lam_ratio))         # centroid
+            ops.append((2 * nL + i_sec, 2 * nL + i_pri, oiii_lam_ratio))  # sigma
 
     # --- NII doublet ---
     if cs.tie_nii and "NII_6549" in idx and "NII_6585" in idx:

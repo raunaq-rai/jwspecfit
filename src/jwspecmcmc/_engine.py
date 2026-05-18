@@ -1052,7 +1052,9 @@ def _fit_with_broad_mcmc(
         bic_broad1=bic_result.bic_broad1,
         bic_broad2=bic_result.bic_broad2,
         bic_both=bic_result.bic_both,
-        oiii_broad_selected=bic_result.oiii_broad_selected,
+        oiii_selected=bic_result.oiii_selected,
         bic_oiii_off=bic_result.bic_oiii_off,
-        bic_oiii_on=bic_result.bic_oiii_on,
+        bic_oiii_broad1=bic_result.bic_oiii_broad1,
+        bic_oiii_broad2=bic_result.bic_oiii_broad2,
+        bic_oiii_both=bic_result.bic_oiii_both,
     )
