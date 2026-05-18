@@ -152,8 +152,8 @@ def fit_lines(
     clip_sigma: float = 2.5,
     n_jobs: int = -1,
     save_path: str | Path | None = None,
-    fit_balmer_broad: bool = True,
-    fit_oiii_broad: bool = True,
+    fit_balmer_broad: bool = False,
+    fit_oiii_broad: bool = False,
     n_boot_bic: int = 100,
     snr_threshold: float = 5.0,
     oiii_snr_threshold: float = 5.0,
@@ -172,13 +172,13 @@ def fit_lines(
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
-    By default, runs two BIC-based broad component selections via
-    :func:`fit_with_broad`:
+    Narrow-only fit by default.  Set either flag to opt in to a
+    BIC-based broad component selection (via :func:`fit_with_broad`):
 
     - ``fit_balmer_broad=True`` — Balmer broad component selection.
     - ``fit_oiii_broad=True`` — independent [OIII] outflow selection.
 
-    Set both flags to ``False`` for a narrow-only fit.
+    The two tests are independent — enable either or both.
 
     Parameters
     ----------
@@ -214,11 +214,11 @@ def fit_lines(
     save_path : str or Path, optional
         Path to save the result.
     fit_balmer_broad : bool
-        If ``True`` (default), run BIC selection for Balmer broad
-        components.
+        If ``True``, run BIC selection for Balmer broad components.
+        Default ``False`` (narrow-only).
     fit_oiii_broad : bool
-        If ``True`` (default), run independent BIC test for [OIII]
-        outflow broad components.
+        If ``True``, run independent BIC test for [OIII] outflow
+        broad components.  Default ``False`` (narrow-only).
     n_boot_bic : int
         Bootstrap iterations for BIC model selection (default 100).
         Only used when at least one broad flag is True.

@@ -3,15 +3,14 @@
 A companion to ``jwspecfit`` that replaces bootstrap uncertainties with
 full Bayesian posterior sampling via **emcee**, **nautilus**, or **NUTS**.
 
-By default, ``fit_lines()`` performs two independent BIC-based broad
-component selections before MCMC sampling:
+By default, ``fit_lines()`` runs a narrow-only MCMC fit.  Two
+independent BIC-based broad component selections can be opted in:
 
 - ``fit_balmer_broad=True`` — Balmer broad (narrow vs. intermediate /
   very-broad / both, on Balmer pixels).
 - ``fit_oiii_broad=True``   — [OIII] outflow broad (on OIII pixels).
 
-Set either flag to ``False`` to skip that test; set both to ``False``
-for narrow-only.
+Either or both can be enabled.
 
 Example
 -------
@@ -81,8 +80,8 @@ def fit_lines(
     max_tree_depth: int = 10,
     progress: bool = True,
     seed: int = 42,
-    fit_balmer_broad: bool = True,
-    fit_oiii_broad: bool = True,
+    fit_balmer_broad: bool = False,
+    fit_oiii_broad: bool = False,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
@@ -101,13 +100,13 @@ def fit_lines(
 ) -> MCMCResult | MCMCBroadFitResult:
     """Fit emission lines using MCMC sampling.
 
-    Two independent BIC-based broad component tests can be enabled:
+    Narrow-only MCMC fit by default.  Two independent BIC-based
+    broad component tests can be opted in to:
 
-    - ``fit_balmer_broad=True`` (default) — Balmer broad selection.
-    - ``fit_oiii_broad=True`` (default)   — [OIII] outflow selection.
+    - ``fit_balmer_broad=True`` — Balmer broad selection.
+    - ``fit_oiii_broad=True``   — [OIII] outflow selection.
 
-    Both can be selected, only one, or neither.  Set both to
-    ``False`` for a narrow-only MCMC fit.
+    Either or both can be enabled.
 
     Parameters
     ----------
@@ -149,13 +148,13 @@ def fit_lines(
     seed : int
         Random seed.
     fit_balmer_broad : bool
-        If ``True`` (default), run BIC selection for a broad Balmer
-        component (narrow vs. intermediate vs. very-broad vs. both),
-        gated by Hα SNR.
+        If ``True``, run BIC selection for a broad Balmer component
+        (narrow vs. intermediate vs. very-broad vs. both), gated by
+        Hα SNR.  Default ``False`` (narrow-only).
     fit_oiii_broad : bool
-        If ``True`` (default), run an independent BIC test for a broad
+        If ``True``, run an independent BIC test for a broad
         component on [OIII] 5007/4959 (outflow signature), gated by
-        [OIII] 5007 SNR.
+        [OIII] 5007 SNR.  Default ``False`` (narrow-only).
     n_boot_bic : int
         Bootstrap iterations for BIC model selection (default 100).
         Only used when at least one of the broad flags is True.
@@ -277,8 +276,8 @@ def fit_with_broad(
     wave_range_A: tuple[float, float] | None = None,
     deg: int = 2,
     clip_sigma: float = 2.5,
-    fit_balmer_broad: bool = True,
-    fit_oiii_broad: bool = True,
+    fit_balmer_broad: bool = False,
+    fit_oiii_broad: bool = False,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
     snr_threshold: float = 5.0,
@@ -322,9 +321,9 @@ def fit_with_broad(
     sampler : str
         ``"nuts"`` (default), ``"emcee"``, or ``"nautilus"``.
     fit_balmer_broad : bool
-        Run BIC selection for Balmer broad (default ``True``).
+        Run BIC selection for Balmer broad (default ``False``).
     fit_oiii_broad : bool
-        Run independent BIC test for [OIII] broad (default ``True``).
+        Run independent BIC test for [OIII] broad (default ``False``).
     snr_threshold : float
         Minimum Hα SNR for Balmer broad (default 5.0).
     oiii_snr_threshold : float

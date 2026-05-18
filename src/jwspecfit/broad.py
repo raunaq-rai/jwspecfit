@@ -539,8 +539,8 @@ def fit_with_broad(
     R: float | Callable | None = None,
     lines: list[str] | None = None,
     deg: int = 2,
-    fit_balmer_broad: bool = True,
-    fit_oiii_broad: bool = True,
+    fit_balmer_broad: bool = False,
+    fit_oiii_broad: bool = False,
     n_boot: int = 1000,
     n_boot_bic: int = 100,
     n_jobs: int = -1,
@@ -589,12 +589,14 @@ def fit_with_broad(
     deg : int
         Continuum polynomial degree.
     fit_balmer_broad : bool
-        If ``True`` (default), run BIC model selection for a broad
-        Balmer component (intermediate / very-broad / both).  If
-        ``False``, skip the Balmer broad test entirely.
+        If ``True``, run BIC model selection for a broad Balmer
+        component (intermediate / very-broad / both).  Default
+        ``False`` — opt in only when you want to test for a BLR or
+        outflow signature on Hα/Hβ.
     fit_oiii_broad : bool
-        If ``True`` (default), run an independent BIC test for a broad
-        component on [OIII] 5007/4959.  Decoupled from the Balmer test.
+        If ``True``, run an independent BIC test for a broad component
+        on [OIII] 5007/4959.  Decoupled from the Balmer test.  Default
+        ``False`` — opt in only when looking for outflow signatures.
     n_boot : int
         Number of bootstrap iterations for flux uncertainties (default 1000).
     n_boot_bic : int
