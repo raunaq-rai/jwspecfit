@@ -391,10 +391,15 @@ def _fit_lines_mcmc(
         cent_margin_v = _CENT_V_MAX / _C_KMS_CENT * lam_obs_A
         cent_margin = max(cent_margin_v, 2.0 * np.median(dlam))
 
+        # Exclude same-rest-wavelength neighbours so broad components
+        # (e.g. OIII_5007_BROAD) don't collapse to lb == ub on their
+        # centroid against their own narrow counterpart.  Mirrors the
+        # same fix in jwspecfit.fitter._fit_one_window.
+        own_rest = REST_LINES_A[name]
         other_obs = [
             REST_LINES_A[n] * (1.0 + z)
             for j, n in enumerate(line_names)
-            if j != i and "BROAD" not in n
+            if j != i and "BROAD" not in n and REST_LINES_A[n] != own_rest
         ]
         if other_obs:
             min_sep = min(abs(lam_obs_A - o) for o in other_obs)
