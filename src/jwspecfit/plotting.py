@@ -1509,8 +1509,24 @@ def plot_2d_1d(
     if xlim is not None:
         ax1d.set_xlim(*xlim)
         ax2d.set_xlim(*xlim)
+
     if ylim is not None:
         ax1d.set_ylim(*ylim)
+    else:
+        # Auto-scale to the brightest emission line in the visible window
+        # (typically [OIII]5007 for low-z optical spectra) — matches the
+        # plot_spectrum_interactive behaviour: 2nd-percentile floor, data
+        # max with a small pad.
+        x_lo, x_hi = ax1d.get_xlim()
+        in_view = (wave >= x_lo) & (wave <= x_hi) & np.isfinite(f_scaled)
+        if np.any(in_view):
+            lo = float(np.nanpercentile(f_scaled[in_view], 2))
+            hi = float(np.nanmax(f_scaled[in_view]))
+            pad = 0.05 * (hi - lo if hi > lo else max(abs(hi), 1.0))
+            y_lower = min(0.0, lo - pad)
+            y_upper = hi + pad
+            if y_upper > y_lower:
+                ax1d.set_ylim(y_lower, y_upper)
 
     # --- Emission-line markers ------------------------------------
     if z is not None:
