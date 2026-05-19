@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>jwspecfit — navy hex outline with gold Gaussian fit</title>
+  <!-- Flat-top hex outline (navy) -->
+  <polygon points="78,41.4 178,41.4 228,128 178,214.6 78,214.6 28,128"
+           fill="none" stroke="#3A2E5F" stroke-width="6" stroke-linejoin="round"/>
+  <!-- Baseline (subtle navy) -->
+  <line x1="46" y1="178" x2="210" y2="178"
+        stroke="#3A2E5F" stroke-width="2.5" opacity="0.4"/>
+  <!-- Gold Gaussian fit -->
+  <polyline points="46,177.9 58,177.5 70,175.5 82,168.0 94,148.9 106,116.7 118,84.0 128,73 138,84.0 150,116.7 162,148.9 174,168.0 186,175.5 198,177.5 210,177.9"
+            stroke="#C9A227" stroke-width="7" fill="none"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Peak marker (navy dot) -->
+  <circle cx="128" cy="73" r="4.5" fill="#3A2E5F"/>
+</svg>
