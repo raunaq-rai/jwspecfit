@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/_static/logos/logo.svg" alt="jwspecfit logo" width="128"/>
+</p>
+
 # jwspecfit
 
 **Emission-line fitting, MCMC, and chemical abundances for JWST NIRSpec spectra.**

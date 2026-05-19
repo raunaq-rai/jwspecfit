@@ -102,6 +102,8 @@ html_theme_options = {
 html_static_path = ["_static"]
 html_show_sourcelink = True
 html_title = f"{project} {version}"
+html_logo = "_static/logos/logo.svg"
+html_favicon = "_static/logos/logo-32.png"
 
 
 # Suppress warnings for references that cannot be resolved (e.g. optional
