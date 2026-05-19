@@ -57,6 +57,8 @@ REST_LINES_A: dict[str, float] = {
     # Balmer series
     "HDELTA": 4104.049910602101,
     "HEI_4145": 4144.928,
+    # He II Pickering 11->4: 4199.83 Å (air, NIST) -> 4201.013 Å (vacuum)
+    "HEII_4200": 4201.013,
     "HGAMMA": 4342.904611871652,
     "HBETA": 4864.041335024339,
     # Oxygen / Helium
@@ -188,6 +190,7 @@ _GRATING_LINES = [
     "HEI_4027",
     "HDELTA",
     "HEI_4145",
+    "HEII_4200",
     "HGAMMA",
     "OIII_4363",
     "HEI_4472",
