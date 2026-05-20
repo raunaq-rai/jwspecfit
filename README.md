@@ -6,7 +6,8 @@
 
 **Emission-line fitting, MCMC, and chemical abundances for JWST NIRSpec spectra.**
 
-[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![PyPI](https://img.shields.io/pypi/v/jwspecfit.svg)](https://pypi.org/project/jwspecfit/)
+[![Python](https://img.shields.io/pypi/pyversions/jwspecfit.svg)](https://pypi.org/project/jwspecfit/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENCE)
 [![Tests](https://img.shields.io/badge/tests-pytest-lightgrey.svg)](tests/)
 [![Docs](https://readthedocs.org/projects/jwspecfit/badge/?version=latest)](https://jwspecfit.readthedocs.io/en/latest/)
@@ -32,6 +33,18 @@ Three packages, one pipeline — from 1-D NIRSpec spectra to element abundances.
 - **Lyα escape fraction** with Monte Carlo propagation of A_V uncertainty.
 
 ## Install
+
+```bash
+pip install jwspecfit
+```
+
+Or with all optional extras (MCMC backends, abundances, DLA fitter):
+
+```bash
+pip install "jwspecfit[nuts,mcmc,abund,dla]"
+```
+
+For development (editable install from source):
 
 ```bash
 git clone https://github.com/raunaq-rai/jwspecfit.git

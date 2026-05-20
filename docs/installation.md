@@ -1,6 +1,18 @@
 # Installation
 
-## From source
+## From PyPI (recommended)
+
+```bash
+pip install jwspecfit
+```
+
+Or with all optional extras (MCMC backends, abundances, DLA fitter):
+
+```bash
+pip install "jwspecfit[nuts,mcmc,abund,dla]"
+```
+
+## From source (development)
 
 ```bash
 git clone https://github.com/raunaq-rai/jwspecfit.git
@@ -14,13 +26,13 @@ edits are picked up without reinstalling.
 ## Optional extras
 
 `jwspecfit` ships with optional dependency groups. Combine them as
-needed:
+needed (works for both PyPI and editable installs):
 
 ```bash
-pip install -e ".[nuts]"     # JAX + NumPyro — recommended MCMC backend
-pip install -e ".[mcmc]"     # emcee + nautilus + corner + h5py
-pip install -e ".[abund]"    # PyNEB for chemical abundances
-pip install -e ".[dev,nuts,mcmc,abund]"   # everything
+pip install "jwspecfit[nuts]"     # JAX + NumPyro — recommended MCMC backend
+pip install "jwspecfit[mcmc]"     # emcee + nautilus + corner + h5py
+pip install "jwspecfit[abund]"    # PyNEB for chemical abundances
+pip install "jwspecfit[dev,nuts,mcmc,abund]"   # everything
 ```
 
 | Extra   | Installs                                  | Enables                                          |
