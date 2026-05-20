@@ -12,6 +12,22 @@ requires-python = ">=3.10"
 authors = [
     {name = "Raunaq Rai", email = "raunaq.rai.22@ucl.ac.uk"},
 ]
+keywords = [
+    "astronomy", "astrophysics", "JWST", "NIRSpec", "spectroscopy",
+    "emission-line fitting", "chemical abundances", "MCMC",
+    "high-redshift galaxies",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
@@ -22,6 +38,13 @@ dependencies = [
     "joblib>=1.3",
     "plotly>=5.0",
 ]
+
+[project.urls]
+Homepage      = "https://github.com/raunaq-rai/jwspecfit"
+Documentation = "https://jwspecfit.readthedocs.io/"
+Source        = "https://github.com/raunaq-rai/jwspecfit"
+Issues        = "https://github.com/raunaq-rai/jwspecfit/issues"
+Changelog     = "https://github.com/raunaq-rai/jwspecfit/blob/main/docs/changelog.md"
 
 [project.optional-dependencies]
 dev = [
