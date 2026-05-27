@@ -5,6 +5,12 @@ bin-averaged Gaussian profiles to all observable emission lines
 simultaneously, and returns a `FitResult` with fluxes, SNRs, centroids,
 widths, and equivalent widths.
 
+```{note}
+For science-quality uncertainties the authors recommend the Bayesian MCMC
+fitter, [`jwspecmcmc`](jwspecmcmc.md). Use this least-squares engine for quick
+looks, initial guesses, and fast BIC model selection.
+```
+
 ## Loading spectra
 
 ```python

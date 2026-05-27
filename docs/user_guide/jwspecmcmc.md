@@ -1,5 +1,12 @@
 # `jwspecmcmc` — Bayesian MCMC fitting
 
+```{tip}
+**This is the authors' recommended fitter for science-quality results.**
+The least-squares `jwspecfit` engine is best for quick looks and initial
+guesses; for published measurements and any quantity that needs faithful
+uncertainties, use `jwspecmcmc`.
+```
+
 `jwspecmcmc` replaces the bootstrap uncertainties of `jwspecfit` with
 full Bayesian posterior sampling. You get asymmetric errors, parameter
 correlations, flux-ratio posteriors, and (with nautilus) the Bayesian

@@ -29,7 +29,12 @@ Example
 
 from __future__ import annotations
 
-__version__ = "1.0.1"
+from importlib.metadata import PackageNotFoundError, version
+
+try:  # jwspecabund ships as part of the jwspecfit distribution
+    __version__ = version("jwspecfit")
+except PackageNotFoundError:  # running from a source tree without an install
+    __version__ = "0.0.0+unknown"
 
 from ._core import compute_abundances
 from .forward import forward_model, hbeta_emissivity_aller84

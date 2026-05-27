@@ -18,8 +18,10 @@ Three packages, one pipeline — from 1-D NIRSpec spectra to element abundances.
 | Package             | What it does                                                       |
 | ------------------- | ------------------------------------------------------------------ |
 | **`jwspecfit`**     | Resolution-aware Gaussian line fitting with bootstrap errors       |
-| **`jwspecmcmc`**    | Bayesian MCMC fitting (NUTS · emcee · nautilus)                    |
+| **`jwspecmcmc`** ⭐ | Bayesian MCMC fitting (NUTS · emcee · nautilus) — **recommended**  |
 | **`jwspecabund`**   | Chemical abundances — direct T_e · forward model · strong-line     |
+
+> **Recommended fitter:** for science-quality results the authors recommend the Bayesian MCMC fitter `jwspecmcmc` (full posteriors and faithful uncertainties). Use the least-squares `jwspecfit` engine for quick looks, initial guesses, and BIC model selection.
 
 ## Key features
 

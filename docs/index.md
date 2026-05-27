@@ -39,6 +39,16 @@ fraction.
 :::
 ::::
 
+```{tip}
+**Recommended method.** For science-quality measurements the authors
+recommend the Bayesian MCMC fitter, [`jwspecmcmc`](user_guide/jwspecmcmc),
+over the least-squares `jwspecfit` bootstrap. MCMC returns full posteriors,
+asymmetric uncertainties, and parameter covariances, and propagates them
+correctly into derived quantities (flux ratios, abundances). Use the
+least-squares engine for quick looks, initial guesses, and BIC model
+selection; use `jwspecmcmc` for published results.
+```
+
 ---
 
 ## Getting started
