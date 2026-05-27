@@ -114,89 +114,164 @@ def fit_lines(
 
     Any combination can be enabled.
 
+    A grouped, tabular version of every argument below is available in
+    the user guide: :doc:`/user_guide/jwspecmcmc`.
+
     Parameters
     ----------
     spectrum : Spectrum
-        Input spectrum.
+        Input spectrum (observed wavelength, flux, and error arrays).
     z : float
-        Source redshift.
+        Source redshift.  Sets each observed line position via
+        ``lambda_obs = lambda_rest * (1 + z)``.
     sampler : str
-        ``"nuts"`` (default), ``"emcee"``, or ``"nautilus"``.
+        Posterior-sampling backend: ``"nuts"`` (default; NumPyro
+        Hamiltonian Monte Carlo), ``"emcee"`` (affine-invariant
+        ensemble), or ``"nautilus"`` (importance nested sampling, which
+        also returns the Bayesian evidence).
     grating : str, optional
-        Grating name.
+        NIRSpec grating name (e.g. ``"G395H"``), used to set the
+        resolution curve.  If ``None``, estimated from the pixel spacing.
     R : float or callable, optional
-        Resolving power.
+        Resolving power as a scalar or a callable ``R(lambda_um)``.
+        Overrides *grating* when given; if ``None`` it is taken from
+        *grating* or the pixel spacing.
     lines : list of str, optional
-        Lines to fit.
-    wave_range_A : tuple, optional
-        Observed wavelength range (Angstrom).
+        Names of emission lines to fit (keys of
+        :data:`jwspecfit.lines.REST_LINES_A`).  If ``None``, the lines
+        that fall inside the spectrum at redshift *z* are auto-selected.
+    wave_range_A : tuple of float, optional
+        ``(lo, hi)`` observed-frame wavelength window in Angstrom to
+        restrict the fit to.  If ``None``, the full spectrum is used.
     deg : int
-        Continuum polynomial degree.
+        Degree of the polynomial continuum (default 2).
     clip_sigma : float
-        Continuum sigma-clipping threshold.
+        Sigma-clip threshold used when fitting the continuum (default 2.5).
+    moving_average : bool or int
+        Continuum model.  ``False`` (default) fits a polynomial of degree
+        *deg*; ``True`` uses a 75-pixel running-median filter; an ``int``
+        uses a running-median filter of that window size.
     init_from_mle : bool
-        Initialise walkers from a least-squares MLE (default ``True``).
-    prior_overrides : dict, optional
-        Per-parameter prior overrides keyed by name, e.g.
-        ``{"A_OIII_5007": GaussianPrior(1e-17, 1e-18, 0, 1e-15)}``.
-    n_walkers : int
-        Emcee walkers.  ``"auto"`` (default) picks based on n_dim and CPU cores.
+        If ``True`` (default), seed the sampler from a fast least-squares
+        MLE (via :func:`jwspecfit.fit_lines`).  Strongly recommended; it
+        speeds convergence and reduces stuck chains.
+    n_warmup : int
+        NUTS only.  Warm-up (tuning) iterations per chain before samples
+        are kept; adapts the step size and mass matrix (default 500).
+    n_samples_nuts : int
+        NUTS only.  Posterior draws kept per chain after warm-up; the
+        total number of samples is ``n_chains * n_samples_nuts``
+        (default 2000).
+    n_chains : int
+        NUTS only.  Number of independent chains run in parallel; enables
+        the Gelman-Rubin R-hat diagnostic (default 6).
+    target_accept_prob : float
+        NUTS only.  Target acceptance probability for step-size
+        adaptation.  Raise toward 0.95 if the sampler reports divergences
+        (default 0.8).
+    max_tree_depth : int
+        NUTS only.  Maximum NUTS binary-tree depth, capping the leapfrog
+        steps per iteration at ``2 ** max_tree_depth`` (default 10).
+    n_walkers : int or str
+        emcee only.  Number of ensemble walkers; ``"auto"`` (default)
+        chooses a value from the parameter count and CPU cores (must be
+        at least ``2 * n_dim``).
     n_steps : int
-        Emcee steps (default 2000).
+        emcee only.  Number of steps per walker (default 2000).
     n_burn : int or None
-        Emcee burn-in (auto if ``None``).
+        emcee only.  Burn-in steps discarded; if ``None`` (default) it is
+        estimated automatically from the integrated autocorrelation time.
     n_live : int
-        Nautilus live points (default 2000).
+        nautilus only.  Number of live points (default 2000).
     n_eff : int
-        Nautilus target effective samples (default 10000).
-    progress : bool
-        Show progress bar.
-    seed : int
-        Random seed.
+        nautilus only.  Target effective posterior sample size
+        (default 10000).
     fit_balmer_broad : bool
         If ``True``, run BIC selection for a broad Balmer component
-        (narrow vs. intermediate vs. very-broad vs. both), gated by
+        (narrow vs. intermediate vs. very-broad vs. both), gated by the
         Hα SNR.  Default ``False`` (narrow-only).
     fit_oiii_broad : bool
-        If ``True``, run an independent BIC test for a broad
-        component on [OIII] 5007/4959 (outflow signature), gated by
-        [OIII] 5007 SNR.  Default ``False`` (narrow-only).
+        If ``True``, run an independent BIC test for a broad component on
+        [OIII] 4959/5007 (an outflow signature), gated by the [OIII] 5007
+        SNR.  Default ``False``.
     fit_hei_broad : bool
         If ``True``, run an independent BIC test for a broad He I
-        component on all observable He I lines (5877/6680/4472/...),
-        with all broad HeI lines sharing kinematics within each tier.
-        Gated by the best narrow HeI SNR.  Default ``False``.
+        component shared (with common kinematics per tier) across all
+        observable He I lines, gated by the best narrow He I SNR.
+        Default ``False``.
     n_boot_bic : int
-        Bootstrap iterations for BIC model selection (default 100).
-        Only used when at least one of the broad flags is True.
+        Bootstrap iterations for the BIC model selection; ``0`` uses a
+        single-point BIC.  Only used when a broad flag is set
+        (default 100).
     n_jobs : int
-        Parallel jobs for BIC bootstrap (default ``-1``).
+        Number of parallel workers for the BIC bootstrap; ``-1`` uses all
+        cores (default -1).
     snr_threshold : float
-        Minimum Hα SNR to attempt Balmer broad fitting (default 5.0).
-    oiii_snr_threshold : float
-        Minimum [OIII] 5007/4959 SNR to attempt OIII broad fitting
+        Minimum Hα SNR required to attempt Balmer broad fitting
         (default 5.0).
+    oiii_snr_threshold : float
+        Minimum [OIII] 5007 SNR required to attempt [OIII] broad fitting
+        (default 5.0).
+    hei_snr_threshold : float
+        Minimum He I SNR (of the best narrow He I line) required to
+        attempt He I broad fitting (default 5.0).
     bic_delta : float
-        ΔBIC threshold for model selection (default 6.0).
-    sigma_factor : float
-        Multiplicative factor on the upper line-width bound.
-        Use values > 1 for stacked spectra (default 1.0).
-    moving_average : bool or int
-        If ``False`` (default), use polynomial continuum.  If ``True``,
-        use a median filter with a default window of 75 pixels.  If an
-        ``int``, use that as the median-filter window size.
+        Minimum ΔBIC by which a more complex model must beat the simpler
+        one to be selected (default 6.0).
+    tie_balmer_to_oiii : bool
+        If ``True`` (default), tie the narrow Balmer (and [NII]) line
+        widths and centroids to [OIII] 5007 in velocity space.
     tie_uv_doublets : bool
-        Tie UV doublet kinematics and fix resonance-line flux ratios.
-        Recommended for stacked spectra where doublets are poorly
-        resolved (default ``False``).
+        If ``True`` (default), tie UV doublet kinematics and fix
+        resonance-line flux ratios.  Recommended for stacked or poorly
+        resolved spectra.
+    tie_uv_centroids : bool
+        When *tie_uv_doublets* is on, tie each UV doublet's secondary
+        centroid to its primary in velocity space; if ``False`` the
+        secondary centroids are free (default ``True``).
+    tie_uv_widths : bool
+        If ``True`` (default), tie the widths of the UV intercombination
+        lines (CIII], NIV, NIII, SiIII) to a single shared velocity
+        dispersion.
+    niv_doublet_ratio : float or None
+        If given, fix the N IV] flux ratio ``F(1483) / F(1486)`` to this
+        value; ``None`` (default) leaves the two amplitudes free.
+    ciii_doublet_ratio : float or None
+        If given, fix the C III] flux ratio ``F(1909) / F(1907)`` to this
+        value; ``None`` (default) leaves the two amplitudes free.
+    sigma_overrides : dict, optional
+        Per-line width bounds ``{line_name: (sigma_lo, sigma_hi)}`` in
+        Angstrom, overriding the automatic grating-based bounds.
+    centroid_overrides : dict, optional
+        Per-line centroid bounds ``{line_name: (mu_lo, mu_hi)}`` in
+        Angstrom, overriding the automatic velocity-based bounds.
+    sigma_factor : float
+        Multiplier applied to the upper line-width bound; use values > 1
+        for stacked spectra whose lines are broadened (default 1.0).
+    centroid_vmax : float
+        Maximum centroid offset, in km/s, allowed for each line
+        (default 500.0).
+    centroid_max_sigma : float
+        Extra resolution-aware cap on narrow-line centroid offsets: the
+        margin is ``min(centroid_vmax-based, centroid_max_sigma *
+        sigma_instrument)`` (default 1.0).
+    prior_overrides : dict, optional
+        Per-parameter prior overrides keyed by parameter name, e.g.
+        ``{"A_OIII_5007": GaussianPrior(1e-17, 1e-18, 0, 1e-15)}``.
+        Keys follow the ``A_<line>`` / ``mu_<line>`` / ``sigma_<line>``
+        convention; values are :class:`Prior` instances.
+    progress : bool
+        Show a progress bar during sampling (default ``True``).
+    seed : int
+        Random seed for initialisation and sampling (default 42).
 
     Returns
     -------
     MCMCBroadFitResult
-        When at least one broad flag is True.  Delegates all
+        When at least one broad flag is ``True``.  Delegates all
         :class:`MCMCResult` attributes via properties.
     MCMCResult
-        When both broad flags are False.
+        When all broad flags are ``False``.
     """
     if not fit_balmer_broad and not fit_oiii_broad and not fit_hei_broad:
         return _fit_lines_mcmc(
@@ -333,29 +408,61 @@ def fit_with_broad(
     Phase 1 uses :func:`jwspecfit.fit_with_broad` (fast least-squares)
     for BIC model selection.  Phase 2 runs MCMC on the winning model.
 
+    Unlike :func:`fit_lines`, this entry point *always* performs the
+    BIC broad-selection step, so the broad flags below are its primary
+    controls.  Every other argument (samplers, continuum, kinematic
+    ties, doublet ratios, line-bound overrides, priors) is identical to
+    :func:`fit_lines`; see that function's docstring or the grouped
+    tables in :doc:`/user_guide/jwspecmcmc` for the full reference.
+
     Parameters
     ----------
     spectrum : Spectrum
-        Input spectrum.
+        Input spectrum (observed wavelength, flux, and error arrays).
     z : float
         Source redshift.
-    sampler : str
-        ``"nuts"`` (default), ``"emcee"``, or ``"nautilus"``.
     fit_balmer_broad : bool
-        Run BIC selection for Balmer broad (default ``False``).
+        If ``True``, run BIC selection for a broad Balmer component
+        (narrow vs. intermediate vs. very-broad vs. both), gated by the
+        Hα SNR.  Default ``False``.
     fit_oiii_broad : bool
-        Run independent BIC test for [OIII] broad (default ``False``).
+        If ``True``, run an independent BIC test for a broad [OIII]
+        4959/5007 component (outflow signature), gated by the [OIII] 5007
+        SNR.  Default ``False``.
     fit_hei_broad : bool
-        Run independent BIC test for HeI broad with shared kinematics
-        across all observable HeI lines (default ``False``).
+        If ``True``, run an independent BIC test for a broad He I
+        component shared across all observable He I lines, gated by the
+        best narrow He I SNR.  Default ``False``.
+    n_boot_bic : int
+        Bootstrap iterations for the BIC model selection; ``0`` uses a
+        single-point BIC (default 100).
+    n_jobs : int
+        Parallel workers for the BIC bootstrap; ``-1`` uses all cores
+        (default -1).
     snr_threshold : float
-        Minimum Hα SNR for Balmer broad (default 5.0).
+        Minimum Hα SNR to attempt Balmer broad fitting (default 5.0).
     oiii_snr_threshold : float
-        Minimum [OIII] 5007 SNR for OIII broad (default 5.0).
+        Minimum [OIII] 5007 SNR to attempt [OIII] broad fitting
+        (default 5.0).
+    hei_snr_threshold : float
+        Minimum He I SNR to attempt He I broad fitting (default 5.0).
     bic_delta : float
-        ΔBIC threshold (default 6.0).
+        Minimum ΔBIC by which a more complex model must beat the simpler
+        one to be selected (default 6.0).
 
-    See :func:`fit_lines` for the full parameter list.
+    Other Parameters
+    ----------------
+    sampler, grating, R, lines, wave_range_A, deg, clip_sigma, \
+    moving_average, n_walkers, n_steps, n_burn, n_live, n_eff, n_warmup, \
+    n_samples_nuts, n_chains, target_accept_prob, max_tree_depth, \
+    tie_balmer_to_oiii, tie_uv_doublets, tie_uv_centroids, tie_uv_widths, \
+    niv_doublet_ratio, ciii_doublet_ratio, sigma_overrides, \
+    centroid_overrides, sigma_factor, centroid_vmax, centroid_max_sigma, \
+    prior_overrides, progress, seed
+        Identical to the corresponding arguments of :func:`fit_lines`;
+        see that function or the grouped tables in
+        :doc:`/user_guide/jwspecmcmc`.  (``init_from_mle`` is not exposed
+        here because Phase 2 always initialises from the Phase 1 fit.)
 
     Returns
     -------
