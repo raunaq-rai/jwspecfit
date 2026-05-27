@@ -61,15 +61,34 @@ installation
 quickstart
 ```
 
-## User guide
+## jwspecfit
 
 ```{toctree}
-:caption: User guide
+:caption: jwspecfit
 :maxdepth: 2
 
 user_guide/jwspecfit
+api_reference/jwspecfit
+```
+
+## jwspecmcmc
+
+```{toctree}
+:caption: jwspecmcmc
+:maxdepth: 2
+
 user_guide/jwspecmcmc
+api_reference/jwspecmcmc
+```
+
+## jwspecabund
+
+```{toctree}
+:caption: jwspecabund
+:maxdepth: 2
+
 user_guide/jwspecabund
+api_reference/jwspecabund
 ```
 
 ## Methodology
@@ -81,16 +100,6 @@ user_guide/jwspecabund
 abundance_methodology
 abundance
 references
-```
-
-## API reference
-
-```{toctree}
-:caption: API reference
-:maxdepth: 2
-
-api
-api_reference/index
 ```
 
 ## Project

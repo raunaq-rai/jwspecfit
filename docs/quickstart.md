@@ -150,6 +150,9 @@ fig.show()
 ## Next steps
 
 - Worked notebooks: see `docs/notebooks/`.
-- Full API reference: [API index](api.md).
+- Full API reference: see each package's **API reference** page
+  ({doc}`jwspecfit <api_reference/jwspecfit>`,
+  {doc}`jwspecmcmc <api_reference/jwspecmcmc>`,
+  {doc}`jwspecabund <api_reference/jwspecabund>`).
 - Abundance methodology in detail:
   [Abundance methodology](abundance_methodology.md).
