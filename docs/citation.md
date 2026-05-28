@@ -3,7 +3,7 @@
 If you use `jwspecfit` in your research, **please cite it**. Choose
 whichever format your reference manager or journal prefers.
 
-> ## 📖 DOI: [10.5281/zenodo.19679794](https://doi.org/10.5281/zenodo.19679794)
+> ## 📖 DOI: [10.5281/zenodo.19679793](https://doi.org/10.5281/zenodo.19679793)
 >
 > Concept DOI — always resolves to the latest Zenodo-archived release.
 
@@ -11,7 +11,7 @@ whichever format your reference manager or journal prefers.
 
 > Rai, R. (2026). *jwspecfit: Resolution-aware emission-line fitting,
 > MCMC sampling, and chemical abundances for JWST NIRSpec* (v1.0.1).
-> Zenodo. <https://doi.org/10.5281/zenodo.19679794>
+> Zenodo. <https://doi.org/10.5281/zenodo.19679793>
 
 ## BibTeX
 
@@ -23,8 +23,8 @@ whichever format your reference manager or journal prefers.
   year         = {2026},
   version      = {1.0.1},
   publisher    = {Zenodo},
-  doi          = {10.5281/zenodo.19679794},
-  url          = {https://doi.org/10.5281/zenodo.19679794},
+  doi          = {10.5281/zenodo.19679793},
+  url          = {https://doi.org/10.5281/zenodo.19679793},
 }
 ```
 
@@ -32,7 +32,7 @@ whichever format your reference manager or journal prefers.
 
 APA · Chicago · IEEE · Harvard · MLA · CSL-JSON · DataCite XML are all
 available from the
-[Zenodo record page](https://zenodo.org/records/19679794) — click the
+[Zenodo record page](https://zenodo.org/records/19679793) — click the
 **Export** panel on the right-hand side.
 
 GitHub's **"Cite this repository"** button on the repository page reads

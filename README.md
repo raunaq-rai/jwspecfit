@@ -11,7 +11,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENCE)
 [![Tests](https://img.shields.io/badge/tests-pytest-lightgrey.svg)](tests/)
 [![Docs](https://readthedocs.org/projects/jwspecfit/badge/?version=latest)](https://jwspecfit.readthedocs.io/en/latest/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19679794.svg)](https://doi.org/10.5281/zenodo.19679794)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19679793.svg)](https://doi.org/10.5281/zenodo.19679793)
 
 Three packages, one pipeline — from 1-D NIRSpec spectra to element abundances.
 
@@ -86,7 +86,7 @@ pytest tests/
 If you use `jwspecfit` in your research, **please cite it**. Choose
 whichever format your reference manager or journal prefers.
 
-> ### 📖 DOI: [10.5281/zenodo.19679794](https://doi.org/10.5281/zenodo.19679794)
+> ### 📖 DOI: [10.5281/zenodo.19679793](https://doi.org/10.5281/zenodo.19679793)
 >
 > Concept DOI — always resolves to the latest Zenodo-archived release.
 
@@ -94,7 +94,7 @@ whichever format your reference manager or journal prefers.
 
 > Rai, R. (2026). *jwspecfit: Resolution-aware emission-line fitting,
 > MCMC sampling, and chemical abundances for JWST NIRSpec* (v1.0.1).
-> Zenodo. <https://doi.org/10.5281/zenodo.19679794>
+> Zenodo. <https://doi.org/10.5281/zenodo.19679793>
 
 ### BibTeX
 
@@ -106,15 +106,15 @@ whichever format your reference manager or journal prefers.
   year         = {2026},
   version      = {1.0.1},
   publisher    = {Zenodo},
-  doi          = {10.5281/zenodo.19679794},
-  url          = {https://doi.org/10.5281/zenodo.19679794},
+  doi          = {10.5281/zenodo.19679793},
+  url          = {https://doi.org/10.5281/zenodo.19679793},
 }
 ```
 
 ### Other formats
 
 APA · Chicago · IEEE · Harvard · MLA · CSL-JSON · DataCite XML are all
-available from the [Zenodo record page](https://zenodo.org/records/19679794)
+available from the [Zenodo record page](https://zenodo.org/records/19679793)
 (Export panel on the right).
 
 GitHub's **"Cite this repository"** button (top-right of the repo page)
