@@ -482,6 +482,11 @@ def plot_spectrum_interactive(
     add_lines: "dict[str, float] | Sequence[str] | None" = None,
     line_color: str = "darkred",
     show_zero: bool = True,
+    show_2d: "bool | str" = "auto",
+    cmap_2d: str = "Blues",
+    vmin_pct: float = 5.0,
+    vmax_pct: float = 99.5,
+    y_crop: tuple[float, float] = (0.25, 0.75),
     **read_kwargs,
 ) -> "go.Figure":
     """Open and interactively plot one or more 1-D spectra.
@@ -548,6 +553,24 @@ def plot_spectrum_interactive(
     show_zero : bool
         Draw a light-grey dashed horizontal line at ``y = 0`` to make
         continuum detection easier to gauge by eye (default ``True``).
+    show_2d : bool or {"auto"}
+        Whether to render the 2-D rectified spectrum image above the 1-D
+        panel.  ``"auto"`` (default) shows it iff a *single* spectrum is
+        supplied **and** its :attr:`~jwspecfit.io.Spectrum.sci_2d` is
+        populated (e.g. when read from an msaexp ``.spec.fits`` file).
+        ``True`` forces it (silently no-ops when multiple spectra are
+        supplied or no 2-D is available); ``False`` always shows the 1-D
+        only.  The two panels share the wavelength axis; emission-line
+        markers span both.
+    cmap_2d : str
+        Plotly colorscale for the 2-D panel (default ``"Blues"`` to
+        mirror :func:`plot_2d_1d`).
+    vmin_pct, vmax_pct : float
+        Percentile clip for the 2-D colour scale (default ``5`` /
+        ``99.5``).
+    y_crop : (float, float)
+        Fractional crop ``(lo, hi)`` of the spatial axis on the 2-D
+        panel (default ``(0.25, 0.75)`` keeps the middle 50 % of rows).
     **read_kwargs
         Forwarded to the file reader when a *source* item is a path.
 
@@ -556,6 +579,7 @@ def plot_spectrum_interactive(
     plotly.graph_objects.Figure
     """
     import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
     from .io import Spectrum, read_fits, read_npz, _ujy_to_flam
 
     # Normalise sources / labels to parallel lists.
@@ -598,7 +622,27 @@ def plot_spectrum_interactive(
 
     use_flam = flux_unit.lower() == "flam"
 
-    fig = go.Figure()
+    # Decide whether to stack a 2-D panel above the 1-D.  Only meaningful
+    # for a single spectrum with a populated sci_2d (msaexp .spec.fits).
+    # In multi-spec mode the 2-D panel is silently omitted (the explicit
+    # user contract: "if multiple spectra, show 1-D only").
+    if show_2d == "auto":
+        _show_2d = (not multi) and (specs[0].sci_2d is not None)
+    else:
+        _show_2d = bool(show_2d) and (not multi) and (specs[0].sci_2d is not None)
+
+    if _show_2d:
+        fig = make_subplots(
+            rows=2, cols=1,
+            shared_xaxes=True,
+            row_heights=[0.26, 0.74],
+            vertical_spacing=0.02,
+        )
+        panel_kw = dict(row=2, col=1)
+    else:
+        fig = go.Figure()
+        panel_kw = {}
+
     all_flux_show: list[np.ndarray] = []
     x_mins: list[float] = []
     x_maxs: list[float] = []
@@ -667,7 +711,7 @@ def plot_spectrum_interactive(
                 mode="lines",
                 line=dict(width=0, shape="hvh"),
                 showlegend=False, hoverinfo="skip",
-            ))
+            ), **panel_kw)
             fig.add_trace(go.Scatter(
                 x=wave[err_show],
                 y=(flux + err)[err_show],
@@ -677,7 +721,7 @@ def plot_spectrum_interactive(
                 name="±1σ",
                 showlegend=not err_legend_done,
                 hoverinfo="skip",
-            ))
+            ), **panel_kw)
             err_legend_done = True
 
         # Data trace (histogram-step style).
@@ -686,7 +730,7 @@ def plot_spectrum_interactive(
             mode="lines", name=name,
             line=dict(color=colour, width=0.9, shape="hvh"),
             hovertemplate=f"λ=%{{x:.3f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
-        ))
+        ), **panel_kw)
 
         if np.any(show):
             all_flux_show.append(flux[show])
@@ -727,6 +771,38 @@ def plot_spectrum_interactive(
     else:
         y_lower, y_upper = -1.0, 1.0
 
+    # --- 2-D rectified-spectrum panel (row=1 when enabled) ---
+    if _show_2d:
+        spec0 = specs[0]
+        sci = np.asarray(spec0.sci_2d, dtype=float)
+        # x-axis matches the 1-D wavelength array (and inherits rest-frame
+        # scaling from the spec0 branch of the per-spectrum loop above).
+        zp1_0 = 1.0 + spec0.z if (rest_frame and spec0.z is not None) else 1.0
+        if wave_unit == "A":
+            wave_2d = spec0.wave_A / zp1_0
+        else:
+            wave_2d = spec0.wave_um / zp1_0
+        ny = sci.shape[0]
+        y_lo_pix = int(round(ny * y_crop[0]))
+        y_hi_pix = max(y_lo_pix + 1, int(round(ny * y_crop[1])))
+        sci_crop = sci[y_lo_pix:y_hi_pix, :]
+        y_pix = np.arange(y_lo_pix, y_hi_pix)
+        finite = np.isfinite(sci_crop)
+        if np.any(finite):
+            vmin, vmax = np.nanpercentile(
+                sci_crop[finite], [vmin_pct, vmax_pct],
+            )
+        else:
+            vmin, vmax = 0.0, 1.0
+        fig.add_trace(
+            go.Heatmap(
+                x=wave_2d, y=y_pix, z=sci_crop,
+                colorscale=cmap_2d, zmin=vmin, zmax=vmax,
+                showscale=False, hoverinfo="skip",
+            ),
+            row=1, col=1,
+        )
+
     if multi:
         legend = dict(orientation="h", x=0.5, xanchor="center",
                       y=-0.22, yanchor="top")
@@ -735,32 +811,67 @@ def plot_spectrum_interactive(
         legend = dict(x=1.0, y=1.0, xanchor="right")
         bottom_margin = None
 
-    layout_kwargs = dict(
-        title=title,
-        xaxis_title=xlabel,
-        yaxis_title=ylabel,
-        yaxis_range=[y_lower, y_upper],
-        xaxis=dict(exponentformat="none"),
-        template="plotly_white",
-        hovermode="x unified",
-        dragmode="zoom",
-        legend=legend,
-        width=1000,
-        height=500,
-    )
-    if bottom_margin is not None:
-        layout_kwargs["margin"] = dict(b=bottom_margin)
-    fig.update_layout(**layout_kwargs)
+    # Layout differs between single-panel and subplot modes: subplots
+    # need per-axis updates (update_xaxes / update_yaxes with row/col).
+    if _show_2d:
+        fig.update_layout(
+            title=title,
+            template="plotly_white",
+            hovermode="x unified",
+            dragmode="zoom",
+            legend=legend,
+            width=1000,
+            height=620,
+        )
+        fig.update_xaxes(exponentformat="none")
+        # Bottom (1-D) panel labels + range.
+        fig.update_xaxes(title_text=xlabel, row=2, col=1)
+        fig.update_yaxes(
+            title_text=ylabel, range=[y_lower, y_upper], row=2, col=1,
+        )
+        # Top (2-D) panel: hide tick labels, label spatial axis.
+        fig.update_yaxes(
+            title_text="Spatial pix", showticklabels=False, row=1, col=1,
+        )
+        if bottom_margin is not None:
+            fig.update_layout(margin=dict(b=bottom_margin))
+    else:
+        layout_kwargs = dict(
+            title=title,
+            xaxis_title=xlabel,
+            yaxis_title=ylabel,
+            yaxis_range=[y_lower, y_upper],
+            xaxis=dict(exponentformat="none"),
+            template="plotly_white",
+            hovermode="x unified",
+            dragmode="zoom",
+            legend=legend,
+            width=1000,
+            height=500,
+        )
+        if bottom_margin is not None:
+            layout_kwargs["margin"] = dict(b=bottom_margin)
+        fig.update_layout(**layout_kwargs)
 
     # --- Zero-flux reference (light grey dashed) ---
     if show_zero:
-        fig.add_hline(
-            y=0,
-            line_width=1,
-            line_dash="dash",
-            line_color="lightgrey",
-            layer="below",
-        )
+        if _show_2d:
+            fig.add_hline(
+                y=0,
+                line_width=1,
+                line_dash="dash",
+                line_color="lightgrey",
+                layer="below",
+                row=2, col=1,
+            )
+        else:
+            fig.add_hline(
+                y=0,
+                line_width=1,
+                line_dash="dash",
+                line_color="lightgrey",
+                layer="below",
+            )
 
     # --- Emission-line markers at supplied redshift ---
     z_eff = z
@@ -834,19 +945,43 @@ def plot_spectrum_interactive(
 
         row_spacing_px = 14
         for (x, label), r in zip(markers, rows):
-            fig.add_vline(
-                x=x,
-                line_width=0.8,
-                line_dash="dash",
-                line_color=line_color,
-                opacity=0.6,
-                annotation_text=label,
-                annotation_position="top",
-                annotation_font_size=9,
-                annotation_font_color=line_color,
-                annotation_yshift=r * row_spacing_px,
-                layer="below",
-            )
+            if _show_2d:
+                # Paper-coord shape spans both subplot rows; xref="x"
+                # anchors to the top subplot's axis, which (via shared
+                # x-axes) is the same scale as the bottom row.  A single
+                # annotation at the top avoids the per-row duplication
+                # that add_vline(row="all", ...) would produce.
+                fig.add_shape(
+                    type="line",
+                    xref="x", yref="paper",
+                    x0=x, x1=x, y0=0, y1=1,
+                    line=dict(color=line_color, width=0.8, dash="dash"),
+                    opacity=0.6,
+                    layer="below",
+                )
+                fig.add_annotation(
+                    x=x, xref="x",
+                    y=1.0, yref="paper",
+                    yshift=r * row_spacing_px,
+                    text=label,
+                    showarrow=False,
+                    font=dict(size=9, color=line_color),
+                    xanchor="center", yanchor="bottom",
+                )
+            else:
+                fig.add_vline(
+                    x=x,
+                    line_width=0.8,
+                    line_dash="dash",
+                    line_color=line_color,
+                    opacity=0.6,
+                    annotation_text=label,
+                    annotation_position="top",
+                    annotation_font_size=9,
+                    annotation_font_color=line_color,
+                    annotation_yshift=r * row_spacing_px,
+                    layer="below",
+                )
 
         # Grow top margin so stacked rows fit above the plot.
         if row_last_x:

@@ -36,6 +36,14 @@ class Spectrum:
         Spectral resolving power.  Overrides ``grating`` when set (useful for stacks).
     meta : dict
         Arbitrary metadata from the FITS header or user.
+    sci_2d : np.ndarray or None
+        Optional 2-D rectified spectrum image with shape
+        ``(n_spatial, n_pix)`` where ``n_pix == len(wave_um)``.  Populated
+        by :func:`read_fits` when an ``SCI`` ImageHDU is present and its
+        wavelength axis matches the 1-D extraction; otherwise ``None``.
+        Read by :func:`~jwspecfit.plotting.plot_spectrum_interactive` to
+        render a 2-D + 1-D stacked view; ignored by every other code
+        path.
     """
 
     wave_um: np.ndarray
@@ -45,6 +53,7 @@ class Spectrum:
     z: float | None = None
     R: float | None = None
     meta: dict[str, Any] = field(default_factory=dict)
+    sci_2d: np.ndarray | None = None
 
     # --- Derived properties ---------------------------------------------------
 
@@ -96,6 +105,7 @@ class Spectrum:
             z=self.z,
             R=self.R,
             meta=dict(self.meta),
+            sci_2d=None if self.sci_2d is None else self.sci_2d.copy(),
         )
 
 
@@ -345,6 +355,27 @@ def read_fits(
         grating = spec_header.get("GRATING", primary_header.get("GRATING", None))
         filt = spec_header.get("FILTER", primary_header.get("FILTER", None))
 
+        # Opportunistic 2-D pickup: many JWST/NIRSpec pipelines (msaexp
+        # in particular) ship a rectified 2-D image in the ``SCI``
+        # ImageHDU sharing the SPEC1D wavelength grid.  We attach it to
+        # the Spectrum when shape[1] matches the 1-D length so that
+        # plot_spectrum_interactive can render a 2-D + 1-D preview.  All
+        # other code paths (fitting, abundances, dust correction)
+        # ignore this field entirely.
+        sci_2d: np.ndarray | None = None
+        ext_names = [h.name for h in hdul]
+        if "SCI" in ext_names:
+            try:
+                cand = hdul["SCI"].data
+                if (
+                    cand is not None
+                    and getattr(cand, "ndim", 0) == 2
+                    and cand.shape[1] == len(wave_um)
+                ):
+                    sci_2d = np.asarray(cand, dtype=float)
+            except Exception:  # pragma: no cover — never block the 1-D read
+                sci_2d = None
+
     meta.update({"filename": path.name, "filter": filt})
     logger.info(
         "Read %s [%s]: %d pixels, grating=%s",
@@ -358,6 +389,7 @@ def read_fits(
         grating=grating,
         z=z,
         meta=meta,
+        sci_2d=sci_2d,
     )
 
 
