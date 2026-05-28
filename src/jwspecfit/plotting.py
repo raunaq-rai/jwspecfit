@@ -468,6 +468,147 @@ def _component_colour(name: str, is_abs: bool) -> str:
     return _COMP_COLOUR_NARROW
 
 
+def _draw_emission_line_markers(
+    fig,
+    *,
+    z_for_lines: "float | None",
+    wave_unit: str,
+    x_lo: "float | None",
+    x_hi: "float | None",
+    lines: "Sequence[str] | bool | None" = None,
+    add_lines: "dict[str, float] | Sequence[str] | None" = None,
+    line_color: str = "darkred",
+    use_paper_shapes: bool = False,
+) -> None:
+    """Draw curated emission-line markers + labels onto a plotly figure.
+
+    Shared by :func:`plot_spectrum_interactive` and
+    :func:`plot_fit_interactive` so both honour the same ``lines`` /
+    ``add_lines`` / ``line_color`` semantics and produce identical
+    marker styling.
+
+    Parameters
+    ----------
+    fig : plotly.graph_objects.Figure
+        Figure to draw markers on, in place.
+    z_for_lines : float or None
+        Redshift used to place markers.  ``0.0`` puts them at rest
+        wavelengths; ``None`` skips drawing entirely.
+    wave_unit : str
+        ``"A"`` (Å) or ``"um"`` (µm) — must match the x-axis.
+    x_lo, x_hi : float or None
+        Plotted x-range.  Markers outside the range are dropped.  When
+        either is ``None`` no markers are drawn.
+    lines, add_lines, line_color
+        Same semantics as the public plot functions.  See
+        :func:`plot_spectrum_interactive` for details.
+    use_paper_shapes : bool
+        ``True`` when *fig* is a multi-row subplot — the marker is a
+        paper-coord shape (spans every row) plus a single annotation
+        pinned to the figure top.  ``False`` uses ``add_vline`` and
+        works for a single-panel figure.
+    """
+    if z_for_lines is None or x_lo is None or x_hi is None:
+        return
+
+    from .lines import REST_LINES_A
+
+    default_names = _DEFAULT_MARKER_NAMES
+    display = _DEFAULT_MARKER_LABELS
+
+    markers: list[tuple[float, str]] = []
+
+    if lines is not False:
+        names = default_names if lines is None else list(lines)
+        for nm in names:
+            rest_A = REST_LINES_A.get(nm)
+            if rest_A is None:
+                continue
+            obs_A = rest_A * (1.0 + z_for_lines)
+            x = obs_A if wave_unit == "A" else obs_A * 1e-4
+            markers.append((x, display.get(nm, nm)))
+
+    if add_lines:
+        if isinstance(add_lines, dict):
+            add_items = list(add_lines.items())
+        else:
+            add_items = []
+            for nm in add_lines:
+                rest_A = REST_LINES_A.get(nm)
+                if rest_A is None:
+                    continue
+                label = display.get(nm, nm.replace("_", " "))
+                add_items.append((label, rest_A))
+        for label, rest_A in add_items:
+            obs_A = float(rest_A) * (1.0 + z_for_lines)
+            x = obs_A if wave_unit == "A" else obs_A * 1e-4
+            markers.append((x, str(label)))
+
+    # Clip to plotted range, then stagger so close labels don't overlap.
+    markers = [(x, lab) for x, lab in markers if x_lo <= x <= x_hi]
+    markers.sort(key=lambda m: m[0])
+    if not markers:
+        return
+    threshold = 0.03 * (x_hi - x_lo)
+    row_last_x: list[float] = []
+    rows: list[int] = []
+    for x, _ in markers:
+        placed = False
+        for r, last_x in enumerate(row_last_x):
+            if x - last_x >= threshold:
+                row_last_x[r] = x
+                rows.append(r)
+                placed = True
+                break
+        if not placed:
+            row_last_x.append(x)
+            rows.append(len(row_last_x) - 1)
+
+    row_spacing_px = 14
+    for (x, label), r in zip(markers, rows):
+        if use_paper_shapes:
+            # Paper-coord shape spans every subplot row; a single
+            # annotation at the top avoids the per-row duplication
+            # that add_vline(row="all", ...) produces.
+            fig.add_shape(
+                type="line",
+                xref="x", yref="paper",
+                x0=x, x1=x, y0=0, y1=1,
+                line=dict(color=line_color, width=0.8, dash="dash"),
+                opacity=0.6,
+                layer="below",
+            )
+            fig.add_annotation(
+                x=x, xref="x",
+                y=1.0, yref="paper",
+                yshift=r * row_spacing_px,
+                text=label,
+                showarrow=False,
+                font=dict(size=9, color=line_color),
+                xanchor="center", yanchor="bottom",
+            )
+        else:
+            fig.add_vline(
+                x=x,
+                line_width=0.8,
+                line_dash="dash",
+                line_color=line_color,
+                opacity=0.6,
+                annotation_text=label,
+                annotation_position="top",
+                annotation_font_size=9,
+                annotation_font_color=line_color,
+                annotation_yshift=r * row_spacing_px,
+                layer="below",
+            )
+
+    # Grow top margin so stacked rows fit above the plot.
+    if row_last_x:
+        n_rows = len(row_last_x)
+        desired_t = 60 + (n_rows - 1) * row_spacing_px + 14
+        fig.update_layout(margin=dict(t=desired_t))
+
+
 def plot_spectrum_interactive(
     source: "Spectrum | str | Path | Sequence[Spectrum | str | Path]",
     *,
@@ -803,13 +944,12 @@ def plot_spectrum_interactive(
             row=1, col=1,
         )
 
-    if multi:
-        legend = dict(orientation="h", x=0.5, xanchor="center",
-                      y=-0.22, yanchor="top")
-        bottom_margin = 110
-    else:
-        legend = dict(x=1.0, y=1.0, xanchor="right")
-        bottom_margin = None
+    # Legend below the plot at all times — top-right covered emission
+    # lines on tall axes, and horizontal-bottom looks the same whether
+    # one spectrum or several are overlaid.
+    legend = dict(orientation="h", x=0.5, xanchor="center",
+                  y=-0.22, yanchor="top")
+    bottom_margin = 110
 
     # Layout differs between single-panel and subplot modes: subplots
     # need per-axis updates (update_xaxes / update_yaxes with row/col).
@@ -885,109 +1025,17 @@ def plot_spectrum_interactive(
     else:
         z_for_lines = None
 
-    if z_for_lines is not None and x_mins and x_maxs:
-        from .lines import REST_LINES_A
-
-        default_names = _DEFAULT_MARKER_NAMES
-        display = _DEFAULT_MARKER_LABELS
-
-        x_lo = min(x_mins)
-        x_hi = max(x_maxs)
-
-        # Collect markers from defaults / user list, then from add_lines.
-        markers: list[tuple[float, str]] = []
-
-        if lines is not False:
-            names = default_names if lines is None else list(lines)
-            for nm in names:
-                rest_A = REST_LINES_A.get(nm)
-                if rest_A is None:
-                    continue
-                obs_A = rest_A * (1.0 + z_for_lines)
-                x = obs_A if wave_unit == "A" else obs_A * 1e-4
-                markers.append((x, display.get(nm, nm)))
-
-        if add_lines:
-            if isinstance(add_lines, dict):
-                add_items = list(add_lines.items())
-            else:
-                # Sequence of REST_LINES_A keys: look up rest wavelengths
-                # and apply the friendly display label where known.
-                add_items = []
-                for nm in add_lines:
-                    rest_A = REST_LINES_A.get(nm)
-                    if rest_A is None:
-                        continue
-                    label = display.get(nm, nm.replace("_", " "))
-                    add_items.append((label, rest_A))
-            for label, rest_A in add_items:
-                obs_A = float(rest_A) * (1.0 + z_for_lines)
-                x = obs_A if wave_unit == "A" else obs_A * 1e-4
-                markers.append((x, str(label)))
-
-        # Clip to plotted range, then stagger so close labels don't overlap.
-        markers = [(x, lab) for x, lab in markers if x_lo <= x <= x_hi]
-        markers.sort(key=lambda m: m[0])
-        threshold = 0.03 * (x_hi - x_lo)
-        row_last_x: list[float] = []
-        rows: list[int] = []
-        for x, _ in markers:
-            placed = False
-            for r, last_x in enumerate(row_last_x):
-                if x - last_x >= threshold:
-                    row_last_x[r] = x
-                    rows.append(r)
-                    placed = True
-                    break
-            if not placed:
-                row_last_x.append(x)
-                rows.append(len(row_last_x) - 1)
-
-        row_spacing_px = 14
-        for (x, label), r in zip(markers, rows):
-            if _show_2d:
-                # Paper-coord shape spans both subplot rows; xref="x"
-                # anchors to the top subplot's axis, which (via shared
-                # x-axes) is the same scale as the bottom row.  A single
-                # annotation at the top avoids the per-row duplication
-                # that add_vline(row="all", ...) would produce.
-                fig.add_shape(
-                    type="line",
-                    xref="x", yref="paper",
-                    x0=x, x1=x, y0=0, y1=1,
-                    line=dict(color=line_color, width=0.8, dash="dash"),
-                    opacity=0.6,
-                    layer="below",
-                )
-                fig.add_annotation(
-                    x=x, xref="x",
-                    y=1.0, yref="paper",
-                    yshift=r * row_spacing_px,
-                    text=label,
-                    showarrow=False,
-                    font=dict(size=9, color=line_color),
-                    xanchor="center", yanchor="bottom",
-                )
-            else:
-                fig.add_vline(
-                    x=x,
-                    line_width=0.8,
-                    line_dash="dash",
-                    line_color=line_color,
-                    opacity=0.6,
-                    annotation_text=label,
-                    annotation_position="top",
-                    annotation_font_size=9,
-                    annotation_font_color=line_color,
-                    annotation_yshift=r * row_spacing_px,
-                    layer="below",
-                )
-
-        # Grow top margin so stacked rows fit above the plot.
-        if row_last_x:
-            n_rows = len(row_last_x)
-            desired_t = 60 + (n_rows - 1) * row_spacing_px + 14
-            fig.update_layout(margin=dict(t=desired_t))
+    _draw_emission_line_markers(
+        fig,
+        z_for_lines=z_for_lines,
+        wave_unit=wave_unit,
+        x_lo=min(x_mins) if x_mins else None,
+        x_hi=max(x_maxs) if x_maxs else None,
+        lines=lines,
+        add_lines=add_lines,
+        line_color=line_color,
+        use_paper_shapes=_show_2d,
+    )
 
     return fig
 
@@ -1003,8 +1051,22 @@ def plot_fit_interactive(
     exclude_wave_A: list[tuple[float, float]] | None = None,
     rest_frame: bool = False,
     z: float | None = None,
+    lines: "Sequence[str] | bool | None" = None,
+    add_lines: "dict[str, float] | Sequence[str] | None" = None,
+    line_color: str = "darkred",
+    show_2d: "bool | str" = "auto",
+    cmap_2d: str = "Blues",
+    vmin_pct: float = 5.0,
+    vmax_pct: float = 99.5,
+    y_crop: tuple[float, float] = (0.25, 0.75),
 ) -> "go.Figure":
     """Interactive plotly plot of a spectral fit with zoom and hover.
+
+    Optionally stacks a 2-D rectified-spectrum panel above the main fit
+    panel (when ``result.spectrum.sci_2d`` is populated by
+    :func:`read_fits`) and a residual panel below.  Curated
+    emission-line markers (dashed verticals + labels) are drawn at the
+    fit's redshift, or at rest wavelengths when ``rest_frame=True``.
 
     Parameters
     ----------
@@ -1024,12 +1086,38 @@ def plot_fit_interactive(
         Wavelength ranges in Angstroms to hide from the plot.
     rest_frame : bool
         If ``True``, plot wavelengths in the rest frame by dividing by
-        ``(1 + z)``.  Default ``False`` (observed frame).
+        ``(1 + z)``.  Default ``False`` (observed frame).  Emission-line
+        markers are placed at rest wavelengths when ``True``.
     z : float, optional
-        Redshift override used for rest-frame conversion.  When
-        ``None`` (default), ``result.spectrum.z`` is used.  Raises
-        ``ValueError`` if ``rest_frame=True`` and neither source
-        provides a redshift.
+        Redshift override used for rest-frame conversion and
+        marker placement.  When ``None`` (default),
+        ``result.spectrum.z`` is used.  Raises ``ValueError`` if
+        ``rest_frame=True`` and neither source provides a redshift.
+    lines : sequence of str, bool, or None
+        Curated emission-line markers (vertical dashed lines + labels).
+        ``None`` (default) draws the package defaults; an explicit list
+        of :data:`jwspecfit.lines.REST_LINES_A` keys restricts to those
+        names; ``False`` disables marker drawing.
+    add_lines : dict[str, float] or sequence of str, optional
+        Extra markers to overlay on top of *lines*.  Same semantics as
+        in :func:`plot_spectrum_interactive`.
+    line_color : str
+        Colour for the emission-line markers and their labels
+        (default ``"darkred"``).
+    show_2d : bool or {"auto"}
+        Whether to stack the 2-D rectified spectrum image above the fit
+        panel.  ``"auto"`` (default) shows it iff
+        ``result.spectrum.sci_2d`` is populated.  ``True`` forces it
+        (silently no-ops when no 2-D is available); ``False`` always
+        hides it.
+    cmap_2d : str
+        Plotly colorscale for the 2-D panel (default ``"Blues"``).
+    vmin_pct, vmax_pct : float
+        Percentile clip for the 2-D colour scale (default ``5`` /
+        ``99.5``).
+    y_crop : (float, float)
+        Fractional crop ``(lo, hi)`` of the spatial axis on the 2-D
+        panel (default ``(0.25, 0.75)``).
 
     Returns
     -------
@@ -1099,19 +1187,44 @@ def plot_fit_interactive(
     model_k = _nan_mask(model_total, keep)
     resid_s = _nan_mask(resid, show)
 
-    # Build figure — with or without residuals subplot.
-    if show_residuals:
+    # Decide whether to stack a 2-D panel on top.  When the spectrum
+    # carries no 2-D, "auto" silently no-ops, and an explicit True is
+    # also no-op'd (so the call doesn't fail on synthetic spectra).
+    if show_2d == "auto":
+        _show_2d = spec.sci_2d is not None
+    else:
+        _show_2d = bool(show_2d) and spec.sci_2d is not None
+
+    # Figure layout: 1, 2, or 3 rows depending on which panels are on.
+    # Row indices and heights are derived once so the rest of the
+    # function can refer to _main_row / _resid_row / _viz_2d_row
+    # without re-deriving them.
+    if _show_2d and show_residuals:
+        fig = make_subplots(
+            rows=3, cols=1, shared_xaxes=True,
+            row_heights=[0.20, 0.60, 0.20], vertical_spacing=0.03,
+        )
+        _viz_2d_row, _main_row, _resid_row = 1, 2, 3
+    elif _show_2d and not show_residuals:
+        fig = make_subplots(
+            rows=2, cols=1, shared_xaxes=True,
+            row_heights=[0.26, 0.74], vertical_spacing=0.03,
+        )
+        _viz_2d_row, _main_row, _resid_row = 1, 2, None
+    elif show_residuals:
         fig = make_subplots(
             rows=2, cols=1, shared_xaxes=True,
             row_heights=[0.75, 0.25], vertical_spacing=0.04,
         )
+        _viz_2d_row, _main_row, _resid_row = None, 1, 2
     else:
         fig = go.Figure()
+        _viz_2d_row = _main_row = _resid_row = None
 
-    main_row = 1 if show_residuals else None
+    _has_subplots = _show_2d or show_residuals
 
     def _add(trace, row=None):
-        if show_residuals and row is not None:
+        if _has_subplots and row is not None:
             fig.add_trace(trace, row=row, col=1)
         else:
             fig.add_trace(trace)
@@ -1122,7 +1235,7 @@ def plot_fit_interactive(
         y=np.concatenate([(flux + err)[show], (flux - err)[show][::-1]]),
         fill="toself", fillcolor="rgba(150,150,150,0.15)",
         line=dict(width=0), showlegend=False, hoverinfo="skip",
-    ), row=1)
+    ), row=_main_row)
 
     # Individual line components as smooth analytical Gaussians.
     if show_components and len(result.line_names) > 0:
@@ -1207,7 +1320,7 @@ def plot_fit_interactive(
                     y=np.concatenate([comp_hi, comp_lo[::-1]]),
                     fill="toself", fillcolor=fill,
                     line=dict(width=0), showlegend=False, hoverinfo="skip",
-                ), row=1)
+                ), row=_main_row)
 
             # Smooth Gaussian curve.
             _add(go.Scatter(
@@ -1216,7 +1329,7 @@ def plot_fit_interactive(
                 line=dict(color=colour, width=1.5, dash=dash),
                 hovertemplate=f"{display_name}<br>λ=%{{x:.1f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
                 showlegend=False,
-            ), row=1)
+            ), row=_main_row)
 
             # Store peak/trough position for annotation label.
             gauss_peak_flam = amp / (sqrt(2 * pi) * sig_A)
@@ -1290,7 +1403,7 @@ def plot_fit_interactive(
                     y=np.concatenate([comp_hi, comp_lo[::-1]]),
                     fill="toself", fillcolor=fill_c,
                     line=dict(width=0), showlegend=False, hoverinfo="skip",
-                ), row=1)
+                ), row=_main_row)
 
             _add(go.Scatter(
                 x=wave_fine_c_plot, y=prof_masked,
@@ -1298,7 +1411,7 @@ def plot_fit_interactive(
                 line=dict(color=comp_col, width=1.5, dash="solid"),
                 hovertemplate="Lyα<br>λ=%{x:.1f}<br>flux=%{y:.4e} " + flux_label + "<extra></extra>",
                 showlegend=False,
-            ), row=1)
+            ), row=_main_row)
 
             # Peak annotation.
             _pk_idx = np.argmax(prof_flam)
@@ -1377,20 +1490,47 @@ def plot_fit_interactive(
                     yanchor=yanchor,
                 )
 
+    # --- 2-D rectified-spectrum panel (row=_viz_2d_row when enabled) ---
+    if _show_2d:
+        sci = np.asarray(spec.sci_2d, dtype=float)
+        # Mirror the 1-D wavelength scaling so the 2-D heatmap aligns
+        # column-for-column with the data trace below.
+        if wave_unit == "A":
+            wave_2d = spec.wave_A / zp1
+        else:
+            wave_2d = spec.wave_um / zp1
+        ny = sci.shape[0]
+        y_lo_pix = int(round(ny * y_crop[0]))
+        y_hi_pix = max(y_lo_pix + 1, int(round(ny * y_crop[1])))
+        sci_crop = sci[y_lo_pix:y_hi_pix, :]
+        y_pix = np.arange(y_lo_pix, y_hi_pix)
+        finite = np.isfinite(sci_crop)
+        if np.any(finite):
+            vmin, vmax = np.nanpercentile(
+                sci_crop[finite], [vmin_pct, vmax_pct],
+            )
+        else:
+            vmin, vmax = 0.0, 1.0
+        _add(go.Heatmap(
+            x=wave_2d, y=y_pix, z=sci_crop,
+            colorscale=cmap_2d, zmin=vmin, zmax=vmax,
+            showscale=False, hoverinfo="skip",
+        ), row=_viz_2d_row)
+
     # Data (steps).
     _add(go.Scatter(
         x=wave[show], y=flux[show],
         mode="lines", name="Data",
         line=dict(color="grey", width=0.8, shape="hvh"),
         hovertemplate=f"Data<br>λ=%{{x:.1f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
-    ), row=1)
+    ), row=_main_row)
 
     # Continuum (steps).
     _add(go.Scatter(
         x=wave_k, y=cont_k,
         mode="lines", name="Continuum",
         line=dict(color="green", width=1, dash="dash", shape="hvh"),
-    ), row=1)
+    ), row=_main_row)
 
     # Model (steps, semi-transparent).
     _add(go.Scatter(
@@ -1398,7 +1538,7 @@ def plot_fit_interactive(
         mode="lines", name="Model",
         line=dict(color="rgba(255,0,0,0.4)", width=1.5, shape="hvh"),
         hovertemplate=f"Model<br>λ=%{{x:.1f}}<br>flux=%{{y:.4e}} {flux_label}<extra></extra>",
-    ), row=1)
+    ), row=_main_row)
 
     # --- Residual panel ---
     if show_residuals:
@@ -1408,7 +1548,7 @@ def plot_fit_interactive(
             y=np.concatenate([err[show], (-err)[show][::-1]]),
             fill="toself", fillcolor="rgba(150,150,150,0.15)",
             line=dict(width=0), showlegend=False, hoverinfo="skip",
-        ), row=2)
+        ), row=_resid_row)
 
         # Zero line.
         _add(go.Scatter(
@@ -1416,7 +1556,7 @@ def plot_fit_interactive(
             y=[0, 0],
             mode="lines", showlegend=False,
             line=dict(color="rgba(255,0,0,0.4)", width=1, dash="dash"),
-        ), row=2)
+        ), row=_resid_row)
 
         # Residual data.
         _add(go.Scatter(
@@ -1424,7 +1564,7 @@ def plot_fit_interactive(
             mode="lines", name="Residual", showlegend=False,
             line=dict(color="grey", width=0.8, shape="hvh"),
             hovertemplate=f"Residual<br>λ=%{{x:.1f}}<br>resid=%{{y:.4e}} {flux_label}<extra></extra>",
-        ), row=2)
+        ), row=_resid_row)
 
     # Y limits — account for absorption troughs.
     model_peak = np.nanmax(model_total[show]) if np.any(show) else 1.0
@@ -1444,26 +1584,57 @@ def plot_fit_interactive(
 
     ylabel = f"fλ [{flux_label}]" if use_flam else f"Flux density [{flux_label}]"
 
-    if show_residuals:
+    # Bottom-horizontal legend in every mode — the previous top-right
+    # placement covered emission-line markers and labels.  Margin
+    # leaves room for the horizontal legend (and any stacked line
+    # labels above the plot — _draw_emission_line_markers grows the
+    # top margin to fit).
+    _legend = dict(
+        orientation="h", x=0.5, xanchor="center", y=-0.18, yanchor="top",
+    )
+
+    if _has_subplots:
+        # Figure height by row count: 1 + 2D, 1 + residual, or 1+2D+residual.
+        if _show_2d and show_residuals:
+            fig_height = 760
+        elif _show_2d:
+            fig_height = 620
+        else:
+            fig_height = 650  # legacy show_residuals-only height
+
         fig.update_layout(
             title=title,
             template="plotly_white",
             hovermode=False,
             dragmode="zoom",
-            legend=dict(x=1.0, y=1.0, xanchor="right"),
+            legend=_legend,
             width=1000,
-            height=650,
+            height=fig_height,
+            margin=dict(b=110),
         )
-        fig.update_xaxes(title_text=xlabel, exponentformat="none", row=2, col=1)
-        # Also annotate the top panel's x-axis so the rest-frame/observed
-        # label is visible without scrolling to the residual panel.
-        fig.update_xaxes(title_text=xlabel, exponentformat="none", row=1, col=1)
-        fig.update_yaxes(title_text=ylabel, range=[y_lower, y_upper], row=1, col=1)
-        # Clip residual y-axis to ±5× median error so noise spikes
-        # don't dominate the panel height.
-        med_err = float(np.nanmedian(err[show])) if np.any(show) else 1.0
-        res_ylim = 5.0 * med_err
-        fig.update_yaxes(title_text="Residual", range=[-res_ylim, res_ylim], row=2, col=1)
+        fig.update_xaxes(exponentformat="none")
+        # Main panel always gets the wavelength label so the unit is
+        # visible without scrolling; bottom-most panel also gets it.
+        fig.update_xaxes(title_text=xlabel, row=_main_row, col=1)
+        fig.update_yaxes(
+            title_text=ylabel, range=[y_lower, y_upper],
+            row=_main_row, col=1,
+        )
+        if _show_2d:
+            fig.update_yaxes(
+                title_text="Spatial pix", showticklabels=False,
+                row=_viz_2d_row, col=1,
+            )
+        if show_residuals:
+            # Clip residual y-axis to ±5× median error so noise spikes
+            # don't dominate the panel height.
+            med_err = float(np.nanmedian(err[show])) if np.any(show) else 1.0
+            res_ylim = 5.0 * med_err
+            fig.update_yaxes(
+                title_text="Residual", range=[-res_ylim, res_ylim],
+                row=_resid_row, col=1,
+            )
+            fig.update_xaxes(title_text=xlabel, row=_resid_row, col=1)
     else:
         fig.update_layout(
             title=title,
@@ -1474,10 +1645,38 @@ def plot_fit_interactive(
             template="plotly_white",
             hovermode=False,
             dragmode="zoom",
-            legend=dict(x=1.0, y=1.0, xanchor="right"),
+            legend=_legend,
             width=1000,
             height=500,
+            margin=dict(b=110),
         )
+
+    # --- Curated emission-line markers (rest-frame aware) ---
+    if rest_frame:
+        z_for_lines: float | None = 0.0
+    elif z_used is not None:
+        z_for_lines = float(z_used)
+    else:
+        z_for_lines = None
+
+    if np.any(show):
+        x_data = wave[show]
+        x_lo_m = float(np.nanmin(x_data))
+        x_hi_m = float(np.nanmax(x_data))
+    else:
+        x_lo_m = x_hi_m = None
+
+    _draw_emission_line_markers(
+        fig,
+        z_for_lines=z_for_lines,
+        wave_unit=wave_unit,
+        x_lo=x_lo_m,
+        x_hi=x_hi_m,
+        lines=lines,
+        add_lines=add_lines,
+        line_color=line_color,
+        use_paper_shapes=_has_subplots,
+    )
 
     return fig
 
