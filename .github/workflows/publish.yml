@@ -9,7 +9,11 @@ name: Publish to PyPI
 #   2. Create GitHub Environment named "pypi" under repo Settings.
 on:
   release:
-    types: [published, released]
+    # Only `published` — GitHub fires both `published` and `released`
+    # on a single "Publish release" click (released is a subset of
+    # published for non-prerelease releases), so listing both causes
+    # the workflow to run twice per release.
+    types: [published]
   workflow_dispatch:  # allows manual runs from the Actions tab
 
 jobs:
