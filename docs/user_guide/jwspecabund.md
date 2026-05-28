@@ -40,6 +40,16 @@ the derivation entirely, or `dust_correct=False` to turn dust off.
 All line fluxes are then corrected at each line's own rest wavelength —
 the correction is fully wavelength-dependent.
 
+```{note}
+**A_V is held constant across MCMC draws by default.** When the input is
+an `MCMCResult`, the single A_V derived above is applied once to every
+posterior draw (the Balmer-propagated A_V error is reported on the
+result but *not* marginalised into the abundance posteriors). To
+marginalise over A_V instead — each draw dust-corrected with its own
+A_V sample — opt in by passing `Av_err=<value>` explicitly (and
+optionally `Av_prior="gaussian"` or `"uniform"`).
+```
+
 ### 2 — Electron density
 
 Three-zone density from whatever ratios are available:

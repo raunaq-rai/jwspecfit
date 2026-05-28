@@ -2152,6 +2152,20 @@ def compute_abundances(
 ) -> AbundanceResult:
     """Compute chemical abundances from a fitting result.
 
+    Dust handling (default)
+    -----------------------
+    By default ``A_V`` is computed **once** from the weighted-mean
+    Balmer decrement of the *median* posterior fluxes and applied as a
+    deterministic correction to every posterior draw — i.e. ``A_V`` is
+    held *constant* across draws.  The Balmer-propagated uncertainty
+    on ``A_V`` is reported on the returned :class:`AbundanceResult`
+    (``Av``, ``Av_err``) but is **not** marginalised into the
+    abundance posteriors.
+
+    To marginalise over ``A_V`` instead (each draw dust-corrected with
+    its own ``A_V`` sample), opt in by passing ``Av_err > 0``
+    explicitly — see *Av_err* below.
+
     Parameters
     ----------
     result : FitResult | BroadFitResult | MCMCResult | MCMCBroadFitResult
@@ -2171,10 +2185,16 @@ def compute_abundances(
         Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα.  Ignored when *Av* is
         supplied directly.
     Av_err : float or None
-        1σ error on A_V when *Av* is supplied.  If ``None`` (default),
-        A_V is treated as fixed (no MC sampling of dust).  Ignored when
-        *Av* is ``None`` (A_V derived from Balmer decrement carries its
-        own error).
+        Controls whether A_V is marginalised over.  ``None`` (default)
+        keeps A_V fixed at its central value — derived once from the
+        median Balmer decrement, or taken from *Av* if supplied — and
+        applies a single deterministic dust correction to all draws.
+        Passing a positive value here switches on per-draw resampling:
+        each posterior draw is dust-corrected with an A_V drawn from
+        the chosen *Av_prior* (centred on *Av*, or on the Balmer-derived
+        value when *Av* is ``None``).  The Balmer-derived error is
+        *always* reported on the result; it is used for resampling
+        only when you pass it back in explicitly here.
     Av_prior : str
         Prior shape for A_V sampling: ``"gaussian"`` (default) draws
         from N(*Av*, *Av_err*) clipped at 0; ``"uniform"`` draws from
