@@ -8,7 +8,7 @@ from jwspecfit import (
     save_result, load_result, export_lines_txt,
 )
 from jwspecfit.fitter import fit_lines
-from .conftest import G395M_FITS, PRISM_FITS, STACK_NPZ
+from .conftest import G395M_FITS, PRISM_FITS
 
 
 class TestReadFits:
@@ -43,19 +43,6 @@ class TestReadFits:
         mask = spec.mask_valid()
         assert mask.dtype == bool
         assert np.sum(mask) > 0
-
-
-class TestReadNpz:
-    def test_stack_loads(self):
-        spec = read_npz(STACK_NPZ, z=6.0, R=100.0)
-        assert spec.n_pix > 1000
-        assert spec.R == 100.0
-        assert spec.grating is None
-
-    def test_stack_wave_range(self):
-        spec = read_npz(STACK_NPZ, z=6.0, R=100.0)
-        assert spec.wave_A.min() >= 900.0
-        assert spec.wave_A.max() <= 80000.0
 
 
 class TestReadDict:

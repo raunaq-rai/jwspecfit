@@ -9,21 +9,27 @@ from jwspecfit.resolution import (
 
 
 class TestRPrism:
-    def test_values_clipped(self):
+    def test_values_in_sane_range(self):
+        """R must stay within the Jakobsen+22 × 1.3 post-launch bounds.
+
+        Lower bound at the prism minimum (≈1.0 µm) ~ 36, upper bound at
+        the red end (5.3 µm) ~ 380.  The bounds give the tabulated curve
+        room to evolve without losing the sanity-check intent.
+        """
         lam = np.array([0.6, 1.0, 3.0, 5.0])
         R = R_prism(lam)
         assert np.all(R >= 30)
-        assert np.all(R <= 300)
+        assert np.all(R <= 400)
 
-    def test_monotonic_increase(self):
-        lam = np.linspace(0.6, 5.0, 100)
+    def test_monotonic_increase_in_red(self):
+        """R rises with λ from the ~1 µm minimum to the red end."""
+        lam = np.linspace(1.0, 5.0, 50)
         R = R_prism(lam)
-        # R should generally increase with wavelength (quadratic).
         assert R[-1] > R[0]
 
     def test_at_1um(self):
-        # At 1.0 µm: R = 50 + 0 + 0 = 50
-        np.testing.assert_approx_equal(R_prism(np.array([1.0]))[0], 50.0)
+        """At 1.0 µm: Jakobsen+22 tabulated R = 28 × 1.3 post-launch = 36.4."""
+        np.testing.assert_allclose(R_prism(np.array([1.0]))[0], 36.4, rtol=1e-6)
 
 
 class TestRGrating:

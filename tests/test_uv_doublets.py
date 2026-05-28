@@ -557,24 +557,28 @@ class TestFitLinesNIVDoublet:
 class TestFitWithBroadUVDoublets:
     """Test that fit_with_broad accepts and passes through tie_uv_doublets."""
 
-    def test_broad_mode_off_with_tying(self, prism_spectrum):
+    def test_narrow_default_with_tying(self, prism_spectrum):
+        """All broad flags off (default) → narrow fit honours tie_uv_doublets."""
         result = fit_with_broad(
-            prism_spectrum, z=6.0, grating="PRISM", mode="off",
+            prism_spectrum, z=6.0, grating="PRISM",
             n_boot=0, tie_uv_doublets=True,
         )
         assert result.selected_model == "narrow"
         assert result.best_fit.success
 
-    def test_broad_mode_auto_with_tying(self, grating_spectrum):
+    def test_balmer_bic_with_tying(self, grating_spectrum):
+        """fit_balmer_broad=True triggers BIC; tie_uv_doublets still honoured."""
         result = fit_with_broad(
-            grating_spectrum, z=5.0, grating="G395M", mode="auto",
+            grating_spectrum, z=5.0, grating="G395M",
+            fit_balmer_broad=True,
             n_boot=0, n_boot_bic=0, tie_uv_doublets=True,
         )
         assert result.selected_model in ("narrow", "broad1", "broad2", "both")
 
     def test_bic_bootstrap_with_tying(self, grating_spectrum):
         result = fit_with_broad(
-            grating_spectrum, z=5.0, grating="G395M", mode="auto",
+            grating_spectrum, z=5.0, grating="G395M",
+            fit_balmer_broad=True,
             n_boot=0, n_boot_bic=3, n_jobs=1,
             snr_threshold=0.0, tie_uv_doublets=True,
         )

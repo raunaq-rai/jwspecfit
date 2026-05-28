@@ -325,71 +325,60 @@ class TestSignConvention:
 
 
 # ---------------------------------------------------------------------------
-# 7. Cross-law sanity on real stack — different curves, similar Av.
+# 7. Cross-law sanity on synthetic Balmer-decrement input.
 # ---------------------------------------------------------------------------
+#
+# Previously this section refitted a real stacked composite (which is
+# not distributed with the package) and compared Salim vs Cardelli on
+# it.  Reformulated as a fully synthetic test: build Case-B-like
+# Balmer fluxes attenuated by a known Av, derive Av with each law and
+# assert they agree on the *physical* attenuation A(5500 Å).
 
-@pytest.fixture(scope="module")
-def stack_optical_fit():
-    import jwspecfit
-    from tests.conftest import DATA_DIR
-    spec = jwspecfit.read_npz(DATA_DIR / "stack_all_Muv19_21.npz", z=0.0)
-    return jwspecfit.fit_lines(
-        spec, z=0.0,
-        lines=["OII_doublet", "HEPSILON", "HDELTA", "HGAMMA",
-               "OIII_4363", "OIII_4959", "OIII_5007",
-               "HBETA", "Ha", "NII_6585"],
-        wave_range_A=(3600, 6800),
-        moving_average=100, n_boot=50, mode="off",
-    )
+def test_salim_and_cardelli_give_similar_A_at_5500_on_synthetic_data():
+    """Cross-law sanity on a known synthetic Balmer decrement.
 
-
-def test_salim_and_cardelli_give_similar_A_at_5500_on_real_data(stack_optical_fit):
-    """Cross-law sanity on the real stack.
-
-    Salim's "Av" is a model parameter and does not equal A(5500 Å) when
-    delta ≠ 0 (see ``test_salim_Av_is_a_model_parameter_not_A_at_5500``).
-    A meaningful comparison between Salim and Cardelli on the same data
-    is therefore in the *physical* attenuation A(5500 Å), not in the
-    model parameter "Av".
-
-    Convert both to A(5500 Å) and assert they agree to within a factor
-    of 2 — strict enough to flag a sign error or factor-of-10 bug, loose
-    enough to allow the genuine difference between the two attenuation
-    curves over the Balmer range.
+    Salim's ``Av`` is a model parameter and ≠ A(5500 Å) when
+    ``delta ≠ 0``, so the meaningful comparison is at A(5500 Å).  Both
+    laws should recover ≈ the same A(5500 Å) on the same fluxes within
+    a factor of 2 — loose enough to allow genuine curve-shape
+    differences across the Balmer range, strict enough to flag a sign
+    error or factor-of-10 bug.
     """
-    from jwspecabund._core import _extract_fluxes
     from jwspecabund.dust import (
         compute_Av_multi_balmer, salim_attenuation, cardelli_extinction,
     )
 
-    fluxes, errors, _ = _extract_fluxes(stack_optical_fit)
+    Av_true = 0.8
+    salim_kw = {"Rv": 3.15, "delta": -0.35, "B": 2.27}
+    waves = {"Ha": 6562.8, "HBETA": 4861.3, "HGAMMA": 4340.5, "HDELTA": 4101.7}
+    case_b = {"Ha": 2.86, "HBETA": 1.00, "HGAMMA": 0.468, "HDELTA": 0.259}
+    A_lam = salim_attenuation(
+        np.array([waves[k] for k in case_b]), Av_true, **salim_kw,
+    )
+    fluxes = {k: case_b[k] * 10 ** (-0.4 * A_lam[i])
+              for i, k in enumerate(case_b)}
+    errors = {k: 0.02 * f for k, f in fluxes.items()}
 
     sal = compute_Av_multi_balmer(
         fluxes, errors, law="salim", snr_min=3.0, anchor="HBETA",
-        Rv=3.15, delta=-0.35, B=2.27,
+        **salim_kw,
     )
     car = compute_Av_multi_balmer(
         fluxes, errors, law="cardelli", snr_min=3.0, anchor="HBETA",
         Rv=3.1,
     )
 
-    # Convert each parameter "Av" into A(5500 Å) using its own law.
-    A_V_sal = salim_attenuation(np.array([5500.0]), sal["Av"],
-                                Rv=3.15, delta=-0.35, B=2.27)[0]
+    A_V_sal = salim_attenuation(np.array([5500.0]), sal["Av"], **salim_kw)[0]
     A_V_car = cardelli_extinction(np.array([5500.0]), car["Av"], Rv=3.1)[0]
 
-    # Both must be strictly positive (the stack has non-zero dust).
     assert A_V_sal > 0.01 and A_V_car > 0.01, (
-        f"Real stack returned ~zero A(5500 Å): "
+        f"Synthetic input returned ~zero A(5500 Å): "
         f"salim={A_V_sal:.4f}, cardelli={A_V_car:.4f}"
     )
-
-    # Cross-law agreement, in the physical observable.
     ratio = A_V_sal / A_V_car
     assert 0.5 < ratio < 2.0, (
-        f"Salim and Cardelli A(5500 Å) disagree by more than a factor of 2 "
-        f"on the real stack: salim={A_V_sal:.4f}, cardelli={A_V_car:.4f}, "
-        f"ratio={ratio:.3f}.  Possible bug in one law."
+        f"Salim and Cardelli A(5500 Å) disagree by more than a factor of 2: "
+        f"salim={A_V_sal:.4f}, cardelli={A_V_car:.4f}, ratio={ratio:.3f}."
     )
 
 

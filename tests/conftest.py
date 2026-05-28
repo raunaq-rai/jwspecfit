@@ -10,7 +10,6 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 PRISM_FITS = DATA_DIR / "borg-v4_prism-clear_1747_732.spec.fits"
 G395M_FITS = DATA_DIR / "excels-uds04-v4_g395m-f290lp_3543_63107.spec.fits"
 G395M_FITS_2 = DATA_DIR / "stark-rxcj2248-v4_g395m-f290lp_2478_3.spec.fits"
-STACK_NPZ = DATA_DIR / "stack_all_Muv19_21_DustCorrected.npz"
 INOUE_TABLE = DATA_DIR / "inoue2014_table2.txt"
 
 

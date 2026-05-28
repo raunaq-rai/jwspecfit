@@ -32,48 +32,59 @@ class TestBalmerPixelMask:
 
 
 class TestFitWithBroad:
-    def test_narrow_mode(self, prism_spectrum):
+    """Tests for the BIC-selected broad-component fitter.
+
+    The legacy ``mode=`` kwarg was replaced with independent boolean
+    flags ``fit_balmer_broad`` / ``fit_oiii_broad`` / ``fit_hei_broad``.
+    When all are ``False`` (the default) only the narrow model is fit;
+    when ``fit_balmer_broad=True`` BIC chooses among narrow / broad1
+    (FWHM 500–2000 km/s) / broad2 (2000–5000 km/s) / both.
+    """
+
+    def test_narrow_only_default(self, prism_spectrum):
+        """All broad flags off → narrow-only fit."""
         result = fit_with_broad(
-            prism_spectrum, z=6.0, grating="PRISM", mode="off", n_boot=0,
+            prism_spectrum, z=6.0, grating="PRISM", n_boot=0,
         )
         assert isinstance(result, BroadFitResult)
         assert result.selected_model == "narrow"
         assert result.best_fit.success
 
-    def test_auto_mode(self, grating_spectrum):
-        """Auto mode with n_boot_bic=0 (no bootstrap, just point BIC)."""
+    def test_balmer_bic_selection(self, grating_spectrum):
+        """fit_balmer_broad=True triggers BIC; selected model must be valid."""
         result = fit_with_broad(
-            grating_spectrum, z=5.0, grating="G395M", mode="auto", n_boot=0,
-            n_boot_bic=0,
+            grating_spectrum, z=5.0, grating="G395M",
+            fit_balmer_broad=True, n_boot=0, n_boot_bic=0,
         )
         assert result.selected_model in ("narrow", "broad1", "broad2", "both")
 
-    def test_bic_values(self, prism_spectrum):
+    def test_bic_values_finite(self, prism_spectrum):
         result = fit_with_broad(
-            prism_spectrum, z=6.0, grating="PRISM", mode="auto", n_boot=0,
-            n_boot_bic=0,
+            prism_spectrum, z=6.0, grating="PRISM",
+            fit_balmer_broad=True, n_boot=0, n_boot_bic=0,
         )
         assert np.isfinite(result.bic_narrow)
 
-    def test_forced_broad1(self, prism_spectrum):
+    def test_balmer_bic_populates_all_fits(self, prism_spectrum):
+        """fit_balmer_broad=True must fit and store the narrow baseline."""
         result = fit_with_broad(
-            prism_spectrum, z=6.0, grating="PRISM", mode="broad1", n_boot=0,
+            prism_spectrum, z=6.0, grating="PRISM",
+            fit_balmer_broad=True, n_boot=0, n_boot_bic=0,
         )
-        assert result.selected_model == "broad1"
-        broad_lines = [n for n in result.best_fit.line_names if "BROAD" in n]
-        assert len(broad_lines) > 0
+        assert "narrow" in result.all_fits
 
     def test_all_fits_dict(self, prism_spectrum):
         result = fit_with_broad(
-            prism_spectrum, z=6.0, grating="PRISM", mode="auto", n_boot=0,
-            n_boot_bic=0,
+            prism_spectrum, z=6.0, grating="PRISM",
+            fit_balmer_broad=True, n_boot=0, n_boot_bic=0,
         )
         assert "narrow" in result.all_fits
 
     def test_bic_bootstrap_auto(self, grating_spectrum):
         """Bootstrap BIC with small n_boot_bic."""
         result = fit_with_broad(
-            grating_spectrum, z=5.0, grating="G395M", mode="auto",
+            grating_spectrum, z=5.0, grating="G395M",
+            fit_balmer_broad=True,
             n_boot=0, n_boot_bic=3, n_jobs=1, snr_threshold=0.0,
         )
         assert result.selected_model in ("narrow", "broad1", "broad2", "both")
@@ -83,17 +94,17 @@ class TestFitWithBroad:
             assert np.all(np.isfinite(dist))
         assert np.isfinite(result.bic_narrow)
 
-    def test_bic_bootstrap_empty_when_off(self, prism_spectrum):
-        """Bootstrap BIC should be empty when mode='off'."""
+    def test_bic_bootstrap_empty_when_no_flags(self, prism_spectrum):
+        """No broad flag enabled → no BIC test → empty bic_bootstrap."""
         result = fit_with_broad(
-            prism_spectrum, z=6.0, grating="PRISM", mode="off", n_boot=0,
+            prism_spectrum, z=6.0, grating="PRISM", n_boot=0,
         )
         assert result.bic_bootstrap == {}
 
     def test_bic_bootstrap_empty_when_zero(self, grating_spectrum):
         """Bootstrap BIC should be empty when n_boot_bic=0."""
         result = fit_with_broad(
-            grating_spectrum, z=5.0, grating="G395M", mode="auto",
-            n_boot=0, n_boot_bic=0,
+            grating_spectrum, z=5.0, grating="G395M",
+            fit_balmer_broad=True, n_boot=0, n_boot_bic=0,
         )
         assert result.bic_bootstrap == {}

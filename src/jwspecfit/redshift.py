@@ -26,6 +26,11 @@ from .io import Spectrum
 from .lines import REST_LINES_A
 from .resolution import R_from_pixels, resolve_R
 
+# NumPy 2.0 renamed ``np.trapz`` to ``np.trapezoid`` and removed the old
+# name.  Resolve once at import so the package works under both old and
+# new NumPy without per-call overhead.
+_trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+
 logger = logging.getLogger(__name__)
 
 
@@ -624,7 +629,7 @@ def fit_redshift(
         chi2_loc = chi2_f[lo:hi + 1]
         prior_loc = prior_f[lo:hi + 1]
         u = np.exp(-0.5 * (chi2_loc - chi2_best)) * prior_loc
-        m = float(np.trapz(u, z_loc)) if z_loc.size > 1 else float(u.sum())
+        m = float(_trapezoid(u, z_loc)) if z_loc.size > 1 else float(u.sum())
         masses.append(m)
         rec["z_loc"] = z_loc
         rec["chi2_loc"] = chi2_loc

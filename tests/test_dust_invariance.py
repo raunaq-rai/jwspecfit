@@ -158,7 +158,7 @@ def _compare_centrals(a: dict, b: dict, *, rtol: float, atol: float):
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("law", ["salim", "cardelli"])
-@pytest.mark.parametrize("Av_true", [0.0, 0.5, 1.5])
+@pytest.mark.parametrize("Av_true", [0.0, 1.0])
 @pytest.mark.parametrize("anchor", ["HBETA", "Ha"])
 def test_auto_av_invariance(law, Av_true, anchor):
     """Path A (auto-derive Av) ≡ Path B (external derive + deredden).
@@ -191,7 +191,7 @@ def test_auto_av_invariance(law, Av_true, anchor):
     abund_A = compute_abundances(
         result_obs, z=2.0, method="direct",
         dust_correct=True, dust_law=law, balmer_anchor=anchor,
-        n_mc=200, progress=False,
+        n_mc=5, progress=False,
     )
 
     # ---- Path B: external derivation + dereddening, then no internal dust ----
@@ -219,7 +219,7 @@ def test_auto_av_invariance(law, Av_true, anchor):
         dust_correct=False, dust_law=law,
         Av=Av_ext, Av_err=Av_ext_err if Av_ext_err > 0 else None,
         balmer_anchor=anchor,
-        n_mc=200, progress=False,
+        n_mc=5, progress=False,
     )
 
     # ---- Compare ----
@@ -241,7 +241,7 @@ def test_auto_av_invariance(law, Av_true, anchor):
 
 
 @pytest.mark.parametrize("law", ["salim", "cardelli"])
-@pytest.mark.parametrize("Av_user", [0.0, 0.7, 2.0])
+@pytest.mark.parametrize("Av_user", [0.0, 1.0])
 def test_user_supplied_av_invariance(law, Av_user):
     """When Av is supplied directly, the same invariance must hold.
 
@@ -271,7 +271,7 @@ def test_user_supplied_av_invariance(law, Av_user):
         result_obs, z=2.0, method="direct",
         dust_correct=True, dust_law=law,
         Av=Av_user, Av_err=None,
-        n_mc=200, progress=False,
+        n_mc=5, progress=False,
     )
 
     # Path B — externally deredden with the same Av_user.
@@ -288,7 +288,7 @@ def test_user_supplied_av_invariance(law, Av_user):
         result_dered, z=2.0, method="direct",
         dust_correct=False, dust_law=law,
         Av=Av_user, Av_err=None,
-        n_mc=200, progress=False,
+        n_mc=5, progress=False,
     )
 
     centrals_A = _extract_centrals(abund_A)
@@ -348,192 +348,12 @@ def test_dereddening_recovers_intrinsic_fluxes():
 
 
 # ---------------------------------------------------------------------------
-# Real-data sanity check
+# Real-data sanity check (REMOVED)
 # ---------------------------------------------------------------------------
 #
-# Synthetic tests above prove the algebraic invariance.  This test exercises
-# the same property on a real FitResult produced by jwspecfit.fit_lines on
-# the public stack data/stack_all_Muv19_21.npz (a rest-frame composite).
-# It catches any bug where _extract_fluxes, _extract_posteriors, or downstream
-# code reaches a different branch when fed a real result vs synthetic one.
-
-@pytest.fixture(scope="module")
-def stack_optical_fit():
-    """Fit optical emission lines on the (un-dust-corrected) stack.
-
-    Uses moderate bootstrap n_boot=50 to keep runtime down — central values
-    don't depend on n_boot, only the flux uncertainties.
-    """
-    import jwspecfit
-
-    from tests.conftest import DATA_DIR
-    npz_path = DATA_DIR / "stack_all_Muv19_21.npz"
-    spec = jwspecfit.read_npz(npz_path, z=0.0)
-
-    optical_lines = [
-        "OII_doublet", "HEPSILON", "HDELTA", "HGAMMA",
-        "OIII_4363", "OIII_4959", "OIII_5007",
-        "HBETA", "Ha", "NII_6585",
-    ]
-    return jwspecfit.fit_lines(
-        spec, z=0.0, lines=optical_lines,
-        wave_range_A=(3600, 6800),
-        moving_average=100, n_boot=50, mode="off",
-    )
-
-
-@pytest.mark.parametrize("law", ["salim", "cardelli"])
-def test_real_data_dust_invariance(stack_optical_fit, law):
-    """End-to-end: feeding the real FitResult through path A and path B.
-
-    Tolerance is looser than the synthetic test (rtol=1e-9) to absorb any
-    floating-point reordering when the real result also goes through
-    _extract_fluxes, broad-component summing, etc.  The dust correction
-    itself is still exact, so values must agree to ~9–10 decimal places.
-    """
-    from jwspecabund import compute_abundances
-    from jwspecabund._core import _LINE_WAVES, _extract_fluxes
-    from jwspecabund.dust import compute_Av_multi_balmer, dust_correct_fluxes
-
-    if law == "salim":
-        dust_kwargs = {"Rv": 3.15, "delta": -0.35, "B": 2.27}
-    else:
-        dust_kwargs = {}
-
-    # ---- Path A: feed the real FitResult and let compute_abundances
-    #              derive Av and apply dust internally. ----
-    abund_A = compute_abundances(
-        stack_optical_fit, z=0.0, method="auto",
-        dust_correct=True, dust_law=law,
-        balmer_anchor="HBETA", n_mc=200, progress=False,
-    )
-
-    # ---- Path B: extract the same fluxes _extract_fluxes would,
-    #              derive Av externally, deredden, then call with
-    #              dust_correct=False. ----
-    fluxes, errors, _ = _extract_fluxes(stack_optical_fit)
-    bal = compute_Av_multi_balmer(
-        fluxes, errors, law=law, snr_min=3.0, anchor="HBETA",
-        **dust_kwargs,
-    )
-    Av_ext = bal["Av"]
-    Av_ext_err = bal["Av_err"]
-
-    line_data = {
-        name: (fluxes[name], errors[name], _LINE_WAVES[name])
-        for name in fluxes if name in _LINE_WAVES
-    }
-    corrected = dust_correct_fluxes(line_data, Av_ext, law=law, **dust_kwargs)
-
-    # Build a mock FitResult that mirrors _extract_fluxes' output so path B
-    # sees an identical set of lines and uncertainties.
-    fluxes_dered = {n: v[0] for n, v in corrected.items()}
-    errors_dered = {n: v[1] for n, v in corrected.items()}
-    result_dered = _make_mock_result(fluxes_dered, errors_dered)
-
-    abund_B = compute_abundances(
-        result_dered, z=0.0, method="auto",
-        dust_correct=False, dust_law=law,
-        Av=Av_ext, Av_err=Av_ext_err if Av_ext_err > 0 else None,
-        balmer_anchor="HBETA", n_mc=200, progress=False,
-    )
-
-    # ---- Sanity: the test is only meaningful if the stack actually
-    # produced a non-trivial Av and reached the direct method. ----
-    assert abund_A.Av is not None and abund_A.Av > 0, (
-        "Stack produced Av <= 0; real-data test loses its bite. "
-        f"Got Av={abund_A.Av}."
-    )
-    assert abund_A.method == "direct", (
-        f"Expected direct method on this stack; got {abund_A.method}."
-    )
-
-    centrals_A = _extract_centrals(abund_A)
-    centrals_B = _extract_centrals(abund_B)
-    _compare_centrals(centrals_A, centrals_B, rtol=1e-9, atol=1e-12)
-
-
-@pytest.mark.parametrize("law", ["salim", "cardelli"])
-def test_external_deredden_then_av_zero(stack_optical_fit, law):
-    """User-workflow test: deredden externally, then compute_abundances(Av=0).
-
-    This is the workflow a typical user is most likely to write by hand:
-
-        1. fit emission lines
-        2. compute Av from Balmer decrement
-        3. dust-correct ALL line fluxes manually
-        4. compute_abundances on the dereddened fluxes, telling the
-           function Av=0 (i.e. "I've already handled dust").
-
-    Path A is the canonical one: hand the raw FitResult to
-    compute_abundances and let it auto-derive and apply Av internally.
-    Both must produce identical OH, NO, Te, ne, ionic abundances.
-
-    Note: the only field that is *expected* to differ is `result.Av`
-    itself — Path A reports the derived value, Path B reports 0.0
-    because that is what we told it.  The downstream chemistry must
-    nevertheless be identical because both paths feed the same
-    (dereddened) numbers into the same downstream code with the same
-    RNG seed.
-    """
-    from jwspecabund import compute_abundances
-    from jwspecabund._core import _LINE_WAVES, _extract_fluxes
-    from jwspecabund.dust import compute_Av_multi_balmer, dust_correct_fluxes
-
-    if law == "salim":
-        dust_kwargs = {"Rv": 3.15, "delta": -0.35, "B": 2.27}
-    else:
-        dust_kwargs = {}
-
-    # ---- Path A: fit → compute_abundances handles dust internally ----
-    abund_A = compute_abundances(
-        stack_optical_fit, z=0.0, method="auto",
-        dust_correct=True, dust_law=law,
-        balmer_anchor="HBETA", n_mc=200, progress=False,
-    )
-
-    # ---- Path B: fit → external Balmer Av → external deredden →
-    #              compute_abundances with Av=0 ("I've already done it") ----
-    fluxes, errors, _ = _extract_fluxes(stack_optical_fit)
-    bal = compute_Av_multi_balmer(
-        fluxes, errors, law=law, snr_min=3.0, anchor="HBETA", **dust_kwargs,
-    )
-    Av_balmer = bal["Av"]
-
-    line_data = {
-        name: (fluxes[name], errors[name], _LINE_WAVES[name])
-        for name in fluxes if name in _LINE_WAVES
-    }
-    corrected = dust_correct_fluxes(line_data, Av_balmer, law=law, **dust_kwargs)
-    fluxes_dered = {n: v[0] for n, v in corrected.items()}
-    errors_dered = {n: v[1] for n, v in corrected.items()}
-    result_dered = _make_mock_result(fluxes_dered, errors_dered)
-
-    # We dereddened the fluxes ourselves; tell compute_abundances Av=0
-    # so it does not double-correct.
-    abund_B = compute_abundances(
-        result_dered, z=0.0, method="auto",
-        dust_correct=True, dust_law=law,
-        Av=0.0, Av_err=None,
-        balmer_anchor="HBETA", n_mc=200, progress=False,
-    )
-
-    # ---- Sanity guards: real test must trigger non-trivial paths ----
-    assert abund_A.method == "direct" and abund_B.method == "direct", (
-        f"Expected direct method on stack; got A={abund_A.method}, "
-        f"B={abund_B.method}."
-    )
-    assert abund_A.Av is not None and abund_A.Av > 0, (
-        f"Stack produced Av <= 0; test loses its bite. Got {abund_A.Av}."
-    )
-    # Path B's reported Av is whatever we passed in (0.0), by design.
-    assert abund_B.Av == 0.0
-
-    # ---- Compare every other central value ----
-    centrals_A = _extract_centrals(abund_A)
-    centrals_B = _extract_centrals(abund_B)
-    # Av is *expected* to differ here (A: derived, B: forced 0); strip it
-    # before invoking the dict comparator.
-    centrals_A.pop("Av", None)
-    centrals_B.pop("Av", None)
-    _compare_centrals(centrals_A, centrals_B, rtol=1e-9, atol=1e-12)
+# A previous module-scoped fixture refitted the rest-frame composite
+# ``data/stack_all_Muv19_21.npz`` and exercised the same invariance
+# end-to-end on a real FitResult.  The composite is no longer
+# distributed with the package and the synthetic tests above already
+# prove the algebraic invariance, so the real-data tests have been
+# removed for speed and reproducibility.

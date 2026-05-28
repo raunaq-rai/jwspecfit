@@ -37,6 +37,11 @@ from scipy.special import wofz
 
 from .lines import REST_LINES_A
 
+# NumPy 2.0 renamed ``np.trapz`` to ``np.trapezoid`` and removed the old
+# name.  Resolve once at import so the package works under both old and
+# new NumPy without per-call overhead.
+_trapezoid = np.trapezoid if hasattr(np, "trapezoid") else np.trapz
+
 logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------
@@ -1419,7 +1424,7 @@ def compute_D_Lya(
         # Avoid divide-by-zero at the rare positive-continuum dips.
         with np.errstate(divide="ignore", invalid="ignore"):
             integrand = np.where(cont_k > 0, 1.0 - f_k / cont_k, 0.0)
-        D_samples[k] = np.trapz(integrand, w_int)
+        D_samples[k] = _trapezoid(integrand, w_int)
     D_Lya_med = float(np.median(D_samples))
     D_Lya_err = float(np.std(D_samples))
 
