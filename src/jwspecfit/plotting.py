@@ -791,13 +791,18 @@ def plot_spectrum_interactive(
     xlabel = ylabel = flux_label = None
 
     for i, spec in enumerate(specs):
-        # Rest-frame scaling (per spectrum).
+        # Rest-frame scaling (per spectrum).  Source of redshift:
+        # prefer the Spectrum's own z (e.g. set by read_fits(z=...)),
+        # else fall back to the explicit ``z`` kwarg so users who read
+        # a file without z=... can still get a rest-frame plot.  Only
+        # silently disable rest-frame when neither is available.
         rf = rest_frame
         zp1 = 1.0
-        if rf and spec.z is not None:
-            zp1 = 1.0 + spec.z
-        elif rf and spec.z is None:
-            rf = False  # Silently fall back; no z available.
+        z_data: float | None = spec.z if spec.z is not None else z
+        if rf and z_data is not None:
+            zp1 = 1.0 + float(z_data)
+        elif rf:
+            rf = False  # No z anywhere — silently observed-frame.
 
         if wave_unit == "A":
             wave = spec.wave_A / zp1
@@ -886,8 +891,10 @@ def plot_spectrum_interactive(
             fname = spec.meta.get("filename")
             if fname:
                 bits.append(str(fname))
-            if spec.z is not None:
-                bits.append(f"z = {spec.z:.4f}")
+            # Title z: prefer spec.z, fall back to explicit z= kwarg.
+            _z_title = spec.z if spec.z is not None else z
+            if _z_title is not None:
+                bits.append(f"z = {float(_z_title):.4f}")
             if spec.grating:
                 bits.append(spec.grating)
             title = "  |  ".join(bits)
@@ -918,7 +925,10 @@ def plot_spectrum_interactive(
         sci = np.asarray(spec0.sci_2d, dtype=float)
         # x-axis matches the 1-D wavelength array (and inherits rest-frame
         # scaling from the spec0 branch of the per-spectrum loop above).
-        zp1_0 = 1.0 + spec0.z if (rest_frame and spec0.z is not None) else 1.0
+        # Same z-resolution policy as the 1-D loop above: spec.z first,
+        # explicit z= kwarg as fallback, else 1.0 (observed frame).
+        _z_2d: float | None = spec0.z if spec0.z is not None else z
+        zp1_0 = (1.0 + float(_z_2d)) if (rest_frame and _z_2d is not None) else 1.0
         if wave_unit == "A":
             wave_2d = spec0.wave_A / zp1_0
         else:
