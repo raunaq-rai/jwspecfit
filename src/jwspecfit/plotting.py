@@ -1061,7 +1061,7 @@ def plot_fit_interactive(
     exclude_wave_A: list[tuple[float, float]] | None = None,
     rest_frame: bool = False,
     z: float | None = None,
-    lines: "Sequence[str] | bool | None" = None,
+    lines: "Sequence[str] | bool | None" = False,
     add_lines: "dict[str, float] | Sequence[str] | None" = None,
     line_color: str = "darkred",
     show_2d: "bool | str" = "auto",
@@ -1074,9 +1074,11 @@ def plot_fit_interactive(
 
     Optionally stacks a 2-D rectified-spectrum panel above the main fit
     panel (when ``result.spectrum.sci_2d`` is populated by
-    :func:`read_fits`) and a residual panel below.  Curated
-    emission-line markers (dashed verticals + labels) are drawn at the
-    fit's redshift, or at rest wavelengths when ``rest_frame=True``.
+    :func:`read_fits`) and a residual panel below.  By default no
+    curated emission-line markers are drawn — every fitted line is
+    already labelled at its peak above the model.  Pass ``lines=None``
+    to add the package-default markers, or an explicit list of
+    :data:`jwspecfit.lines.REST_LINES_A` keys to mark only those.
 
     Parameters
     ----------
@@ -1105,9 +1107,11 @@ def plot_fit_interactive(
         ``rest_frame=True`` and neither source provides a redshift.
     lines : sequence of str, bool, or None
         Curated emission-line markers (vertical dashed lines + labels).
-        ``None`` (default) draws the package defaults; an explicit list
-        of :data:`jwspecfit.lines.REST_LINES_A` keys restricts to those
-        names; ``False`` disables marker drawing.
+        ``False`` (default) draws none — the fit-component peak
+        annotations already identify every fitted line.  ``None``
+        opts in to the package-default marker set; an explicit list of
+        :data:`jwspecfit.lines.REST_LINES_A` keys marks only those
+        names.
     add_lines : dict[str, float] or sequence of str, optional
         Extra markers to overlay on top of *lines*.  Same semantics as
         in :func:`plot_spectrum_interactive`.
