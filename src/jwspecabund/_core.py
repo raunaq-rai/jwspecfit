@@ -1149,7 +1149,7 @@ def _run_direct(
         compute_Te_OIII_1666,
         compute_total_abundances,
     )
-    from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
+    from .martinez25_icf import LOG_OH_SOLAR
 
     # --- Step 1: Multi-phase electron density ---
     ne_low, ne_mid, ne_high, ne_failures = _compute_multi_ne(
@@ -1310,8 +1310,10 @@ def _run_direct(
             else:
                 z_zsun_mc = Z_Zsun  # fallback to point estimate
 
-            # Compute logU for this MC iteration (clamped to validity
-            # range to prevent wild ICF extrapolation).
+            # Compute logU for this MC iteration.  Out-of-range logU — and
+            # the O32/N43/Z inputs behind it — are rejected to NaN inside
+            # the Martinez+2025 surfaces, so unphysical draws drop out of
+            # the nanmedian/nanstd statistics rather than being clipped.
             # Pass original errors so the same SNR gating applies as
             # for the point estimate (prevents switching between N43
             # and O32 across MC iterations).
@@ -1322,7 +1324,7 @@ def _run_direct(
                     snr_logU=snr_logU,
                 )
                 if logU_mc_val is not None:
-                    logU_mc = float(np.clip(logU_mc_val, *_LOG_U_VALID))
+                    logU_mc = float(logU_mc_val)
 
             Te_high_mc.append(Te_h)
             Te_low_mc.append(Te_l)
@@ -1638,7 +1640,7 @@ def _run_direct_mcmc(
         compute_Te_OIII_1666,
         compute_total_abundances,
     )
-    from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
+    from .martinez25_icf import LOG_OH_SOLAR
 
     from .dust import _draw_Av
 
@@ -1793,8 +1795,10 @@ def _run_direct_mcmc(
             oh_val = ionic_i.get("O+/H+", 0.0) + ionic_i.get("O++/H+", 0.0)
             z_zsun_i = 10.0 ** (12.0 + np.log10(oh_val) - LOG_OH_SOLAR) if oh_val > 0 else Z_Zsun_pt
 
-            # logU for this sample (clamped to validity range to
-            # prevent wild ICF extrapolation).
+            # logU for this sample.  Out-of-range logU — and the O32/N43/Z
+            # inputs behind it — are rejected to NaN inside the
+            # Martinez+2025 surfaces, so unphysical samples drop out of the
+            # nanmedian/nanstd statistics rather than being clipped.
             # Pass med_errors so the same SNR gating applies as for
             # the point estimate.
             logU_i = logU_pt
@@ -1804,7 +1808,7 @@ def _run_direct_mcmc(
                     snr_logU=snr_logU,
                 )
                 if logU_val is not None:
-                    logU_i = float(np.clip(logU_val, *_LOG_U_VALID))
+                    logU_i = float(logU_val)
 
             Te_high_post[i] = Te_h
             Te_low_post[i] = Te_l
