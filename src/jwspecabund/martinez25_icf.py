@@ -185,6 +185,44 @@ def _interp_ne(
     return val_lo + frac * (val_hi - val_lo)
 
 
+def _warn_and_clip(
+    value: float,
+    valid: tuple[float, float],
+    label: str,
+) -> float:
+    """Clip *value* to the validity range *valid* = ``(lo, hi)``.
+
+    The Martinez+2025 coefficients are fits over a bounded calibration
+    domain; the bicubic surface diverges if evaluated by extrapolation.
+    Out-of-range inputs are therefore clipped to the nearest boundary
+    (a warning is emitted so the clip is visible) rather than passed
+    through raw.  Clipping — instead of returning NaN — keeps every
+    Monte-Carlo / posterior draw finite, so downstream sample counts
+    are preserved.
+
+    Parameters
+    ----------
+    value : float
+        Input surface variable (e.g. log(O32), log(N43), log(U), Z/Zsun).
+    valid : tuple of float
+        ``(lo, hi)`` validity bounds.
+    label : str
+        Human-readable name used in the warning message.
+
+    Returns
+    -------
+    float
+        *value* clipped to ``[lo, hi]``.
+    """
+    lo, hi = valid
+    if value < lo or value > hi:
+        logger.warning(
+            "%s=%.3g outside validity range [%g, %g]; clipped to range.",
+            label, value, lo, hi,
+        )
+    return float(np.clip(value, lo, hi))
+
+
 # =========================================================================
 # Ionisation parameter diagnostics
 # =========================================================================
@@ -216,16 +254,8 @@ def log_U_from_O32(
     O32 is density-sensitive; prefer N43 when available.
     Martinez+2025 Table 3 (upper).
     """
-    if not (_LOG_O32_VALID[0] <= log_O32 <= _LOG_O32_VALID[1]):
-        logger.warning(
-            "log(O32)=%.2f outside validity range [%.1f, %.1f].",
-            log_O32, *_LOG_O32_VALID,
-        )
-    if not (_Z_ZSUN_VALID[0] <= Z_Zsun <= _Z_ZSUN_VALID[1]):
-        logger.warning(
-            "Z/Zsun=%.3f outside validity range [%.2f, %.2f].",
-            Z_Zsun, *_Z_ZSUN_VALID,
-        )
+    log_O32 = _warn_and_clip(log_O32, _LOG_O32_VALID, "log(O32)")
+    Z_Zsun = _warn_and_clip(Z_Zsun, _Z_ZSUN_VALID, "Z/Zsun")
     return _interp_ne(ne, _COEFF_LOG_U_O32, log_O32, Z_Zsun)
 
 
@@ -257,16 +287,8 @@ def log_U_from_N43(
     NIV] and NIII] are available (Martinez+2025 Section 4.2).
     Martinez+2025 Table 3 (lower).
     """
-    if not (_LOG_N43_VALID[0] <= log_N43 <= _LOG_N43_VALID[1]):
-        logger.warning(
-            "log(N43)=%.2f outside validity range [%.1f, %.1f].",
-            log_N43, *_LOG_N43_VALID,
-        )
-    if not (_Z_ZSUN_VALID[0] <= Z_Zsun <= _Z_ZSUN_VALID[1]):
-        logger.warning(
-            "Z/Zsun=%.3f outside validity range [%.2f, %.2f].",
-            Z_Zsun, *_Z_ZSUN_VALID,
-        )
+    log_N43 = _warn_and_clip(log_N43, _LOG_N43_VALID, "log(N43)")
+    Z_Zsun = _warn_and_clip(Z_Zsun, _Z_ZSUN_VALID, "Z/Zsun")
     return _interp_ne(ne, _COEFF_LOG_U_N43, log_N43, Z_Zsun)
 
 
@@ -274,13 +296,21 @@ def log_U_from_N43(
 # ICF evaluation functions
 # =========================================================================
 
-def _check_logU_range(logU: float) -> None:
-    """Warn if logU is outside the validity range."""
-    if not (_LOG_U_VALID[0] <= logU <= _LOG_U_VALID[1]):
-        logger.warning(
-            "log(U)=%.2f outside validity range [%.1f, %.1f].",
-            logU, *_LOG_U_VALID,
-        )
+def _clip_icf_inputs(logU: float, Z_Zsun: float) -> tuple[float, float]:
+    """Clip the ICF-surface inputs to their Martinez+2025 validity ranges.
+
+    Both ``logU`` and ``Z_Zsun`` parameterise the bicubic ICF surfaces,
+    so both are clipped to their calibration domains before evaluation
+    to avoid divergent extrapolation.  See :func:`_warn_and_clip`.
+
+    Returns
+    -------
+    tuple of float
+        ``(logU, Z_Zsun)`` clipped to their validity ranges.
+    """
+    logU = _warn_and_clip(logU, _LOG_U_VALID, "log(U)")
+    Z_Zsun = _warn_and_clip(Z_Zsun, _Z_ZSUN_VALID, "Z/Zsun")
+    return logU, Z_Zsun
 
 
 def icf_NpOp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
@@ -306,7 +336,7 @@ def icf_NpOp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     at high density (ne ~ 10^6), can overestimate N/O by up to 40%.
     Martinez+2025 Table 4, row 1.
     """
-    _check_logU_range(logU)
+    logU, Z_Zsun = _clip_icf_inputs(logU, Z_Zsun)
     return _interp_ne(ne, _COEFF_ICF_NpOp, logU, Z_Zsun)
 
 
@@ -332,7 +362,7 @@ def icf_NppOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     Overestimates N/O at low logU, underestimates at high logU.
     Martinez+2025 Table 4, row 2.
     """
-    _check_logU_range(logU)
+    logU, Z_Zsun = _clip_icf_inputs(logU, Z_Zsun)
     return _interp_ne(ne, _COEFF_ICF_NppOpp, logU, Z_Zsun)
 
 
@@ -359,7 +389,7 @@ def icf_NpppOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     to return the ICF itself.  N3+/O2+ alone underestimates N/O by
     100--15000%.  Martinez+2025 Table 4, row 3.
     """
-    _check_logU_range(logU)
+    logU, Z_Zsun = _clip_icf_inputs(logU, Z_Zsun)
     log_icf = _interp_ne(ne, _COEFF_ICF_NpppOpp, logU, Z_Zsun)
     return 10.0 ** log_icf
 
@@ -386,7 +416,7 @@ def icf_NpNpp_OpOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     Combines optical (N+, O+) and UV (N2+, O2+) ionic abundances.
     Martinez+2025 Table 4, row 4.
     """
-    _check_logU_range(logU)
+    logU, Z_Zsun = _clip_icf_inputs(logU, Z_Zsun)
     return _interp_ne(ne, _COEFF_ICF_NpNpp_OpOpp, logU, Z_Zsun)
 
 
@@ -413,7 +443,7 @@ def icf_NppNppp_Opp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     corrections < 5%.  **Recommended** when both NIII] and NIV]
     are detected.  Martinez+2025 Table 4, row 5.
     """
-    _check_logU_range(logU)
+    logU, Z_Zsun = _clip_icf_inputs(logU, Z_Zsun)
     return _interp_ne(ne, _COEFF_ICF_NppNppp_Opp, logU, Z_Zsun)
 
 
