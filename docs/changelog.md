@@ -4,6 +4,26 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### Behaviour changes
+
+- **Martinez+2025 ICF/log(U) bounds are now enforced by rejection, not
+  extrapolation.** Inputs outside the calibration domain
+  (`log(O32)`, `log(N43)`, `Z/Z_sun`, or the resulting `log(U)`) are set
+  to `NaN` instead of being extrapolated or clipped to the boundary, so
+  uncalibrated values no longer enter the reported N/O.
+- **Direct-`T_e` MC and MCMC loops resample to the requested count.** The
+  loop keeps drawing until `n_mc` / `n_posterior` *in-bounds* N/O draws
+  are collected (capped at 20× attempts; a `WARNING` is logged and N/O is
+  left under-sampled if an object is centred outside the bounds).
+- **O/H is decoupled from the N/O bounds.** Only N/O is gated on the
+  Martinez calibration; O/H, `T_e`, and the C/O, S/O, Ne/O, Ar/O ratios
+  (which do not use the Martinez ICF) are recorded for every drawn
+  sample. As a result the O/H posterior generally holds **more** finite
+  draws than the N/O posterior — the two arrays are independent and need
+  not share a length. See `abundance_methodology` §8.2 and §11.3.
+
 ## 1.1.0 — 2026-05-20
 
 ### New public API

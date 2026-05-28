@@ -36,6 +36,12 @@ logger = logging.getLogger(__name__)
 # filled with NaN and a warning is emitted.
 _RESAMPLE_MAX_ATTEMPT_FACTOR = 20
 
+
+def _log10_or_nan(v: float | None) -> float:
+    """Return log10(*v*) for a positive finite *v*, else NaN."""
+    return float(np.log10(v)) if (v is not None and np.isfinite(v) and v > 0) else np.nan
+
+
 # Line name to rest wavelength mapping for dust correction.
 _LINE_WAVES: dict[str, float] = {
     name: wave for name, wave in REST_LINES_A.items()
@@ -1282,12 +1288,16 @@ def _run_direct(
     _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
     NO_tier_mc: dict[str, list[float]] = {k: [] for k in _tier_keys}
 
-    # Rejection resampling: keep drawing until n_mc *valid* (in-bounds)
-    # draws are collected, capped so an out-of-bounds object can't hang.
+    # Resampling: keep drawing until n_mc in-bounds N/O draws are collected
+    # (capped so an out-of-bounds object can't hang).  Only N/O is gated on
+    # the Martinez+2025 bounds; O/H, Te and the other X/O ratios do not use
+    # the Martinez ICF, so they are recorded for *every* drawn sample and
+    # their posteriors therefore hold >= n_mc finite draws.
     max_attempts = n_mc * _RESAMPLE_MAX_ATTEMPT_FACTOR
     attempts = 0
+    n_collected = 0  # draws counted toward n_mc (in-bounds N/O or solver fail)
     _pbar = tqdm(total=n_mc, desc="Direct Te (MC)", disable=not progress)
-    while len(OH_mc) < n_mc and attempts < max_attempts:
+    while n_collected < n_mc and attempts < max_attempts:
         attempts += 1
         mc_fluxes = {}
         for name in fluxes:
@@ -1324,14 +1334,16 @@ def _run_direct(
             else:
                 z_zsun_mc = Z_Zsun  # fallback to point estimate
 
-            # Compute logU for this MC iteration.  Out-of-range logU — and
-            # the O32/N43/Z inputs behind it — are rejected to NaN inside
-            # the Martinez+2025 surfaces, so unphysical draws drop out of
-            # the nanmedian/nanstd statistics rather than being clipped.
+            # Compute logU for this MC iteration.  If the O32/N43/Z inputs
+            # or the resulting logU fall outside the Martinez+2025 bounds,
+            # logU is set to NaN so the Martinez N/O ICF returns NaN for
+            # this draw (it does not count toward n_mc).  O/H, Te and the
+            # other ratios do not use logU and are still recorded below.
             # Pass original errors so the same SNR gating applies as
             # for the point estimate (prevents switching between N43
             # and O32 across MC iterations).
             logU_mc = logU  # default to point estimate
+            no_in_bounds = True
             if z_zsun_mc is not None and logU_diag is not None:
                 logU_mc_val, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_high, errors=errors,
@@ -1341,10 +1353,10 @@ def _run_direct(
                         and _LOG_U_VALID[0] <= logU_mc_val <= _LOG_U_VALID[1]):
                     logU_mc = float(logU_mc_val)
                 else:
-                    # Out-of-range Martinez input (O32/N43/Z) or logU:
-                    # reject this draw and re-draw, so the valid-sample
-                    # count still reaches n_mc.
-                    continue
+                    # Out-of-range: reject N/O for this draw only (logU=NaN
+                    # -> Martinez ICF returns NaN N/O); O/H etc. still kept.
+                    logU_mc = np.nan
+                    no_in_bounds = False
 
             Te_high_mc.append(Te_h)
             Te_low_mc.append(Te_l)
@@ -1401,11 +1413,15 @@ def _run_direct(
             for k in _tier_keys:
                 val = mc_tiers.get(k, np.nan)
                 NO_tier_mc[k].append(val if np.isfinite(val) else np.nan)
-            _pbar.update(1)
+            # Only in-bounds draws count toward the N/O target; out-of-bounds
+            # draws keep their (finite) O/H etc. but trigger another draw.
+            if no_in_bounds:
+                n_collected += 1
+                _pbar.update(1)
         except (ValueError, RuntimeError):
-            # Non-rejection failure (e.g. Te could not be solved): keep the
-            # draw as NaN — it counts toward n_mc and is excluded by
-            # nanmedian/nanstd.  Only out-of-bounds draws are re-drawn.
+            # Non-rejection failure (e.g. Te could not be solved): record
+            # NaN for this draw.  It counts toward n_mc (re-drawing can't fix
+            # it) and is excluded by nanmedian/nanstd.
             OH_mc.append(np.nan)
             NO_mc.append(np.nan)
             CO_mc.append(np.nan)
@@ -1417,25 +1433,20 @@ def _run_direct(
             logU_mc_arr.append(np.nan)
             for k in _tier_keys:
                 NO_tier_mc[k].append(np.nan)
+            n_collected += 1
             _pbar.update(1)
     _pbar.close()
 
-    # If the attempt cap was hit before n_mc valid draws were collected,
-    # pad the remaining slots with NaN so every array stays length n_mc.
-    n_valid = len(OH_mc)
-    if n_valid < n_mc:
+    # Warn if the attempt cap was hit before n_mc in-bounds N/O draws were
+    # collected (object centred outside the Martinez+2025 bounds).  O/H and
+    # the other non-Martinez ratios are unaffected and remain fully sampled.
+    if n_collected < n_mc:
         logger.warning(
-            "Direct Te MC: collected only %d/%d valid draws after %d "
-            "attempts; inputs repeatedly outside Martinez+2025 bounds. "
-            "Padding %d slot(s) with NaN.",
-            n_valid, n_mc, attempts, n_mc - n_valid,
+            "Direct Te MC: collected only %d/%d in-bounds N/O draws after "
+            "%d attempts; N/O inputs repeatedly outside Martinez+2025 "
+            "bounds. N/O is under-sampled (O/H and other ratios unaffected).",
+            n_collected, n_mc, attempts,
         )
-        _pad = [np.nan] * (n_mc - n_valid)
-        for _arr in (OH_mc, NO_mc, CO_mc, SO_mc, NeO_mc, ArO_mc,
-                     Te_high_mc, Te_low_mc, logU_mc_arr):
-            _arr.extend(_pad)
-        for k in _tier_keys:
-            NO_tier_mc[k].extend(_pad)
 
     OH_mc = np.array(OH_mc)
     NO_mc = np.array(NO_mc)
@@ -1690,26 +1701,28 @@ def _run_direct_mcmc(
     _resample_dust = (Av_err is not None and Av_err > 0 and Av is not None)
     _dk = dust_kwargs or {}
 
-    # Rejection resampling over the full posterior pool: scan members in a
-    # shuffled order and keep going until `n_samples` valid (in-bounds)
-    # draws are collected, or the pool is exhausted (any remaining slots
-    # stay NaN).  This keeps the number of valid draws at n_posterior even
-    # when some are rejected for falling outside the Martinez+2025 bounds.
+    # Resampling over the full posterior pool: scan members in a shuffled
+    # order until `n_samples` in-bounds N/O draws are collected (or the pool
+    # is exhausted).  Only N/O is gated on the Martinez+2025 bounds; O/H, Te
+    # and the other X/O ratios do not use the Martinez ICF, so they are
+    # recorded for *every* scanned sample.  Their posteriors therefore hold
+    # >= n_samples finite draws while N/O holds n_samples in-bounds draws.
     n_total = min(len(v) for v in posteriors.values())
     rng = np.random.default_rng(seed)
     n_samples = n_posterior if (n_posterior > 0 and n_total > n_posterior) else n_total
     scan_order = rng.permutation(n_total)
+    max_scan = n_samples * _RESAMPLE_MAX_ATTEMPT_FACTOR
 
-    OH_post = np.full(n_samples, np.nan)
-    NO_post = np.full(n_samples, np.nan)
-    CO_post = np.full(n_samples, np.nan)
-    SO_post = np.full(n_samples, np.nan)
-    NeO_post = np.full(n_samples, np.nan)
-    ArO_post = np.full(n_samples, np.nan)
-    Te_high_post = np.full(n_samples, np.nan)
-    Te_low_post = np.full(n_samples, np.nan)
-    logU_post = np.full(n_samples, np.nan)
-    Av_post = np.full(n_samples, np.nan) if _resample_dust else None
+    OH_post = []
+    NO_post = []
+    CO_post = []
+    SO_post = []
+    NeO_post = []
+    ArO_post = []
+    Te_high_post = []
+    Te_low_post = []
+    logU_post = []
+    Av_post = [] if _resample_dust else None
 
     # Compute medians and errors for the point estimate and multi-phase ne.
     # When resampling dust, posteriors are raw (observed); dust-correct
@@ -1803,17 +1816,20 @@ def _run_direct_mcmc(
     _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
     NO_tier_post: dict[str, list[float]] = {k: [] for k in _tier_keys}
 
-    j = 0  # write pointer: advances only on a kept (valid or NaN) draw
+    n_collected = 0  # scanned draws counted toward n_samples (in-bounds N/O
+    #                  or solver failure); out-of-bounds draws keep O/H etc.
+    scanned = 0
     _pbar = tqdm(total=n_samples, desc="Direct Te (posterior)", disable=not progress)
     for src_i in scan_order:
-        if j >= n_samples:
+        if n_collected >= n_samples or scanned >= max_scan:
             break
+        scanned += 1
         sample = {name: max(float(post[src_i]), 1e-50) for name, post in posteriors.items()}
 
         # Per-draw dust correction: draw A_V and correct this sample.
         if _resample_dust:
             Av_draw = _draw_Av(rng, Av, Av_err, prior=Av_prior)
-            Av_post[j] = Av_draw
+            Av_post.append(Av_draw)
             sample = _dust_correct_sample(sample, Av_draw, dust_law, _dk)
 
         try:
@@ -1840,13 +1856,15 @@ def _run_direct_mcmc(
             oh_val = ionic_i.get("O+/H+", 0.0) + ionic_i.get("O++/H+", 0.0)
             z_zsun_i = 10.0 ** (12.0 + np.log10(oh_val) - LOG_OH_SOLAR) if oh_val > 0 else Z_Zsun_pt
 
-            # logU for this sample.  An out-of-range Martinez input
-            # (O32/N43/Z) or logU rejects the sample: it is skipped and the
-            # next pool member is scanned, so the valid-sample count still
-            # reaches n_posterior.
+            # logU for this sample.  If the O32/N43/Z inputs or the resulting
+            # logU fall outside the Martinez+2025 bounds, logU is set to NaN
+            # so the Martinez N/O ICF returns NaN (this draw does not count
+            # toward n_posterior); O/H, Te and the other ratios do not use
+            # logU and are still recorded.
             # Pass med_errors so the same SNR gating applies as for
             # the point estimate.
             logU_i = logU_pt
+            no_in_bounds = True
             if z_zsun_i is not None and logU_diag is not None:
                 logU_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_high, errors=med_errors,
@@ -1856,12 +1874,12 @@ def _run_direct_mcmc(
                         and _LOG_U_VALID[0] <= logU_val <= _LOG_U_VALID[1]):
                     logU_i = float(logU_val)
                 else:
-                    # Out-of-range -> reject; scan the next pool member.
-                    continue
+                    logU_i = np.nan
+                    no_in_bounds = False
 
-            Te_high_post[j] = Te_h
-            Te_low_post[j] = Te_l
-            logU_post[j] = logU_i if logU_i is not None else np.nan
+            Te_high_post.append(Te_h)
+            Te_low_post.append(Te_l)
+            logU_post.append(logU_i if logU_i is not None else np.nan)
 
             # Gate nitrogen ions using median errors (same ions as
             # point estimate to prevent tier-switching across samples).
@@ -1874,56 +1892,66 @@ def _run_direct_mcmc(
             )
 
             oh = totals_i.get("O/H", np.nan)
-            if np.isfinite(oh) and oh > 0:
-                OH_post[j] = 12.0 + np.log10(oh)
-
-            no = totals_i.get("N/O", np.nan)
-            if no is not None and np.isfinite(no) and no > 0:
-                NO_post[j] = np.log10(no)
-
-            co = totals_i.get("C/O", np.nan)
-            if co is not None and np.isfinite(co) and co > 0:
-                CO_post[j] = np.log10(co)
-
-            so = totals_i.get("S/O", np.nan)
-            if so is not None and np.isfinite(so) and so > 0:
-                SO_post[j] = np.log10(so)
-
-            neo = totals_i.get("Ne/O", np.nan)
-            if neo is not None and np.isfinite(neo) and neo > 0:
-                NeO_post[j] = np.log10(neo)
-
-            aro = totals_i.get("Ar/O", np.nan)
-            if aro is not None and np.isfinite(aro) and aro > 0:
-                ArO_post[j] = np.log10(aro)
+            OH_post.append(12.0 + _log10_or_nan(oh))
+            NO_post.append(_log10_or_nan(totals_i.get("N/O", np.nan)))
+            CO_post.append(_log10_or_nan(totals_i.get("C/O", np.nan)))
+            SO_post.append(_log10_or_nan(totals_i.get("S/O", np.nan)))
+            NeO_post.append(_log10_or_nan(totals_i.get("Ne/O", np.nan)))
+            ArO_post.append(_log10_or_nan(totals_i.get("Ar/O", np.nan)))
 
             # Collect per-tier N/O values.
             mc_tiers = totals_i.get("_NO_tiers", {})
             for k in _tier_keys:
                 val = mc_tiers.get(k, np.nan)
                 NO_tier_post[k].append(val if np.isfinite(val) else np.nan)
-            j += 1
-            _pbar.update(1)
+
+            # Only in-bounds draws count toward the N/O target; out-of-bounds
+            # draws keep their (finite) O/H etc. but trigger another scan.
+            if no_in_bounds:
+                n_collected += 1
+                _pbar.update(1)
         except (ValueError, RuntimeError):
-            # Non-rejection failure: keep the sample as NaN (counts toward
-            # n_posterior, excluded by nanmedian/nanstd).
+            # Non-rejection failure: record NaN for this draw.  It counts
+            # toward n_posterior (re-drawing can't fix it).
+            OH_post.append(np.nan)
+            NO_post.append(np.nan)
+            CO_post.append(np.nan)
+            SO_post.append(np.nan)
+            NeO_post.append(np.nan)
+            ArO_post.append(np.nan)
+            Te_high_post.append(np.nan)
+            Te_low_post.append(np.nan)
+            logU_post.append(np.nan)
             for k in _tier_keys:
                 NO_tier_post[k].append(np.nan)
-            j += 1
+            n_collected += 1
             _pbar.update(1)
-            continue
     _pbar.close()
 
-    # If the pool was exhausted before n_samples valid draws were
-    # collected, the trailing slots stay NaN; clear any stray dust value
-    # left at the first unfilled slot and warn.
-    if j < n_samples:
-        if Av_post is not None:
-            Av_post[j:] = np.nan
+    # Convert per-quantity posteriors to arrays.  O/H, Te and the other
+    # non-Martinez ratios hold one entry per scanned draw; N/O has the same
+    # length with NaN on the out-of-bounds draws (n_collected are in-bounds).
+    OH_post = np.array(OH_post)
+    NO_post = np.array(NO_post)
+    CO_post = np.array(CO_post)
+    SO_post = np.array(SO_post)
+    NeO_post = np.array(NeO_post)
+    ArO_post = np.array(ArO_post)
+    Te_high_post = np.array(Te_high_post)
+    Te_low_post = np.array(Te_low_post)
+    logU_post = np.array(logU_post)
+    if Av_post is not None:
+        Av_post = np.array(Av_post)
+
+    # Warn if the scan ended before n_samples in-bounds N/O draws were
+    # collected (object centred outside the Martinez+2025 bounds).  O/H and
+    # the other non-Martinez ratios are unaffected and remain fully sampled.
+    if n_collected < n_samples:
         logger.warning(
-            "Direct Te posterior: collected only %d/%d valid samples from a "
-            "pool of %d; inputs outside Martinez+2025 bounds. Remaining "
-            "slot(s) are NaN.", j, n_samples, n_total,
+            "Direct Te posterior: collected only %d/%d in-bounds N/O draws "
+            "from a pool of %d; N/O inputs outside Martinez+2025 bounds. "
+            "N/O is under-sampled (O/H and other ratios unaffected).",
+            n_collected, n_samples, n_total,
         )
 
     # Point estimates from posteriors.

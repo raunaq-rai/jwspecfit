@@ -557,6 +557,22 @@ The final N/O is:
 N/O = ionic_ratio × ICF(log(U), Z/Z_sun, n_e)
 ```
 
+#### Inputs outside the calibration bounds
+
+The Martinez et al. (2025) coefficients are polynomial fits over a
+bounded calibration domain (the validity ranges above).  The bicubic
+surface diverges if it is evaluated by extrapolation, so an input that
+falls outside its range — `log(O32)`, `log(N43)`, `Z/Z_sun`, or the
+resulting `log(U)` — is **rejected, not clipped**: the surface returns
+`NaN` rather than a boundary value or an extrapolated number.  This
+keeps unphysical, uncalibrated values out of the reported N/O entirely.
+
+Because only the N/O ICF depends on `log(U)` and `Z/Z_sun`, this
+rejection affects **N/O alone**.  O/H (direct `T_e`), `T_e`, and the
+other X/O ratios (C/O, S/O, Ne/O, Ar/O) do not use the Martinez ICF and
+are unaffected — see Section 11.3 for how this is handled in the Monte
+Carlo / posterior loops.
+
 
 ---
 
@@ -652,7 +668,52 @@ where A_V,i is re-derived from the Balmer decrement in each sample.
 This propagates the full posterior covariance between line fluxes
 through to the final abundances.
 
-### 11.3 Pre-computed emissivity grids
+### 11.3 Out-of-bounds resampling and the O/H–N/O decoupling
+
+The Martinez et al. (2025) log(U)/ICF surfaces are only valid inside
+their calibration domain (Section 8.2).  Inputs outside that domain are
+**rejected** (set to `NaN`), not clipped — see "Inputs outside the
+calibration bounds" in Section 8.2.  In the uncertainty loops this is
+handled per draw so the reported sample counts stay meaningful:
+
+1. **Only N/O is gated.**  If a draw's `log(O32)`/`log(N43)`, `Z/Z_sun`,
+   or resulting `log(U)` falls outside the bounds, `log(U)` is set to
+   `NaN` for that draw.  The Martinez N/O ICF then returns `NaN`, so the
+   draw contributes nothing to N/O.
+
+2. **O/H and the other ratios are kept.**  O/H (direct `T_e`), `T_e`, and
+   the X/O ratios that do not use the Martinez ICF (C/O, S/O, Ne/O, Ar/O)
+   are computed and recorded for **every** drawn sample, in-bounds or
+   not.  They are never discarded on account of an out-of-bounds N/O.
+
+3. **Resampling to the requested count.**  The loop keeps drawing until
+   `n_mc` (Gaussian MC) or `n_posterior` (MCMC pool) *in-bounds* N/O
+   draws have been collected, so N/O is sampled to the requested depth
+   rather than silently under-sampled.  Solver failures and missing-line
+   `NaN`s are *not* re-drawn (re-drawing cannot fix them) and count
+   toward the target.
+
+4. **Different lengths are expected.**  Because out-of-bounds draws are
+   re-drawn for N/O but retained for O/H, the O/H posterior generally
+   holds **more** finite samples than the N/O posterior.  The two arrays
+   are independent; do not assume they are the same length.
+
+5. **Safety cap.**  To guarantee termination for an object centred
+   outside the bounds (e.g. `Z/Z_sun < 0.05`, where acceptance ≈ 0), the
+   total number of attempts is capped at 20× the requested count.  If the
+   target is not reached, a `WARNING` is logged
+   (`"... in-bounds N/O draws ..."`) and N/O is reported from whatever
+   in-bounds draws were collected; O/H and the other ratios remain fully
+   sampled.
+
+```{note}
+If you set the `jwspecabund` logger above `WARNING`, the under-sampling
+message is suppressed.  To detect objects where N/O could not be sampled
+to the requested depth, inspect the posterior directly, e.g.
+`np.isfinite(result.NO_posterior).sum()`.
+```
+
+### 11.4 Pre-computed emissivity grids
 
 To avoid calling PyNEB ~10^6 times (N_mc × N_lines), emissivity grids
 are pre-computed as a function of T_e(high) on a fine grid (e.g.
