@@ -396,7 +396,7 @@ log(N/O) = log10(ionic_ratio × ICF)
 ```
 
 The ICF selection procedure is described in
-[Section 8.2](#82-martinez-et-al-2025-density-dependent-icfs).
+[Section 8.2](#82-martinez-et-al-2025--density-dependent-icfs).
 
 
 ---
