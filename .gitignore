@@ -32,3 +32,6 @@ docs/api_reference/generated/
 # !data/*.fits
 # !data/*.npz
 # !data/*.txt
+
+# Local task tracking / plans / lessons (not version-controlled)
+tasks/
