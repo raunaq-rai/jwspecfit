@@ -582,20 +582,22 @@ def _compute_logU(
     ne_high: float,
     errors: dict[str, float] | None = None,
     snr_logU: float = 3.0,
-    ne_mid: float | None = None,
 ) -> tuple[float | None, str | None]:
     """Compute ionisation parameter (Berg+2025 step 5).
 
-    Density usage by diagnostic
-    ---------------------------
-    N43 (NIV]/NIII]) is a high-ionisation diagnostic and is evaluated at
-    *ne_high*; it is density-insensitive by construction, so the choice is
-    robust even when *ne_high* is extreme.  O32 ([OIII]/[OII]) forms in the
-    O²⁺/O⁺ zone and is density-*sensitive*, so it is evaluated at *ne_mid*
-    (the intermediate-zone density) when supplied — feeding it the
-    high-ionisation NIV] density mixes zones and can drive log(U) to
-    spurious values.  When *ne_mid* is ``None`` the O32 branch falls back
-    to *ne_high* (legacy behaviour).
+    Diagnostic priority and density (Martinez+2025)
+    -----------------------------------------------
+    N43 (NIV]/NIII]) is the preferred log(U) diagnostic: it is
+    density-insensitive and traces the high-ionisation zone, so it is
+    evaluated at *ne_high*.  When the N43 ratio exceeds the upper
+    calibration edge the object is simply more highly ionised than the
+    grid (log U > -1.0; Martinez+2025 report this for their high-z
+    sample, §6.2), so the ratio is clipped to the edge and the resulting
+    high-U value (~ -1.0) is used rather than discarding N43.  O32
+    ([OIII]/[OII]) is only a fallback: it is density-*sensitive* and, per
+    Martinez+2025 (recommendation 5), is evaluated with the measured
+    high-ionisation-zone density *ne_high*; it is unreliable when that
+    density is high or unknown, which is why N43 is preferred.
 
     Parameters
     ----------
@@ -604,17 +606,14 @@ def _compute_logU(
     Z_Zsun : float
         Gas-phase metallicity in solar units.
     ne_high : float
-        High-ionisation zone electron density in cm^-3.  Used for the N43
-        diagnostic.
+        High-ionisation zone electron density in cm^-3.  Used for both
+        the N43 and (fallback) O32 diagnostics.
     errors : dict, optional
         Flux errors.  When provided, the **total doublet** SNR
         (summed flux / quadrature-summed error) must be >= *snr_logU*
         for each doublet in N43 to be used.
     snr_logU : float
         Minimum total-doublet SNR for N43 (default 3.0).
-    ne_mid : float, optional
-        Intermediate (O²⁺) zone electron density in cm^-3, used for the
-        O32 diagnostic.  Falls back to *ne_high* if ``None``.
 
     Returns
     -------
@@ -660,7 +659,22 @@ def _compute_logU(
     if niv_flux > 0 and niii_flux > 0:
         N43 = niv_flux / niii_flux
         log_N43 = np.log10(N43)
-        # Reject N43 if the ratio is outside the calibration range.
+        # A ratio past the UPPER calibration edge means the object is more
+        # highly ionised than the Martinez+25 grid (their high-z sample
+        # shows this too, indicating log U > -1.0; Martinez+25 §6.2).  Clip
+        # to the edge and use the resulting high-ionisation log(U) (~ -1.0)
+        # rather than discarding the preferred, density-insensitive N43
+        # diagnostic for the density-sensitive O32 fallback.  The
+        # (N2+ + N3+)/O2+ ICF is near unity and barely changes for
+        # -2 < log U < -1 (Martinez+25 §6.3), so N/O is robust to the
+        # exact clipped value.
+        if log_N43 > _LOG_N43_VALID[1]:
+            logger.info(
+                "log(N43)=%.2f exceeds calibration ceiling %.1f "
+                "(log U > -1.0); clipping to the high-ionisation edge.",
+                log_N43, _LOG_N43_VALID[1],
+            )
+            log_N43 = _LOG_N43_VALID[1]
         if _LOG_N43_VALID[0] <= log_N43 <= _LOG_N43_VALID[1]:
             logU = log_U_from_N43(log_N43, Z_Zsun, ne_high)
             if _LOG_U_VALID[0] <= logU <= _LOG_U_VALID[1]:
@@ -673,7 +687,7 @@ def _compute_logU(
                 )
         else:
             logger.debug(
-                "log(N43)=%.2f outside validity [%.1f, %.1f]; "
+                "log(N43)=%.2f below validity [%.1f, %.1f]; "
                 "falling back to O32.", log_N43, *_LOG_N43_VALID,
             )
 
@@ -687,15 +701,12 @@ def _compute_logU(
 
     if oiii > 0 and oii > 0:
         O32 = oiii / oii
-        # O32 forms in the O²⁺/O⁺ zone and is density-sensitive: use the
-        # intermediate-zone density (ne_mid), not the high-ionisation NIV]
-        # density (ne_high), which is the wrong zone and can be extreme.
-        ne_o32 = ne_mid if ne_mid is not None else ne_high
-        logU = log_U_from_O32(np.log10(O32), Z_Zsun, ne_o32)
-        logger.info(
-            "log(U) from O32 = %.2f (O32=%.3f, ne=%.0f cm^-3).",
-            logU, O32, ne_o32,
-        )
+        # O32 is density-sensitive; Martinez+25 (recommendation 5) evaluate
+        # it with the measured high-ionisation-zone density (ne_high).  It
+        # is only a fallback and is unreliable when ne_high is high/unknown.
+        logU = log_U_from_O32(np.log10(O32), Z_Zsun, ne_high)
+        logger.info("log(U) from O32 = %.2f (O32=%.3f, ne=%.0f cm^-3).",
+                    logU, O32, ne_high)
         return logU, "O32"
 
     return None, None
@@ -1256,7 +1267,6 @@ def _run_direct(
     if Z_Zsun is not None:
         logU, logU_diag = _compute_logU(
             fluxes, Z_Zsun, ne_high, errors=errors, snr_logU=snr_logU,
-            ne_mid=ne_mid,
         )
 
     # --- Step 6: Total abundances with ICFs ---
@@ -1382,7 +1392,7 @@ def _run_direct(
             if z_zsun_mc is not None and logU_diag is not None:
                 logU_mc_val, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_high, errors=errors,
-                    snr_logU=snr_logU, ne_mid=ne_mid,
+                    snr_logU=snr_logU,
                 )
                 if (logU_mc_val is not None and np.isfinite(logU_mc_val)
                         and _LOG_U_VALID[0] <= logU_mc_val <= _LOG_U_VALID[1]):
@@ -1822,7 +1832,7 @@ def _run_direct_mcmc(
     if Z_Zsun_pt is not None:
         logU_pt, logU_diag = _compute_logU(
             med_fluxes, Z_Zsun_pt, ne_high, errors=med_errors,
-            snr_logU=snr_logU, ne_mid=ne_mid,
+            snr_logU=snr_logU,
         )
 
     if ionic_pt:
@@ -1907,7 +1917,7 @@ def _run_direct_mcmc(
             if z_zsun_i is not None and logU_diag is not None:
                 logU_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_high, errors=med_errors,
-                    snr_logU=snr_logU, ne_mid=ne_mid,
+                    snr_logU=snr_logU,
                 )
                 if (logU_val is not None and np.isfinite(logU_val)
                         and _LOG_U_VALID[0] <= logU_val <= _LOG_U_VALID[1]):
