@@ -91,6 +91,15 @@ user_guide/jwspecabund
 api_reference/jwspecabund
 ```
 
+## Visualisation
+
+```{toctree}
+:caption: Visualisation
+:maxdepth: 2
+
+plotting
+```
+
 ## Methodology
 
 ```{toctree}

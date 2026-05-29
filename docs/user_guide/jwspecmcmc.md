@@ -90,6 +90,9 @@ jwspecmcmc.plot_traces(result)
 jwspecmcmc.plot_flux_posterior(result, "OIII_5007")
 ```
 
+See the [Plotting & visualisation](../plotting) page for full details on the
+corner/trace/flux-posterior diagnostics and the shared fit plotters.
+
 ## HDF5 persistence
 
 ```python

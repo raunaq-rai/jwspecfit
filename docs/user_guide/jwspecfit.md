@@ -219,6 +219,9 @@ fig = jwspecfit.plot_fit(result, save_path="fit.pdf")
 fig = jwspecfit.plot_fit_interactive(result)   # plotly
 ```
 
+See the [Plotting & visualisation](../plotting) page for the full set of
+static and interactive helpers, line markers, and the 2-D + 1-D viewer.
+
 ## Save / load
 
 ```python
