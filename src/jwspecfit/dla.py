@@ -578,16 +578,23 @@ class DLAResult:
         import matplotlib.pyplot as plt
 
         if show_residuals:
+            # constrained layout keeps tidy margins while respecting the
+            # small hspace; tight_layout() would conflict with the manual
+            # gridspec spacing and warn.
             fig, (ax_main, ax_res) = plt.subplots(
                 2, 1, figsize=(8, 5), sharex=True,
                 gridspec_kw={"height_ratios": [3, 1], "hspace": 0.05},
+                layout="constrained",
             )
+            _own_fig = True
         else:
             if ax is None:
                 fig, ax_main = plt.subplots(figsize=(8, 4))
+                _own_fig = True
             else:
                 ax_main = ax
                 fig = ax.get_figure()
+                _own_fig = False
             ax_res = None
 
         # Convert to rest frame for display.
@@ -708,7 +715,11 @@ class DLAResult:
         else:
             ax_main.set_xlabel(r"Rest wavelength ($\mathrm{\AA}$)")
 
-        fig.tight_layout()
+        # Single-panel figures we created ourselves benefit from
+        # tight_layout; the 2-panel case already uses constrained layout,
+        # and a user-supplied ax's figure must not be relaid out here.
+        if ax_res is None and _own_fig:
+            fig.tight_layout()
         return fig
 
     def corner(self, **kwargs: Any) -> Any:
