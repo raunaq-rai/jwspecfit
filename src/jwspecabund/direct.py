@@ -591,11 +591,16 @@ def compute_ionic_abundances(
     ne_mid : float, optional
         Electron density for the intermediate-ionisation zone (cm^-3).
         Traced by CIII] 1907/1909 (~24 eV).  If ``None``, defaults to
-        *ne*.  Used for C²⁺, N²⁺, S²⁺, Ar²⁺.
+        *ne*.  Used for O²⁺, C²⁺, N²⁺, S²⁺, Ar²⁺.  O²⁺ uses this
+        intermediate-zone density (not *ne_high*): the [OIII] 5007/Hβ
+        abundance is density-insensitive below ~10⁴ cm⁻³, and CIII]
+        (24–48 eV) overlaps the O²⁺ zone (35–55 eV), whereas NIV]
+        (47–77 eV) traces more highly-ionised gas.  This decouples O²⁺
+        from the noisy high-ionisation N IV] density.
     ne_high : float, optional
         Electron density for the high-ionisation zone (cm^-3).
         Traced by NIV] 1483/1486 (~47 eV).  If ``None``, defaults to
-        *ne_mid*.  Used for O²⁺, Ne²⁺, N³⁺, N⁴⁺, C³⁺.
+        *ne_mid*.  Used for Ne²⁺, N³⁺, N⁴⁺, C³⁺.
 
     Returns
     -------
@@ -611,9 +616,12 @@ def compute_ionic_abundances(
     ne_md = ne_mid if ne_mid is not None else ne
     ne_hi = ne_high if ne_high is not None else ne_md
 
-    # O++/H+ from [OIII] 5007 — T_high zone
+    # O++/H+ from [OIII] 5007 — T_high zone, intermediate-zone density.
+    # Uses ne_md (CIII]→low fallback), not ne_hi (NIV]): 5007/Hβ is
+    # density-insensitive below ~10⁴ cm⁻³ and CIII] overlaps the O²⁺ zone,
+    # so this avoids the noisy high-ionisation N IV] density.
     if "OIII_5007" in fluxes and fluxes["OIII_5007"] > 0:
-        ionic["O++/H+"] = _ionic_abundance("O", 3, fluxes["OIII_5007"], Hb, Te_high, ne_hi, 5007)
+        ionic["O++/H+"] = _ionic_abundance("O", 3, fluxes["OIII_5007"], Hb, Te_high, ne_md, 5007)
 
     # O+/H+ from [OII] 3726+3729 — T_low zone
     oii = 0.0

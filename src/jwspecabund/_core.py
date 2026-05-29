@@ -864,7 +864,7 @@ def _compute_ionic_upper_limits(
     # Mapping: ion_key -> (element, ion_stage, line_names, wave_labels, Te, ne)
     _ION_MAP = [
         ("O+/H+",   "O", 2, ["OII_doublet"], [3727],       Te_low,  ne_low),
-        ("O++/H+",  "O", 3, ["OIII_5007"],   [5007],       Te_high, ne_high),
+        ("O++/H+",  "O", 3, ["OIII_5007"],   [5007],       Te_high, ne_mid),
         ("N+/H+",   "N", 2, ["NII_6585"],    [6584],       Te_low,  ne_low),
         ("N++/H+",  "N", 3, ["NIII_1749", "NIII_1752"], [1749, 1752], Te_high, ne_mid),
         ("N+++/H+", "N", 4, ["NIV_1483", "NIV_1486"],   [1483, 1486], Te_high, ne_high),
@@ -989,10 +989,16 @@ def _build_diagnostics(
     totals = totals or {}
     diag: dict[str, str] = {}
 
-    # Te(high)
+    # Te(high) — solved at the O²⁺-zone density (CIII]→low), not NIV].
+    _ne_OIII = ne_mid if ne_mid is not None else ne_low
     if Te_high is not None:
         diag["Te(high)"] = (
-            f"[OIII] 4363/(5007+4959) ratio with n_e(high) = {ne_high:.0f} cm^-3 (PyNEB)"
+            f"[OIII] 4363/(5007+4959) ratio with n_e(O++ zone) = {_ne_OIII:.0f} cm^-3 (PyNEB)"
+        )
+        diag["O++/H+ density"] = (
+            f"intermediate-zone n_e = {_ne_OIII:.0f} cm^-3 (CIII] 1907/1909 -> low fallback), "
+            "decoupled from NIV]: 5007/Hβ is density-insensitive below ~10^4 cm^-3 and "
+            "CIII] (24-48 eV) overlaps the O²⁺ zone (35-55 eV)"
         )
 
     # Te(low)
@@ -1181,6 +1187,11 @@ def _run_direct(
         logger.info("n_e(high) overridden to %.0f cm^-3.", ne_high)
 
     # --- Step 2: Electron temperature with zone-appropriate ne ---
+    # T_e(O++) is solved at the O²⁺-zone density (CIII]→low fallback),
+    # NOT ne_high (NIV]): the [OIII] 4363 ratio is O²⁺ light, so the
+    # correct density is the intermediate zone that overlaps O²⁺.  This
+    # also keeps the T_e solve consistent with the O²⁺/H+ abundance.
+    ne_OIII = ne_mid if ne_mid is not None else ne_low
     # Try [OIII] 4363 first; fall back to O III] 1666 if 4363 is missing.
     _Te_diagnostic = None
     Te_high = None
@@ -1189,10 +1200,10 @@ def _run_direct(
     f_4959 = fluxes.get("OIII_4959", 0.0)
     f_1666 = fluxes.get("OIII_1666", 0.0)
     if f_4363 > 0 and f_5007 > 0:
-        Te_high = compute_Te_OIII(f_4363, f_5007, f_4959, ne_high)
+        Te_high = compute_Te_OIII(f_4363, f_5007, f_4959, ne_OIII)
         _Te_diagnostic = "4363"
     elif f_1666 > 0 and f_5007 > 0:
-        Te_high = compute_Te_OIII_1666(f_1666, f_5007, f_4959, ne_high)
+        Te_high = compute_Te_OIII_1666(f_1666, f_5007, f_4959, ne_OIII)
         _Te_diagnostic = "1666"
         logger.info(
             "[OIII] 4363 not available; using O III] 1666/(5007+4959) "
@@ -1313,14 +1324,14 @@ def _run_direct(
                     mc_fluxes.get("OIII_4363", 0),
                     mc_fluxes.get("OIII_5007", 0),
                     mc_fluxes.get("OIII_4959", 0),
-                    ne_high,
+                    ne_OIII,
                 )
             else:
                 Te_h = compute_Te_OIII_1666(
                     mc_fluxes.get("OIII_1666", 0),
                     mc_fluxes.get("OIII_5007", 0),
                     mc_fluxes.get("OIII_4959", 0),
-                    ne_high,
+                    ne_OIII,
                 )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
             ionic_mc = compute_ionic_abundances(
@@ -1487,7 +1498,7 @@ def _run_direct(
     _alt_1666 = None
     if _Te_diagnostic == "4363" and f_1666 > 0 and f_5007 > 0:
         try:
-            Te_alt = compute_Te_OIII_1666(f_1666, f_5007, f_4959, ne_high)
+            Te_alt = compute_Te_OIII_1666(f_1666, f_5007, f_4959, ne_OIII)
             Te_alt_low = Te_low_from_high(Te_alt, relation=Te_relation)
             ionic_alt = compute_ionic_abundances(
                 fluxes, Te_alt, Te_alt_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
@@ -1510,7 +1521,7 @@ def _run_direct(
                 try:
                     Te_a = compute_Te_OIII_1666(
                         mc_f.get("OIII_1666", 0), mc_f.get("OIII_5007", 0),
-                        mc_f.get("OIII_4959", 0), ne_high,
+                        mc_f.get("OIII_4959", 0), ne_OIII,
                     )
                     Te_a_low = Te_low_from_high(Te_a, relation=Te_relation)
                     ion_a = compute_ionic_abundances(
@@ -1742,6 +1753,10 @@ def _run_direct_mcmc(
     if ne_high_override is not None:
         ne_high = ne_high_override
 
+    # T_e(O++) is solved at the O²⁺-zone density (CIII]→low fallback),
+    # not ne_high (NIV]); see _run_direct for rationale.
+    ne_OIII = ne_mid if ne_mid is not None else ne_low
+
     # Point estimate: logU and Z_Zsun from medians.
     # Try 4363 first; fall back to 1666 if unavailable.
     _Te_diagnostic = None
@@ -1751,7 +1766,7 @@ def _run_direct_mcmc(
                 med_fluxes.get("OIII_4363", 0),
                 med_fluxes.get("OIII_5007", 0),
                 med_fluxes.get("OIII_4959", 0),
-                ne_high,
+                ne_OIII,
             )
             _Te_diagnostic = "4363"
         elif med_fluxes.get("OIII_1666", 0) > 0:
@@ -1759,7 +1774,7 @@ def _run_direct_mcmc(
                 med_fluxes.get("OIII_1666", 0),
                 med_fluxes.get("OIII_5007", 0),
                 med_fluxes.get("OIII_4959", 0),
-                ne_high,
+                ne_OIII,
             )
             _Te_diagnostic = "1666"
             logger.info(
@@ -1838,14 +1853,14 @@ def _run_direct_mcmc(
                     sample.get("OIII_4363", 0),
                     sample.get("OIII_5007", 0),
                     sample.get("OIII_4959", 0),
-                    ne_high,
+                    ne_OIII,
                 )
             else:
                 Te_h = compute_Te_OIII_1666(
                     sample.get("OIII_1666", 0),
                     sample.get("OIII_5007", 0),
                     sample.get("OIII_4959", 0),
-                    ne_high,
+                    ne_OIII,
                 )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
             ionic_i = compute_ionic_abundances(
@@ -2016,7 +2031,7 @@ def _run_direct_mcmc(
         try:
             Te_alt = compute_Te_OIII_1666(
                 med_fluxes["OIII_1666"], med_fluxes["OIII_5007"],
-                med_fluxes.get("OIII_4959", 0), ne_high,
+                med_fluxes.get("OIII_4959", 0), ne_OIII,
             )
             Te_alt_low = Te_low_from_high(Te_alt, relation=Te_relation)
             ionic_alt = compute_ionic_abundances(
@@ -2033,7 +2048,7 @@ def _run_direct_mcmc(
                 try:
                     Ta = compute_Te_OIII_1666(
                         samp.get("OIII_1666", 0), samp.get("OIII_5007", 0),
-                        samp.get("OIII_4959", 0), ne_high,
+                        samp.get("OIII_4959", 0), ne_OIII,
                     )
                     Tl = Te_low_from_high(Ta, relation=Te_relation)
                     ion_a = compute_ionic_abundances(
@@ -2765,7 +2780,7 @@ def compute_abundances(
                             Te_1666_pt = compute_Te_OIII_1666(
                                 f_1666_alt, f_5007_alt,
                                 fluxes.get("OIII_4959", 0.0),
-                                primary_result.ne_high or 300,
+                                primary_result.ne_mid or primary_result.ne_low or 300,
                             )
                             Te_1666_low = Te_low_from_high(Te_1666_pt, relation=Te_relation)
                             ionic_1666 = compute_ionic_abundances(
