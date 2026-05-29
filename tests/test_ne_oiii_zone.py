@@ -15,6 +15,7 @@ from jwspecabund.direct import _ionic_abundance, compute_ionic_abundances
 _FLUXES = {
     "HBETA": 100.0,
     "OIII_5007": 500.0,
+    "NeIII_3869": 80.0,
     "OII_3726": 30.0,
     "OII_3729": 30.0,
     "NIV_1483": 5.0,
@@ -45,6 +46,17 @@ def test_Opp_uses_intermediate_zone_density():
     assert np.isclose(ionic["O++/H+"], expected_mid, rtol=1e-6)
     # The two zones differ enough that picking the wrong one is detectable.
     assert not np.isclose(ionic["O++/H+"], expected_high, rtol=1e-3)
+
+
+def test_Nepp_uses_intermediate_zone_density():
+    """Ne²⁺/H+ ([NeIII] 3869) must use ne_mid, not ne_high."""
+    ionic = compute_ionic_abundances(
+        _FLUXES, _TE_HIGH, _TE_LOW, _NE_LOW, ne_mid=_NE_MID, ne_high=_NE_HIGH,
+    )
+    expected_mid = _ionic_abundance(
+        "Ne", 3, _FLUXES["NeIII_3869"], _FLUXES["HBETA"], _TE_HIGH, _NE_MID, 3869,
+    )
+    assert np.isclose(ionic["Ne++/H+"], expected_mid, rtol=1e-6)
 
 
 def test_Nppp_still_uses_high_zone_density():

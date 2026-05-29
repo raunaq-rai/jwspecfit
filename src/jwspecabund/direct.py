@@ -591,16 +591,17 @@ def compute_ionic_abundances(
     ne_mid : float, optional
         Electron density for the intermediate-ionisation zone (cm^-3).
         Traced by CIII] 1907/1909 (~24 eV).  If ``None``, defaults to
-        *ne*.  Used for O²⁺, C²⁺, N²⁺, S²⁺, Ar²⁺.  O²⁺ uses this
-        intermediate-zone density (not *ne_high*): the [OIII] 5007/Hβ
-        abundance is density-insensitive below ~10⁴ cm⁻³, and CIII]
-        (24–48 eV) overlaps the O²⁺ zone (35–55 eV), whereas NIV]
-        (47–77 eV) traces more highly-ionised gas.  This decouples O²⁺
-        from the noisy high-ionisation N IV] density.
+        *ne*.  Used for O²⁺, Ne²⁺, C²⁺, N²⁺, S²⁺, Ar²⁺.  O²⁺ and Ne²⁺
+        use this intermediate-zone density (not *ne_high*): the
+        [OIII] 5007/Hβ and [NeIII] 3869/Hβ abundances are density-
+        insensitive below ~10⁴–10⁵ cm⁻³, and CIII] (24–48 eV) overlaps
+        the O²⁺ zone (35–55 eV), whereas NIV] (47–77 eV) traces more
+        highly-ionised gas.  This decouples O²⁺/Ne²⁺ from the noisy
+        high-ionisation N IV] density.
     ne_high : float, optional
         Electron density for the high-ionisation zone (cm^-3).
         Traced by NIV] 1483/1486 (~47 eV).  If ``None``, defaults to
-        *ne_mid*.  Used for Ne²⁺, N³⁺, N⁴⁺, C³⁺.
+        *ne_mid*.  Used for N³⁺, N⁴⁺, C³⁺.
 
     Returns
     -------
@@ -648,9 +649,12 @@ def compute_ionic_abundances(
         Te_mid = 0.5 * (Te_high + Te_low)
         ionic["S++/H+"] = _ionic_abundance("S", 3, fluxes["SIII_9069"], Hb, Te_mid, ne_md, 9069)
 
-    # Ne++/H+ from [NeIII] 3869 — T_high zone
+    # Ne++/H+ from [NeIII] 3869 — T_high zone, intermediate-zone density.
+    # Like O²⁺, [NeIII] 3869 is density-insensitive below ~10⁵ cm⁻³, so it
+    # uses ne_md (CIII]→low) rather than the noisy high-ionisation N IV]
+    # density (ne_hi).
     if "NeIII_3869" in fluxes and fluxes["NeIII_3869"] > 0:
-        ionic["Ne++/H+"] = _ionic_abundance("Ne", 3, fluxes["NeIII_3869"], Hb, Te_high, ne_hi, 3869)
+        ionic["Ne++/H+"] = _ionic_abundance("Ne", 3, fluxes["NeIII_3869"], Hb, Te_high, ne_md, 3869)
 
     # Ar++/H+ from [ArIII] 7136 — T_mid zone
     if "ArIII_7136" in fluxes and fluxes["ArIII_7136"] > 0:
