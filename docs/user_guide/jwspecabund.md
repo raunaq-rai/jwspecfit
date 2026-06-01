@@ -20,10 +20,13 @@ print(abund.summary())
 
 ### 1 — Dust correction
 
-A_V is derived from the **multi-Balmer decrement**. By default the
-anchor is Hβ (using Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ), but you can anchor
-on Hα — useful at moderate redshift where Hα is the highest-SNR Balmer
-line:
+A_V is derived from the **multi-Balmer decrement**. The anchor is the
+denominator line; every *other* detected Balmer line above `snr_balmer`
+is ratioed against it and the per-line A_V values are combined as an
+inverse-variance weighted mean. With the default anchor Hβ that means
+**Hα/Hβ** (when Hα is in band), Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ — i.e. Hα
+*is* included and, having the smallest error, usually dominates the
+mean. You can instead anchor on Hα:
 
 ```python
 abund = jwspecabund.compute_abundances(
