@@ -2331,13 +2331,14 @@ def compute_abundances(
         V-band attenuation. If ``None``, derived from Balmer decrement
         (see *balmer_anchor*).
     balmer_anchor : str
-        Denominator line for the multi-Balmer A_V derivation.  Every
-        *other* detected Balmer line above *snr_balmer* is ratioed
-        against it.  ``"HBETA"`` (default) therefore uses Hα/Hβ (when Hα
-        is in band), Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ — Hα is included and,
-        having the smallest error, usually dominates the weighted mean.
-        ``"Ha"`` uses Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα.  Ignored when
-        *Av* is supplied directly, or when *balmer_pair* is set.
+        Denominator line for the multi-Balmer A_V derivation.  Only
+        Balmer lines **bluer than** the anchor (and above *snr_balmer*)
+        are ratioed against it.  ``"HBETA"`` (default) therefore uses
+        Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ — **Hα is excluded**.  ``"Ha"`` uses
+        every other Balmer line (Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα).
+        So anchor on Hα when you want Hα included, on Hβ when you don't.
+        Ignored when *Av* is supplied directly, or when *balmer_pair* is
+        set.
     balmer_pair : tuple of str or None
         Force the A_V derivation onto a single Balmer decrement instead
         of the multi-line fit, given as ``(numerator, denominator)`` line

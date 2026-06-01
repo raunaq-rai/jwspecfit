@@ -173,6 +173,33 @@ class TestAvRecovery:
 
 
 # ---------------------------------------------------------------------------
+# 2a. Multi-Balmer only uses lines bluer than the anchor.
+# ---------------------------------------------------------------------------
+class TestMultiBalmerBluerThanAnchor:
+
+    def test_hbeta_anchor_excludes_halpha(self):
+        """anchor=Hβ must use only bluer lines (Hα excluded)."""
+        from jwspecabund.dust import compute_Av_multi_balmer
+        fluxes, errors = _build_full_balmer_observed(0.5, "cardelli")
+        out = compute_Av_multi_balmer(
+            fluxes, errors, law="cardelli", snr_min=3.0, anchor="HBETA",
+        )
+        used = {r["line"] for r in out["individual"]}
+        assert "Ha" not in used
+        assert used == {"HGAMMA", "HDELTA", "H9", "H10"}
+
+    def test_ha_anchor_includes_all_bluer(self):
+        """anchor=Hα must use every other Balmer line (all bluer than Hα)."""
+        from jwspecabund.dust import compute_Av_multi_balmer
+        fluxes, errors = _build_full_balmer_observed(0.5, "cardelli")
+        out = compute_Av_multi_balmer(
+            fluxes, errors, law="cardelli", snr_min=3.0, anchor="Ha",
+        )
+        used = {r["line"] for r in out["individual"]}
+        assert used == {"HBETA", "HGAMMA", "HDELTA", "H9", "H10"}
+
+
+# ---------------------------------------------------------------------------
 # 2b. Single-pair Av recovery — compute_Av_balmer_pair forces one decrement.
 # ---------------------------------------------------------------------------
 class TestAvBalmerPair:
@@ -339,12 +366,16 @@ def test_dust_correction_preserves_snr():
 class TestSignConvention:
 
     def test_red_balmer_excess_gives_positive_av(self):
-        """Observed Hα/Hβ > 2.86 means dust-reddened => Av > 0."""
+        """Observed Hα/Hβ > 2.86 means dust-reddened => Av > 0.
+
+        Uses anchor="Ha" so the Hα/Hβ decrement is actually exercised
+        (the Hβ anchor only uses lines bluer than Hβ).
+        """
         from jwspecabund.dust import compute_Av_multi_balmer
         out = compute_Av_multi_balmer(
             {"Ha": 4.0, "HBETA": 1.0},
             {"Ha": 0.01, "HBETA": 0.01},
-            law="salim", snr_min=3.0, anchor="HBETA",
+            law="salim", snr_min=3.0, anchor="Ha",
         )
         assert out["Av"] > 0, (
             f"Red Balmer excess (Hα/Hβ = 4.0) gave Av = {out['Av']}; "
@@ -359,7 +390,7 @@ class TestSignConvention:
         out = compute_Av_multi_balmer(
             {"Ha": 2.5, "HBETA": 1.0},
             {"Ha": 0.01, "HBETA": 0.01},
-            law="salim", snr_min=3.0, anchor="HBETA",
+            law="salim", snr_min=3.0, anchor="Ha",
         )
         assert out["Av"] >= 0, (
             f"Blue Balmer excess produced negative Av = {out['Av']}."

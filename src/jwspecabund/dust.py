@@ -362,9 +362,11 @@ def compute_Av_multi_balmer(
 ) -> dict[str, object]:
     """Derive A_V from every available Balmer decrement.
 
-    Ratios each detected Balmer line against the chosen *anchor* line
-    (Hβ by default, optionally Hα) and returns individual and
-    weighted-average A_V values.
+    Ratios each detected Balmer line **bluer than** the chosen *anchor*
+    against it, and returns individual and weighted-average A_V values.
+    Only lines at shorter wavelength than the anchor are used: anchor Hβ
+    therefore uses Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ (Hα is **excluded**),
+    while anchor Hα uses Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα (all of them).
 
     Parameters
     ----------
@@ -378,8 +380,9 @@ def compute_Av_multi_balmer(
         Minimum SNR for a Balmer line to be included (default 3.0).
     anchor : str
         Reference (denominator) line for the decrement.  ``"HBETA"``
-        (default) or ``"Ha"``.  When ``"Ha"``, ratios used are
-        Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα.
+        (default) uses only bluer lines (Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ),
+        excluding Hα.  ``"Ha"`` uses every other Balmer line
+        (Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα).
     **kwargs
         Extra arguments to the attenuation law (Rv, delta, B).
 
@@ -408,6 +411,11 @@ def compute_Av_multi_balmer(
     results = []
     for name, (wave, ratio_over_Hb) in _BALMER_LADDER.items():
         if name == anchor:
+            continue
+        # Only use lines bluer than the anchor.  Anchor=Hβ therefore uses
+        # Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ (Hα excluded); anchor=Hα uses every
+        # other Balmer line (all are bluer than Hα).
+        if wave >= anchor_wave:
             continue
         if name not in fluxes or fluxes[name] <= 0:
             continue

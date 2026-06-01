@@ -6,6 +6,14 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### Behaviour changes
+
+- **Multi-Balmer A_V now uses only lines bluer than the anchor.**
+  `balmer_anchor="HBETA"` (default) uses Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ and
+  **excludes Hα/Hβ**; `balmer_anchor="Ha"` uses every other Balmer line
+  (all are bluer than Hα). Previously the Hβ anchor also included Hα/Hβ.
+  Anchor on Hα to include Hα; on Hβ to use only the bluer Balmer series.
+
 ### New
 
 - **`balmer_pair` option in `compute_abundances`** (and the public

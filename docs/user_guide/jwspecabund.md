@@ -21,12 +21,17 @@ print(abund.summary())
 ### 1 — Dust correction
 
 A_V is derived from the **multi-Balmer decrement**. The anchor is the
-denominator line; every *other* detected Balmer line above `snr_balmer`
-is ratioed against it and the per-line A_V values are combined as an
-inverse-variance weighted mean. With the default anchor Hβ that means
-**Hα/Hβ** (when Hα is in band), Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ — i.e. Hα
-*is* included and, having the smallest error, usually dominates the
-mean. You can instead anchor on Hα:
+denominator line; only Balmer lines **bluer than the anchor** (and above
+`snr_balmer`) are ratioed against it, and the per-line A_V values are
+combined as an inverse-variance weighted mean. So:
+
+- **`balmer_anchor="HBETA"`** (default) uses Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ
+  — **Hα is excluded** (it's redder than Hβ).
+- **`balmer_anchor="Ha"`** uses every other Balmer line (Hβ/Hα, Hγ/Hα,
+  Hδ/Hα, H9/Hα, H10/Hα) — i.e. **all** of them that pass the SNR cut.
+
+Anchor on Hα when you want Hα included; on Hβ when you want only the
+bluer Balmer series:
 
 ```python
 abund = jwspecabund.compute_abundances(
