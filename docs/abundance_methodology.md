@@ -106,6 +106,17 @@ are the inverse-variance of each A_V estimate.
 | H9 | 3836.48 | 0.0731 |
 | H10 | 3799.00 | 0.0530 |
 
+**Single-pair option.** Passing `balmer_pair=(numerator, denominator)`
+to `compute_abundances` (or calling `compute_Av_balmer_pair()` directly)
+restricts the derivation to one chosen decrement — e.g.
+`("Ha", "HBETA")` for Hα/Hβ — bypassing the SNR-weighted multi-line fit.
+This is useful when only one Balmer ratio is high-SNR and the fainter
+lines would otherwise bias or inflate the A_V error.  The intrinsic
+Case-B ratio is taken from the ladder above (extended with Hα = 2.86 and
+Hβ = 1.00).  A_V is still applied as a single point value to all draws;
+its formal error is reported on the result but not marginalised into the
+abundances unless A_V resampling is explicitly enabled (§2.4).
+
 ### 2.4 Dust correction of line fluxes
 
 Each emission-line flux is corrected using:

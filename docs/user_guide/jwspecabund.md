@@ -37,6 +37,30 @@ A per-line A_V is computed against the anchor, then an inverse-variance
 weighted mean is returned. You can also supply `Av=` directly to skip
 the derivation entirely, or `dust_correct=False` to turn dust off.
 
+**Forcing a single Balmer pair.** To derive A_V from exactly one
+decrement — and ignore lower-SNR Balmer lines — pass `balmer_pair`:
+
+```python
+abund = jwspecabund.compute_abundances(
+    result, z=6.0,
+    balmer_pair=("Ha", "HBETA"),   # A_V from Hα/Hβ only
+    dust_law="cardelli",
+)
+print(f"A_V = {abund.Av:.3f} ± {abund.Av_err:.3f}")
+```
+
+`balmer_pair=(numerator, denominator)` accepts ladder names `"Ha"`,
+`"HBETA"`, `"HGAMMA"`, `"HDELTA"`, `"H9"`, `"H10"`; the intrinsic Case-B
+ratio is looked up automatically. It overrides `balmer_anchor` /
+`snr_balmer` for the A_V step and is ignored when `Av=` is supplied.
+A_V is still applied as a single point value (the abundance error is
+**not** widened by the A_V uncertainty), but both `abund.Av` and
+`abund.Av_err` (the formal error of the chosen pair) are reported. If
+either line is missing or non-positive, A_V falls back to 0 with
+`Av_err = nan` — check for `0.000 ± nan` when looping over objects. The
+same single-pair calculation is available standalone as
+{func}`~jwspecabund.compute_Av_balmer_pair`.
+
 All line fluxes are then corrected at each line's own rest wavelength —
 the correction is fully wavelength-dependent.
 
