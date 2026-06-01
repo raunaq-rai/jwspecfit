@@ -460,6 +460,82 @@ def compute_Av_multi_balmer(
     }
 
 
+def compute_Av_balmer_pair(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    pair: tuple[str, str],
+    law: str = "salim",
+    **kwargs,
+) -> dict[str, object]:
+    """Derive A_V from a single, explicitly-chosen Balmer decrement.
+
+    Like :func:`compute_Av_multi_balmer` but restricted to exactly one
+    ``(numerator, denominator)`` pair — useful when you want to force the
+    dust correction onto a high-SNR pair (e.g. ``("Ha", "HBETA")``) and
+    ignore lower-SNR Balmer lines.
+
+    Parameters
+    ----------
+    fluxes, errors : dict
+        Observed (not dust-corrected) line fluxes and 1σ errors.
+    pair : tuple of str
+        ``(numerator, denominator)`` line names from the Balmer ladder
+        (``"Ha"``, ``"HBETA"``, ``"HGAMMA"``, ``"HDELTA"``, ``"H9"``,
+        ``"H10"``), e.g. ``("Ha", "HBETA")`` for Hα/Hβ.
+    law : str
+        ``"salim"`` (default) or ``"cardelli"``.
+    **kwargs
+        Extra arguments to the attenuation law (Rv, delta, B).
+
+    Returns
+    -------
+    dict
+        Same shape as :func:`compute_Av_multi_balmer`: ``"Av"``,
+        ``"Av_err"``, ``"individual"``, ``"n_lines"`` (1 if usable, else
+        0), ``"anchor"`` (the denominator line).
+
+    Raises
+    ------
+    ValueError
+        If either line name is not in the Balmer ladder.
+    """
+    num, den = pair
+    for nm in (num, den):
+        if nm not in _BALMER_LADDER:
+            raise ValueError(
+                f"balmer_pair line {nm!r} not recognised; "
+                f"choose from {tuple(_BALMER_LADDER)}"
+            )
+
+    if (num not in fluxes or fluxes[num] <= 0
+            or den not in fluxes or fluxes[den] <= 0):
+        return {
+            "Av": 0.0, "Av_err": np.nan, "individual": [],
+            "n_lines": 0, "anchor": den,
+        }
+
+    wave_num, ratio_num = _BALMER_LADDER[num]
+    wave_den, ratio_den = _BALMER_LADDER[den]
+    intrinsic_ratio = ratio_num / ratio_den
+
+    av, av_err = compute_Av_from_balmer(
+        fluxes[num], fluxes[den], errors.get(num, 0.0), errors.get(den, 0.0),
+        law=law, intrinsic_ratio=intrinsic_ratio,
+        wave_num_A=wave_num, wave_den_A=wave_den, **kwargs,
+    )
+    return {
+        "Av": max(av, 0.0),
+        "Av_err": av_err,
+        "individual": [{
+            "line": num, "wave": wave_num, "Av": av, "Av_err": av_err,
+            "observed_ratio": fluxes[num] / fluxes[den],
+            "intrinsic_ratio": intrinsic_ratio,
+        }],
+        "n_lines": 1,
+        "anchor": den,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Lyα escape fraction
 # ---------------------------------------------------------------------------

@@ -18,6 +18,7 @@ from jwspecfit.fitter import FitResult
 from jwspecfit.lines import REST_LINES_A
 
 from .dust import (
+    compute_Av_balmer_pair,
     compute_Av_from_balmer,
     compute_Av_multi_balmer,
     compute_lya_escape_fraction,
@@ -2288,6 +2289,7 @@ def compute_abundances(
     snr_balmer: float = 3.0,
     # Balmer decrement anchor line for A_V derivation
     balmer_anchor: str = "HBETA",
+    balmer_pair: tuple[str, str] | None = None,
     # Forward model kwargs (method="forward")
     forward_sampler: str = "emcee",
     forward_n_walkers: int = 32,
@@ -2332,7 +2334,16 @@ def compute_abundances(
         Reference line for the multi-Balmer A_V derivation: ``"HBETA"``
         (default) uses Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ; ``"Ha"`` uses
         Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα.  Ignored when *Av* is
-        supplied directly.
+        supplied directly, or when *balmer_pair* is set.
+    balmer_pair : tuple of str or None
+        Force the A_V derivation onto a single Balmer decrement instead
+        of the multi-line fit, given as ``(numerator, denominator)`` line
+        names from the ladder (``"Ha"``, ``"HBETA"``, ``"HGAMMA"``,
+        ``"HDELTA"``, ``"H9"``, ``"H10"``).  For example
+        ``balmer_pair=("Ha", "HBETA")`` uses only Hα/Hβ — useful to avoid
+        low-SNR Balmer lines.  Overrides *balmer_anchor* / *snr_balmer*
+        for the A_V step.  Ignored when *Av* is supplied directly.
+        ``None`` (default) keeps the multi-Balmer fit.
     Av_err : float or None
         Controls whether A_V is marginalised over.  ``None`` (default)
         keeps A_V fixed at its central value — derived once from the
@@ -2461,13 +2472,26 @@ def compute_abundances(
     _balmer_info: dict | None = None
     if dust_correct:
         if Av is None:
-            # Derive A_V from all available Balmer decrements anchored on
-            # either Hβ (default) or Hα via `balmer_anchor`.
-            balmer_out = compute_Av_multi_balmer(
-                fluxes, errors, law=dust_law, snr_min=snr_balmer,
-                anchor=balmer_anchor, **dust_kwargs,
+            if balmer_pair is not None:
+                # Force A_V onto a single chosen decrement (e.g. Hα/Hβ),
+                # ignoring lower-SNR Balmer lines.
+                balmer_out = compute_Av_balmer_pair(
+                    fluxes, errors, balmer_pair, law=dust_law, **dust_kwargs,
+                )
+            else:
+                # Derive A_V from all available Balmer decrements anchored
+                # on either Hβ (default) or Hα via `balmer_anchor`.
+                balmer_out = compute_Av_multi_balmer(
+                    fluxes, errors, law=dust_law, snr_min=snr_balmer,
+                    anchor=balmer_anchor, **dust_kwargs,
+                )
+            _ANCHOR_LABELS = {
+                "Ha": "Hα", "HBETA": "Hβ", "HGAMMA": "Hγ",
+                "HDELTA": "Hδ", "H9": "H9", "H10": "H10",
+            }
+            anchor_label = _ANCHOR_LABELS.get(
+                balmer_out["anchor"], balmer_out["anchor"]
             )
-            anchor_label = "Hα" if balmer_anchor == "Ha" else "Hβ"
             if balmer_out["n_lines"] > 0:
                 Av_derived = balmer_out["Av"]
                 Av_err_derived = balmer_out["Av_err"]

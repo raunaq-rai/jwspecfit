@@ -173,6 +173,48 @@ class TestAvRecovery:
 
 
 # ---------------------------------------------------------------------------
+# 2b. Single-pair Av recovery — compute_Av_balmer_pair forces one decrement.
+# ---------------------------------------------------------------------------
+class TestAvBalmerPair:
+
+    @pytest.mark.parametrize("law", ["salim", "cardelli"])
+    @pytest.mark.parametrize("pair", [("Ha", "HBETA"), ("HGAMMA", "HBETA")])
+    @pytest.mark.parametrize("Av_true", [0.0, 0.5, 1.5, 3.0])
+    def test_recover_av_from_single_pair(self, law, pair, Av_true):
+        """compute_Av_balmer_pair recovers a known Av from exactly one pair."""
+        from jwspecabund.dust import compute_Av_balmer_pair
+
+        dust_kwargs = ({"Rv": 3.15, "delta": -0.35, "B": 2.27}
+                       if law == "salim" else {})
+        fluxes, errors = _build_full_balmer_observed(Av_true, law, **dust_kwargs)
+        out = compute_Av_balmer_pair(fluxes, errors, pair, law=law, **dust_kwargs)
+        assert out["n_lines"] == 1
+        assert out["anchor"] == pair[1]
+        np.testing.assert_allclose(out["Av"], Av_true, atol=1e-3)
+
+    def test_uses_only_the_named_pair(self):
+        """Only the two named lines influence the result; others are ignored."""
+        from jwspecabund.dust import compute_Av_balmer_pair
+
+        fluxes, errors = _build_full_balmer_observed(1.0, "cardelli")
+        # Corrupt a line NOT in the pair — result must be unchanged.
+        ref = compute_Av_balmer_pair(fluxes, errors, ("Ha", "HBETA"), law="cardelli")
+        fluxes["HGAMMA"] *= 5.0
+        out = compute_Av_balmer_pair(fluxes, errors, ("Ha", "HBETA"), law="cardelli")
+        np.testing.assert_allclose(out["Av"], ref["Av"], atol=1e-10)
+
+    def test_missing_line_returns_no_detection(self):
+        from jwspecabund.dust import compute_Av_balmer_pair
+        out = compute_Av_balmer_pair({"HBETA": 100.0}, {"HBETA": 2.0}, ("Ha", "HBETA"))
+        assert out["n_lines"] == 0 and out["Av"] == 0.0
+
+    def test_invalid_line_name_raises(self):
+        from jwspecabund.dust import compute_Av_balmer_pair
+        with pytest.raises(ValueError):
+            compute_Av_balmer_pair({"Ha": 1, "HBETA": 1}, {}, ("Halpha", "HBETA"))
+
+
+# ---------------------------------------------------------------------------
 # 3. Av recovery under realistic noise — the estimator must be unbiased.
 # ---------------------------------------------------------------------------
 class TestAvRecoveryUnderNoise:

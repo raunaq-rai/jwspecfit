@@ -4,6 +4,17 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### New
+
+- **`balmer_pair` option in `compute_abundances`** (and the public
+  `compute_Av_balmer_pair`). Forces the A_V derivation onto a single
+  Balmer decrement, e.g. `balmer_pair=("Ha", "HBETA")` for Hα/Hβ only,
+  instead of the multi-line fit — useful to avoid low-SNR Balmer lines.
+  Overrides `balmer_anchor`/`snr_balmer` for the A_V step; ignored when
+  `Av` is supplied directly.
+
 ## 1.1.3 — 2026-06-01
 
 ### Behaviour changes

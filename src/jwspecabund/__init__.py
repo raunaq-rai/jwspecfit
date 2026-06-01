@@ -58,6 +58,7 @@ from .martinez25_icf import (
 )
 from .dust import (
     cardelli_extinction,
+    compute_Av_balmer_pair,
     compute_Av_from_balmer,
     compute_Av_multi_balmer,
     compute_lya_escape_fraction,
@@ -74,6 +75,7 @@ __all__ = [
     "Te_low_from_high",
     "cardelli_extinction",
     "compute_abundances",
+    "compute_Av_balmer_pair",
     "compute_Av_from_balmer",
     "compute_Av_multi_balmer",
     "compute_lya_escape_fraction",
