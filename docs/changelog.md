@@ -4,6 +4,35 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## 1.1.3 — 2026-06-01
+
+### Behaviour changes
+
+- **O²⁺ and Ne²⁺ are decoupled from the N IV] density.** `T_e([O III])`
+  and the O²⁺/H⁺ and Ne²⁺/H⁺ abundances are now evaluated at the
+  intermediate-ionisation density (C III] λ1907/1909, with a low-zone
+  fallback) instead of the high-ionisation N IV] density. The [O III]
+  5007/Hβ and [Ne III] 3869/Hβ abundances are density-insensitive below
+  ~10⁴–10⁵ cm⁻³, and C III] (24–48 eV) overlaps the O²⁺ zone (35–55 eV),
+  whereas N IV] (47–77 eV) traces more highly-ionised gas and can
+  spuriously spike — dragging `T_e` down and inflating O/H. N³⁺ and C³⁺
+  keep the high-ionisation density, so the Martinez+25 ICF 5
+  ((N²⁺+N³⁺)/O²⁺) still uses the correct density for each nitrogen ion.
+- **log(U) from O32 / N43 now takes an electron-density input.** The
+  Martinez+25 O32 and N43 log(U) diagnostics are evaluated at the
+  measured density rather than a fixed default.
+
+### Documentation
+
+- New **Plotting & visualisation** section consolidating all static
+  (matplotlib) and interactive (plotly) plotting helpers across the
+  suite, with a backend-choice guide and line-marker reference.
+
+### Fixes
+
+- `DLAResult.plot()` no longer emits a `tight_layout` warning on the
+  two-panel (data + residual) figure (now uses constrained layout).
+
 ## 1.1.2 — 2026-05-29
 
 ### Behaviour changes
