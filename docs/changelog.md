@@ -6,6 +6,19 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### Line database additions
+
+- **Seven UV interstellar absorption lines** added to `REST_LINES_A`
+  (vacuum, Morton 2003): the O I λ1302 + Si II λ1304 blend
+  (`abs_OISiII1303`, single feature), Si II λ1526 (`abs_SiII1526`),
+  Fe II λ1608 (`abs_FeII1608`), the Al III λλ1854,1862 doublet
+  (`abs_AlIII1854`, `abs_AlIII1862`), and the C IV λλ1548,1550 doublet
+  (`abs_CIV1548`, `abs_CIV1550`). All but the C IV pair are included in
+  the default prism and grating line lists. **`abs_CIV1548/1550` are in
+  the database but *not* the default lists**, because they coincide
+  exactly with the `CIV_1`/`CIV_2` emission components — fit them
+  explicitly via `lines=[...]` when C IV is in absorption / P-Cygni.
+
 ### Behaviour changes
 
 - **Multi-Balmer A_V now uses only lines bluer than the anchor.**

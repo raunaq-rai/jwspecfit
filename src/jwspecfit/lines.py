@@ -31,12 +31,19 @@ REST_LINES_A: dict[str, float] = {
     "CIII]": 1908.734,
     "CII]_2324": 2324.21346335,
     "CII]_2326": 2325.40372661,
-    # UV absorption lines
-    "abs_SiII1260": 1260.422,
-    "abs_CII1334":  1334.532,
-    "abs_SiIV1394": 1393.755,
-    "abs_SiIV1403": 1402.770,
-    "abs_AlII1672": 1670.787,
+    # UV absorption lines (low- and high-ionisation interstellar; Morton 2003)
+    "abs_SiII1260":   1260.422,
+    "abs_OISiII1303": 1303.269,   # O I 1302.168 + Si II 1304.370 blend (single feature)
+    "abs_CII1334":    1334.532,
+    "abs_SiIV1394":   1393.755,
+    "abs_SiIV1403":   1402.770,
+    "abs_SiII1526":   1526.707,
+    "abs_CIV1548":    1548.187,   # coincides with CIV_1 emission (P-Cygni) — not in default lists
+    "abs_CIV1550":    1550.772,   # coincides with CIV_2 emission (P-Cygni) — not in default lists
+    "abs_FeII1608":   1608.451,
+    "abs_AlII1672":   1670.787,
+    "abs_AlIII1854":  1854.716,
+    "abs_AlIII1862":  1862.790,
     # Semi-forbidden / weak
     "OIII]_2321": 2322.41306535397,
     "OIII]_2331": 2332.015190970458,
@@ -112,12 +119,17 @@ _PRISM_LINES = [
     "NIV_doublet",
     "CIV_doublet",
     "HEII_1640",
-    # UV absorption lines
+    # UV absorption lines (abs_CIV* omitted: coincide with CIV emission)
     "abs_SiII1260",
+    "abs_OISiII1303",
     "abs_CII1334",
     "abs_SiIV1394",
     "abs_SiIV1403",
+    "abs_SiII1526",
+    "abs_FeII1608",
     "abs_AlII1672",
+    "abs_AlIII1854",
+    "abs_AlIII1862",
     "NIII_doublet",
     "CIII]",
     # Semi-forbidden / weak UV
@@ -157,12 +169,17 @@ _GRATING_LINES = [
     "CIV_1",
     "CIV_2",
     "HEII_1640",
-    # UV absorption lines
+    # UV absorption lines (abs_CIV* omitted: coincide with CIV_1/CIV_2 emission)
     "abs_SiII1260",
+    "abs_OISiII1303",
     "abs_CII1334",
     "abs_SiIV1394",
     "abs_SiIV1403",
+    "abs_SiII1526",
+    "abs_FeII1608",
     "abs_AlII1672",
+    "abs_AlIII1854",
+    "abs_AlIII1862",
     "OIII_1661",
     "OIII_1666",
     "NIII_1749",
