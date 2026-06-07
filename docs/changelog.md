@@ -4,7 +4,21 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
-## Unreleased
+## 1.1.4 — 2026-06-07
+
+### Bug fixes
+
+- **Corrected air/vacuum wavelengths for 12 optical lines in
+  `REST_LINES_A`.** A subset of lines (Hδ, Hγ, Hβ, Hα, [O III] λλ4959,5007,
+  [N II] λλ5756,6549,6585, He I λ5877, [S II] λλ6718,6732) had the
+  air→vacuum transform applied twice — once to values that were already in
+  vacuum — inflating them by the refractive index of air (n ≈ 1.000279,
+  ≈ +1.4 Å at 5000 Å, a +84 km/s offset). They now hold the correct vacuum
+  wavelengths. The inconsistency (some lines, e.g. [O III] λ4363, were
+  already correct) could bias fitted redshifts and line positions at
+  grating/high resolution. A regression test
+  (`tests/test_line_wavelengths.py`) now pins these against literature
+  vacuum values.
 
 ### Line database additions
 
