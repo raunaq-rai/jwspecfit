@@ -158,10 +158,21 @@ class TestConstraintSetFreeMask:
         assert free[2 * nL + 1] is np.False_
 
     def test_nv_free_mask(self):
-        """NV doublet: amplitude-tied (secondary fully constrained)."""
+        """NV resonance doublet: amplitude free when resolved, kinematics derived."""
         names = ["NV_1", "NV_2"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
+        free = cs.free_mask()
+        nL = 2
+        assert free[1] is np.True_            # secondary amplitude free
+        assert free[nL + 1] is np.False_      # centroid derived
+        assert free[2 * nL + 1] is np.False_  # sigma derived
+
+    def test_nv_blended_free_mask(self):
+        """NV blended: secondary amplitude also constrained."""
+        names = ["NV_1", "NV_2"]
+        cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
+                           tie_uv_doublets=True, blended_doublets={"NV_2"})
         free = cs.free_mask()
         nL = 2
         assert free[1] is np.False_
@@ -284,10 +295,21 @@ class TestConstraintSetApply:
         lam_ratio = REST_LINES_A["CIV_2"] / REST_LINES_A["CIV_1"]
         assert p_out[2 * nL + 1] == pytest.approx(p_out[2 * nL + 0] * lam_ratio)
 
-    def test_nv_amplitude_ratio(self):
+    def test_nv_amplitude_free_when_resolved(self):
+        """NV resonance doublet: amplitude is free (not fixed) when resolved."""
         names = ["NV_1", "NV_2"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
+        p = self._make_params(names)
+        p[0], p[1] = 3.0, 1.0  # arbitrary, non-ratio amplitudes
+        p_out = cs.apply(p)
+        assert p_out[1] == pytest.approx(1.0)  # amplitude unchanged
+
+    def test_nv_amplitude_ratio_when_blended(self):
+        """NV blended: amplitude fixed to the optically-thin ratio."""
+        names = ["NV_1", "NV_2"]
+        cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
+                           tie_uv_doublets=True, blended_doublets={"NV_2"})
         p = self._make_params(names)
         p_out = cs.apply(p)
         assert p_out[1] == pytest.approx(p_out[0] * NV_RATIO)

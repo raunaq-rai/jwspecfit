@@ -19,14 +19,18 @@ logger = logging.getLogger(__name__)
 # [NII] 6549/6585 theoretical flux ratio (Storey & Zeippen 2000).
 NII_RATIO = 1.0 / 2.96
 
-# Resonance doublets: secondary/primary amplitude ratio (optically thin).
-# Set by statistical weights g = 2J+1; not density-sensitive.
-NV_RATIO = 0.5       # F(NV_2) / F(NV_1)
+# Resonance-doublet optically-thin amplitude ratio (secondary/primary),
+# set by statistical weights g = 2J+1.  Used as the blended-fallback ratio
+# for N V and C IV; the ratio is left free when the doublet is resolved,
+# because resonance scattering / optical depth drives it between 2:1
+# (optically thin) and 1:1 (optically thick).
+NV_RATIO = 0.5       # F(NV_2) / F(NV_1), optically thin limit
 
-# Low-density-limit flux ratios for intercombination doublets.
-# Used as default when doublet is unresolved.
+# Low-density / optically-thin flux ratios for doublets.
+# Used as the default ratio when a doublet is blended (unresolved).
 _INTERCOM_LOW_DENSITY_RATIOS: dict[tuple[str, str], float] = {
     # (primary, secondary): F(secondary) / F(primary)
+    ("NV_1",      "NV_2"):      NV_RATIO,  # resonance, optically thin limit
     ("CIV_1",     "CIV_2"):     0.50,   # optically thin limit
     ("OIII_1666", "OIII_1661"): 0.83,   # 1/1.20, low-density limit
     ("CIII]_1907", "CIII]"):     0.65,   # Keenan+1992
@@ -181,28 +185,16 @@ class ConstraintSet:
 
         # --- UV doublet constraints ---
         if self.tie_uv_doublets:
-            # Amplitude-tied doublets: resonance lines with fixed flux ratios
-            # and OIII] UV intercombination (weakly density-dependent).
-            _AMPLITUDE_TIED = [
-                # (primary, secondary, ratio = F_secondary / F_primary)
-                ("NV_1",      "NV_2",      NV_RATIO),
-            ]
-            for pri, sec, ratio in _AMPLITUDE_TIED:
-                if pri in idx and sec in idx:
-                    i_pri = idx[pri]
-                    i_sec = idx[sec]
-                    lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
-                    p[i_sec] = p[i_pri] * ratio
-                    if self.tie_uv_centroids:
-                        p[nL + i_sec] = p[nL + i_pri] * lam_ratio
-                    p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
-
-            # Intercombination doublets: density-sensitive lines.
-            # If resolved, only kinematics are tied (amplitude free).
-            # If blended (unresolved), amplitude is also fixed to the
-            # low-density-limit ratio for fitting stability.
+            # Kinematically-tied doublets: kinematics shared, amplitude free
+            # when resolved.  If blended (unresolved), the amplitude is also
+            # fixed to the low-density / optically-thin ratio for fitting
+            # stability.  Resonance doublets (N V, C IV) are handled the same
+            # way: their flux ratio runs between 2:1 (optically thin) and 1:1
+            # (optically thick), so it is only fixed when the members cannot
+            # be resolved.
             _KINEMATIC_TIED = [
                 # (primary, secondary) — amplitudes free when resolved
+                ("NV_1",      "NV_2"),
                 ("CIV_1",     "CIV_2"),
                 ("OIII_1666", "OIII_1661"),
                 ("CIII]_1907", "CIII]"),
@@ -342,21 +334,10 @@ class ConstraintSet:
 
         # UV doublet constraints.
         if self.tie_uv_doublets:
-            # Amplitude-tied: all 3 parameters of secondary are derived.
-            _AMPLITUDE_TIED = [
-                ("NV_1",      "NV_2"),
-            ]
-            for pri, sec in _AMPLITUDE_TIED:
-                if pri in idx and sec in idx:
-                    i_sec = idx[sec]
-                    free[i_sec] = False
-                    if self.tie_uv_centroids:
-                        free[nL + i_sec] = False
-                    free[2 * nL + i_sec] = False
-
-            # Intercombination doublets: sigma derived, centroid conditional.
+            # Kinematically-tied doublets: sigma derived, centroid conditional.
             # Amplitude is free when resolved, derived when blended.
             _KINEMATIC_TIED = [
+                ("NV_1",      "NV_2"),
                 ("CIV_1",     "CIV_2"),
                 ("OIII_1666", "OIII_1661"),
                 ("CIII]_1907", "CIII]"),

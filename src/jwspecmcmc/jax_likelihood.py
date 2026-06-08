@@ -19,7 +19,6 @@ import numpy as np
 from jwspecfit.constraints import (
     ConstraintSet,
     NII_RATIO,
-    NV_RATIO,
     _INTERCOM_LOW_DENSITY_RATIOS,
 )
 from jwspecfit.lines import REST_LINES_A
@@ -127,21 +126,13 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
 
     # --- UV doublet constraints ---
     if cs.tie_uv_doublets:
-        # Amplitude-tied (NV)
-        _AMPLITUDE_TIED = [
-            ("NV_1", "NV_2", NV_RATIO),
-        ]
-        for pri, sec, ratio in _AMPLITUDE_TIED:
-            if pri in idx and sec in idx:
-                i_pri, i_sec = idx[pri], idx[sec]
-                lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
-                ops.append((i_sec, i_pri, ratio))                     # amplitude
-                if cs.tie_uv_centroids:
-                    ops.append((nL + i_sec, nL + i_pri, lam_ratio))   # centroid
-                ops.append((2 * nL + i_sec, 2 * nL + i_pri, lam_ratio))  # sigma
-
-        # Kinematic-tied intercombination doublets
+        # Kinematic-tied doublets: kinematics shared, amplitude free when
+        # resolved and fixed to the optically-thin / low-density ratio only
+        # when blended.  Resonance doublets (N V, C IV) are included here:
+        # their flux ratio runs between 2:1 (thin) and 1:1 (thick), so it is
+        # only fixed when the members cannot be resolved.
         _KINEMATIC_TIED = [
+            ("NV_1", "NV_2"),
             ("CIV_1", "CIV_2"),
             ("OIII_1666", "OIII_1661"),
             ("CIII]_1907", "CIII]"),
