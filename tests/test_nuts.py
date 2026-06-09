@@ -116,6 +116,54 @@ class TestJaxLikelihood:
         assert np.all(np.isfinite(grads))
 
 
+class TestUntiedMLESeed:
+    """Regression: untied MCMC fit must not be wrecked by the MLE seed.
+
+    The MLE initialiser must run under the SAME tying configuration as
+    NUTS.  When it ran tied while NUTS ran untied (tie_balmer_to_oiii=
+    False), the tied parameter vector mapped onto the untied free layout
+    produced a catastrophic seed (log-likelihood ~ -1e16) and every NUTS
+    transition diverged.  This test fits a synthetic spectrum untied and
+    asserts the fit is healthy.
+    """
+
+    def test_untied_fit_not_all_divergent(self):
+        import jwspecfit
+        import jwspecmcmc
+
+        # Synthetic z=0 spectrum: narrow Hα + broader [OIII]/Hβ, so the
+        # untie is meaningful (Hα width differs from [OIII]).
+        wave_um = np.linspace(0.480, 0.660, 1800)
+        wave_A = wave_um * 1e4
+        flux = np.full_like(wave_A, 0.1)
+        inject = {  # name: (rest_A, peak, sigma_A)
+            "HBETA": (4862.69, 3.0, 1.9),
+            "OIII_4959": (4960.29, 4.0, 2.0),
+            "OIII_5007": (5008.24, 12.0, 2.0),
+            "Ha": (6564.63, 15.0, 1.6),   # narrower than [OIII]
+        }
+        for _, (lam, amp, sig) in inject.items():
+            flux += amp * np.exp(-0.5 * ((wave_A - lam) / sig) ** 2)
+        rng = np.random.default_rng(0)
+        err = np.full_like(flux, 0.05)
+        flux += err * rng.standard_normal(len(flux))
+        spec = jwspecfit.Spectrum(
+            wave_um=wave_um, flux_ujy=flux, err_ujy=err, grating=None,
+        )
+
+        result = jwspecmcmc.fit_lines(
+            spec, z=0.0, sampler="nuts",
+            lines=["HBETA", "OIII_4959", "OIII_5007", "Ha"],
+            tie_balmer_to_oiii=False,      # the path that used to explode
+            init_from_mle=True,
+            n_warmup=120, n_samples_nuts=120, n_chains=1,
+        )
+        n_div = result.sampler_meta.get("n_divergent", 0)
+        # Before the fix this was 120/120 (100%).  Allow a small number of
+        # genuine divergences but nothing close to all transitions.
+        assert n_div < 60, f"too many divergences: {n_div}/120"
+
+
 class TestRunNuts:
     """Integration test for the NUTS sampler."""
 

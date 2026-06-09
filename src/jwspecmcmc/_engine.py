@@ -486,6 +486,7 @@ def _fit_lines_mcmc(
             spec, z,
             grating=grating, R=R, lines=_mle_lines,
             deg=deg, n_boot=0, clip_sigma=clip_sigma,
+            tie_balmer_to_oiii=tie_balmer_to_oiii,
             tie_uv_doublets=tie_uv_doublets,
             tie_uv_centroids=tie_uv_centroids,
             tie_uv_widths=tie_uv_widths,

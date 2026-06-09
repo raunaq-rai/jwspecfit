@@ -461,6 +461,28 @@ def run_nuts(
             f"This usually means parameter bounds are too tight or inconsistent. "
             f"See diagnostics above."
         )
+
+    # Guard against a finite-but-catastrophic seed.  A mis-mapped init
+    # (e.g. an MLE seed built under a different tying configuration) can
+    # produce a wildly negative log-likelihood that still passes the
+    # finiteness check above; starting NUTS there makes every transition
+    # diverge.  If the bounds midpoint scores dramatically better, the
+    # seed is broken — fall back to it and warn rather than silently
+    # returning an all-divergent fit.
+    p_mid = 0.5 * (lb + ub)
+    ll_mid = float(log_likelihood_jax(jnp.array(p_mid, dtype=jnp.float64)))
+    if np.isfinite(ll_mid) and ll_mid > ll_init + 1000.0:
+        logger.warning(
+            "Seed log-likelihood (%.3e) is far worse than the bounds "
+            "midpoint (%.3e) — the initialisation seed looks broken "
+            "(often a tying-config mismatch). Falling back to the "
+            "midpoint seed; NUTS warmup will adapt from there.",
+            ll_init, ll_mid,
+        )
+        p0_free = p_mid
+        p0_jax = jnp.array(p0_free, dtype=jnp.float64)
+        ll_init = ll_mid
+
     logger.info("Initial log-likelihood at p0: %.2f", ll_init)
 
     kernel = NUTS(
