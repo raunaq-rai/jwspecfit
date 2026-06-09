@@ -583,6 +583,7 @@ def _compute_logU(
     ne_high: float,
     errors: dict[str, float] | None = None,
     snr_logU: float = 3.0,
+    lock_diag: str | None = None,
 ) -> tuple[float | None, str | None]:
     """Compute ionisation parameter (Berg+2025 step 5).
 
@@ -615,13 +616,22 @@ def _compute_logU(
         for each doublet in N43 to be used.
     snr_logU : float
         Minimum total-doublet SNR for N43 (default 3.0).
+    lock_diag : str, optional
+        Force a specific diagnostic instead of the N43→O32 priority
+        tree.  ``"O32"`` skips N43 entirely; ``"N43"`` uses N43 only and
+        returns ``(None, None)`` rather than falling back to O32 when
+        N43 is unavailable or out of range.  Used by the Monte-Carlo
+        loops to keep every draw on the same diagnostic as the point
+        estimate, so the log(U) posterior is not a silent mixture of
+        N43- and O32-based draws.  ``None`` (default) uses the full
+        priority tree.
 
     Returns
     -------
     tuple
         ``(logU, diagnostic)`` where diagnostic is ``"N43"`` or
-        ``"O32"``.  Returns ``(None, None)`` if neither diagnostic
-        is available.
+        ``"O32"``.  Returns ``(None, None)`` if the (locked or
+        priority-selected) diagnostic is not available.
     """
     from .martinez25_icf import (
         LOG_OH_SOLAR, _LOG_N43_VALID, _LOG_U_VALID,
@@ -649,66 +659,76 @@ def _compute_logU(
 
     # N43 = NIV]1486 / NIII]1750 — density-insensitive, recommended.
     # Total doublet SNR must pass the cut for both NIV] and NIII].
-    niv_ok, niv_flux = _doublet_ok("NIV_1483", "NIV_1486")
-    if not niv_ok and (fluxes.get("NIV_1483", 0) > 0 or fluxes.get("NIV_1486", 0) > 0):
-        logger.info("N43: NIV] doublet below total SNR threshold (%.1f); skipping.", snr_logU)
+    if lock_diag in (None, "N43"):
+        niv_ok, niv_flux = _doublet_ok("NIV_1483", "NIV_1486")
+        if not niv_ok and (fluxes.get("NIV_1483", 0) > 0 or fluxes.get("NIV_1486", 0) > 0):
+            logger.info("N43: NIV] doublet below total SNR threshold (%.1f); skipping.", snr_logU)
 
-    niii_ok, niii_flux = _doublet_ok("NIII_1749", "NIII_1752")
-    if not niii_ok and (fluxes.get("NIII_1749", 0) > 0 or fluxes.get("NIII_1752", 0) > 0):
-        logger.info("N43: NIII] doublet below total SNR threshold (%.1f); skipping.", snr_logU)
+        niii_ok, niii_flux = _doublet_ok("NIII_1749", "NIII_1752")
+        if not niii_ok and (fluxes.get("NIII_1749", 0) > 0 or fluxes.get("NIII_1752", 0) > 0):
+            logger.info("N43: NIII] doublet below total SNR threshold (%.1f); skipping.", snr_logU)
 
-    if niv_flux > 0 and niii_flux > 0:
-        N43 = niv_flux / niii_flux
-        log_N43 = np.log10(N43)
-        # A ratio past the UPPER calibration edge means the object is more
-        # highly ionised than the Martinez+25 grid (their high-z sample
-        # shows this too, indicating log U > -1.0; Martinez+25 §6.2).  Clip
-        # to the edge and use the resulting high-ionisation log(U) (~ -1.0)
-        # rather than discarding the preferred, density-insensitive N43
-        # diagnostic for the density-sensitive O32 fallback.  The
-        # (N2+ + N3+)/O2+ ICF is near unity and barely changes for
-        # -2 < log U < -1 (Martinez+25 §6.3), so N/O is robust to the
-        # exact clipped value.
-        if log_N43 > _LOG_N43_VALID[1]:
-            logger.info(
-                "log(N43)=%.2f exceeds calibration ceiling %.1f "
-                "(log U > -1.0); clipping to the high-ionisation edge.",
-                log_N43, _LOG_N43_VALID[1],
-            )
-            log_N43 = _LOG_N43_VALID[1]
-        if _LOG_N43_VALID[0] <= log_N43 <= _LOG_N43_VALID[1]:
-            logU = log_U_from_N43(log_N43, Z_Zsun, ne_high)
-            if _LOG_U_VALID[0] <= logU <= _LOG_U_VALID[1]:
-                logger.info("log(U) from N43 = %.2f (N43=%.3f).", logU, N43)
-                return logU, "N43"
+        if niv_flux > 0 and niii_flux > 0:
+            N43 = niv_flux / niii_flux
+            log_N43 = np.log10(N43)
+            # A ratio past the UPPER calibration edge means the object is more
+            # highly ionised than the Martinez+25 grid (their high-z sample
+            # shows this too, indicating log U > -1.0; Martinez+25 §6.2).  Clip
+            # to the edge and use the resulting high-ionisation log(U) (~ -1.0)
+            # rather than discarding the preferred, density-insensitive N43
+            # diagnostic for the density-sensitive O32 fallback.  The
+            # (N2+ + N3+)/O2+ ICF is near unity and barely changes for
+            # -2 < log U < -1 (Martinez+25 §6.3), so N/O is robust to the
+            # exact clipped value.
+            if log_N43 > _LOG_N43_VALID[1]:
+                logger.info(
+                    "log(N43)=%.2f exceeds calibration ceiling %.1f "
+                    "(log U > -1.0); clipping to the high-ionisation edge.",
+                    log_N43, _LOG_N43_VALID[1],
+                )
+                log_N43 = _LOG_N43_VALID[1]
+            if _LOG_N43_VALID[0] <= log_N43 <= _LOG_N43_VALID[1]:
+                logU = log_U_from_N43(log_N43, Z_Zsun, ne_high)
+                if _LOG_U_VALID[0] <= logU <= _LOG_U_VALID[1]:
+                    logger.info("log(U) from N43 = %.2f (N43=%.3f).", logU, N43)
+                    return logU, "N43"
+                else:
+                    logger.debug(
+                        "N43 gives log(U)=%.2f outside validity [%.1f, %.1f].",
+                        logU, *_LOG_U_VALID,
+                    )
             else:
                 logger.debug(
-                    "N43 gives log(U)=%.2f outside validity [%.1f, %.1f]; "
-                    "falling back to O32.", logU, *_LOG_U_VALID,
+                    "log(N43)=%.2f below validity [%.1f, %.1f].",
+                    log_N43, *_LOG_N43_VALID,
                 )
-        else:
-            logger.debug(
-                "log(N43)=%.2f below validity [%.1f, %.1f]; "
-                "falling back to O32.", log_N43, *_LOG_N43_VALID,
-            )
+
+        if lock_diag == "N43":
+            # Locked to N43 (matching the point estimate) but it was
+            # unavailable or out of range for this draw — do NOT fall back
+            # to O32.  The caller records this draw as NaN so the log(U)
+            # posterior stays a pure-N43 distribution.
+            return None, None
 
     # O32 = [OIII]5007 / [OII]3727 — density-sensitive fallback.
-    oiii = fluxes.get("OIII_5007", 0.0)
-    oii = 0.0
-    if "OII_3726" in fluxes and "OII_3729" in fluxes:
-        oii = fluxes["OII_3726"] + fluxes["OII_3729"]
-    elif "OII_doublet" in fluxes:
-        oii = fluxes["OII_doublet"]
+    if lock_diag in (None, "O32"):
+        oiii = fluxes.get("OIII_5007", 0.0)
+        oii = 0.0
+        if "OII_3726" in fluxes and "OII_3729" in fluxes:
+            oii = fluxes["OII_3726"] + fluxes["OII_3729"]
+        elif "OII_doublet" in fluxes:
+            oii = fluxes["OII_doublet"]
 
-    if oiii > 0 and oii > 0:
-        O32 = oiii / oii
-        # O32 is density-sensitive; Martinez+25 (recommendation 5) evaluate
-        # it with the measured high-ionisation-zone density (ne_high).  It
-        # is only a fallback and is unreliable when ne_high is high/unknown.
-        logU = log_U_from_O32(np.log10(O32), Z_Zsun, ne_high)
-        logger.info("log(U) from O32 = %.2f (O32=%.3f, ne=%.0f cm^-3).",
-                    logU, O32, ne_high)
-        return logU, "O32"
+        if oiii > 0 and oii > 0:
+            O32 = oiii / oii
+            # O32 is density-sensitive; Martinez+25 (recommendation 5)
+            # evaluate it with the measured high-ionisation-zone density
+            # (ne_high).  It is only a fallback and is unreliable when
+            # ne_high is high/unknown.
+            logU = log_U_from_O32(np.log10(O32), Z_Zsun, ne_high)
+            logger.info("log(U) from O32 = %.2f (O32=%.3f, ne=%.0f cm^-3).",
+                        logU, O32, ne_high)
+            return logU, "O32"
 
     return None, None
 
@@ -1386,14 +1406,15 @@ def _run_direct(
             # this draw (it does not count toward n_mc).  O/H, Te and the
             # other ratios do not use logU and are still recorded below.
             # Pass original errors so the same SNR gating applies as
-            # for the point estimate (prevents switching between N43
-            # and O32 across MC iterations).
+            # for the point estimate, and lock the diagnostic to the one
+            # the point estimate selected so every draw uses N43 (or every
+            # draw uses O32) — the posterior is never a silent mixture.
             logU_mc = logU  # default to point estimate
             no_in_bounds = True
             if z_zsun_mc is not None and logU_diag is not None:
                 logU_mc_val, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_high, errors=errors,
-                    snr_logU=snr_logU,
+                    snr_logU=snr_logU, lock_diag=logU_diag,
                 )
                 if (logU_mc_val is not None and np.isfinite(logU_mc_val)
                         and _LOG_U_VALID[0] <= logU_mc_val <= _LOG_U_VALID[1]):
@@ -1911,14 +1932,16 @@ def _run_direct_mcmc(
             # so the Martinez N/O ICF returns NaN (this draw does not count
             # toward n_posterior); O/H, Te and the other ratios do not use
             # logU and are still recorded.
-            # Pass med_errors so the same SNR gating applies as for
-            # the point estimate.
+            # Pass med_errors so the same SNR gating applies as for the
+            # point estimate, and lock the diagnostic to the one the point
+            # estimate selected so every draw stays on N43 (or every draw
+            # on O32) — the log(U) posterior is never a silent mixture.
             logU_i = logU_pt
             no_in_bounds = True
             if z_zsun_i is not None and logU_diag is not None:
                 logU_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_high, errors=med_errors,
-                    snr_logU=snr_logU,
+                    snr_logU=snr_logU, lock_diag=logU_diag,
                 )
                 if (logU_val is not None and np.isfinite(logU_val)
                         and _LOG_U_VALID[0] <= logU_val <= _LOG_U_VALID[1]):

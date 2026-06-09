@@ -1908,3 +1908,75 @@ class TestLyaEscapeInAbundances:
         )
         summary = abund.summary()
         assert "f_esc(Lyα)" in summary
+
+
+class TestLogUDiagnosticLock:
+    """log(U) diagnostic locking for the Monte-Carlo posterior.
+
+    Each MC draw must use the SAME diagnostic (N43 or O32) that the point
+    estimate selected, so the log(U) posterior is never a silent mixture
+    of the two (which would manufacture a bimodal/skewed error bar).
+    """
+
+    Z = 0.2
+    NE = 5.0e4
+    # Tiny errors so both N doublets always pass the SNR gate; only the
+    # N43 ratio (set per draw) governs which branch is taken.
+    ERRS = {k: 1e-4 for k in (
+        "NIV_1483", "NIV_1486", "NIII_1749", "NIII_1752",
+        "OIII_5007", "OII_doublet",
+    )}
+
+    @staticmethod
+    def _fluxes(log_n43: float) -> dict[str, float]:
+        niii, niv = 1.0, 10.0 ** log_n43
+        return {
+            "NIV_1483": niv * 0.4, "NIV_1486": niv * 0.6,
+            "NIII_1749": niii * 0.6, "NIII_1752": niii * 0.4,
+            "OIII_5007": 10.0, "OII_doublet": 2.0,
+        }
+
+    def test_unlocked_can_switch_diagnostic(self):
+        """Without a lock, draws near the N43 validity edge flip N43<->O32."""
+        from jwspecabund._core import _compute_logU
+
+        # These log(N43) values straddle the N43->log(U) validity edge:
+        # the higher ones give an in-range N43 log(U); the lower ones spill
+        # below it and fall back to O32.
+        diags = set()
+        for log_n43 in (-2.55, -2.40, -2.80, -2.90):
+            _, d = _compute_logU(
+                self._fluxes(log_n43), self.Z, self.NE, errors=self.ERRS,
+            )
+            diags.add(d)
+        assert diags == {"N43", "O32"}  # mixture confirmed
+
+    def test_lock_o32_uses_only_o32(self):
+        """lock_diag='O32' skips N43 entirely for every input."""
+        from jwspecabund._core import _compute_logU
+
+        for log_n43 in (-2.55, -2.40, -2.80, -2.90):
+            val, diag = _compute_logU(
+                self._fluxes(log_n43), self.Z, self.NE,
+                errors=self.ERRS, lock_diag="O32",
+            )
+            assert diag == "O32"
+            assert val is not None
+
+    def test_lock_n43_does_not_fall_back_to_o32(self):
+        """lock_diag='N43' returns None (rejected draw) instead of O32."""
+        from jwspecabund._core import _compute_logU
+
+        # In-range N43 -> used.
+        val, diag = _compute_logU(
+            self._fluxes(-2.40), self.Z, self.NE,
+            errors=self.ERRS, lock_diag="N43",
+        )
+        assert diag == "N43" and val is not None
+
+        # Out-of-range N43 -> rejected, NOT switched to O32.
+        val, diag = _compute_logU(
+            self._fluxes(-2.90), self.Z, self.NE,
+            errors=self.ERRS, lock_diag="N43",
+        )
+        assert val is None and diag is None
