@@ -403,6 +403,7 @@ def _compute_multi_ne(
     errors: dict[str, float] | None = None,
     snr_ne: float = 3.0,
     ne_high_max: float = 5e5,
+    niv_density_invalid: bool = False,
 ) -> tuple[float, float | None, float, dict[str, str]]:
     """Compute 3-zone electron densities (Berg+2025 step 1).
 
@@ -487,7 +488,14 @@ def _compute_multi_ne(
 
     # High-ionisation zone: NIV] 1483/1486 (~47 eV).
     ne_high_raw = None
-    if "NIV_1483" in fluxes and "NIV_1486" in fluxes:
+    if niv_density_invalid:
+        # The NIV] doublet ratio is outside the physical range, so it cannot
+        # yield a density — but its summed flux is retained upstream for the
+        # N³⁺/H⁺ abundance.  Skip the density solve and fall back.
+        ne_failures["n_e(NIV])"] = (
+            "NIV] ratio outside physical range; density from fallback zone"
+        )
+    elif "NIV_1483" in fluxes and "NIV_1486" in fluxes:
         if _doublet_snr_ok("NIV_1483", "NIV_1486", fluxes, errors, snr_ne, combined=True):
             try:
                 ne_high_raw = compute_ne_NIV(fluxes["NIV_1483"], fluxes["NIV_1486"])
@@ -1229,6 +1237,7 @@ def _run_direct(
     # --- Step 1: Multi-phase electron density ---
     ne_low, ne_mid, ne_high, ne_failures = _compute_multi_ne(
         fluxes, errors=errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
+        niv_density_invalid=niv_rejected,
     )
     # Apply user overrides (bypass diagnostic computation).
     if ne_low_override is not None:
@@ -1800,6 +1809,7 @@ def _run_direct_mcmc(
         med_fluxes = _dust_correct_sample(dict(med_fluxes), Av, dust_law, _dk)
     ne_low, ne_mid, ne_high, ne_failures = _compute_multi_ne(
         med_fluxes, errors=med_errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
+        niv_density_invalid=niv_rejected,
     )
     # Apply user overrides (bypass diagnostic computation).
     if ne_low_override is not None:
@@ -2599,17 +2609,18 @@ def compute_abundances(
         niv_ratio = _niv1483 / _niv1486
         if niv_ratio > 1.7:
             logger.warning(
-                "NIV] ratio F(1483)/F(1486) = %.2f > 1.7 — exceeds "
-                "physical low-density limit (~1.5); excluding NIV] doublet.",
+                "NIV] ratio F(1483)/F(1486) = %.2f > 1.7 — exceeds physical "
+                "low-density limit (~1.5); rejecting NIV] as a density "
+                "diagnostic but KEEPING the summed flux for N³⁺/H⁺ "
+                "(evaluated at the fallback intermediate/low density, to "
+                "which N³⁺/H⁺ is only weakly sensitive).",
                 niv_ratio,
             )
-            fluxes.pop("NIV_1483", None)
-            fluxes.pop("NIV_1486", None)
-            errors.pop("NIV_1483", None)
-            errors.pop("NIV_1486", None)
-            posteriors.pop("NIV_1483", None)
-            posteriors.pop("NIV_1486", None)
-            excluded_lines.extend(["NIV_1483", "NIV_1486"])
+            # Only the *ratio* (density) is unphysical — usually noise in the
+            # individual members.  The summed flux F(1483)+F(1486) is still a
+            # valid measurement of the N³⁺ emission, so we keep both lines and
+            # let the N³⁺/H⁺ abundance be computed with a fallback density
+            # rather than throwing the ion (and ICF 5) away entirely.
             _niv_rejected = True
         else:
             logger.info(

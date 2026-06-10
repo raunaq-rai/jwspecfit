@@ -1096,6 +1096,30 @@ class TestNeSNRGating:
         assert ne_mid is None
         assert ne_high == NE_DEFAULT
 
+    def test_niv_density_invalid_skips_solve_and_falls_back(self):
+        """An unphysical NIV] ratio must not be used for the density.
+
+        When ``niv_density_invalid`` is set, ``_compute_multi_ne`` must skip
+        the NIV] density solve entirely (so the bad ratio cannot corrupt
+        ne_high) and record the reason — while the caller keeps the summed
+        NIV] flux for the N³⁺/H⁺ abundance.
+        """
+        from jwspecabund._core import _compute_multi_ne
+
+        # NIV] present with an unphysical ratio (F1483/F1486 = 2.0 > 1.5),
+        # no other high-zone doublet → ne_high should fall back, NOT solve.
+        fluxes = {"NIV_1483": 2.0e-17, "NIV_1486": 1.0e-17}
+        errors = {"NIV_1483": 1.0e-19, "NIV_1486": 1.0e-19}  # very high SNR
+
+        _, _, ne_high, failures = _compute_multi_ne(
+            fluxes, errors=errors, snr_ne=3.0, niv_density_invalid=True,
+        )
+        # The failure must be attributed to the ratio, not a PyNEB solve, and
+        # ne_high must be a finite fallback (not a value solved from 2.0).
+        assert "NIV]" in failures.get("n_e(NIV])", "")
+        assert "outside physical range" in failures["n_e(NIV])"]
+        assert np.isfinite(ne_high)
+
     @pytest.mark.skipif(
         not pytest.importorskip("pyneb", reason="PyNEB required"),
         reason="PyNEB not available",
