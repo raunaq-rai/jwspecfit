@@ -592,34 +592,35 @@ class TestComputeAbundances:
         not pytest.importorskip("pyneb", reason="PyNEB required"),
         reason="PyNEB not available",
     )
-    def test_marginalize_logU_false_holds_logU_fixed(self):
-        """marginalize_logU=False uses the median-flux point estimate.
+    def test_marginalize_logU_false_keeps_logU_error(self):
+        """marginalize_logU=False fixes logU in the ICFs but keeps its error.
 
-        The log(U) posterior must collapse to a single value (zero error)
-        rather than being resampled per draw — the analogue of a fixed
-        A_V applied to every draw.
+        Like a fixed A_V, the median-flux point-estimate log(U) is fed to
+        every draw's ICFs (so logU scatter does not inflate N/O), but log(U)
+        is still resampled for reporting — its error must NOT be zeroed.
         """
         from jwspecabund import compute_abundances
 
         result = self._make_mock_fit_result({
-            "OIII_4363": (0.5, 0.02),
-            "OIII_4959": (3.0, 0.05),
-            "OIII_5007": (9.0, 0.10),
-            "HBETA": (1.0, 0.02),
+            "OIII_4363": (0.5, 0.03),
+            "OIII_4959": (3.0, 0.10),
+            "OIII_5007": (9.0, 0.50),
+            "HBETA": (1.0, 0.03),
             "Ha": (2.86, 0.05),
-            "OII_doublet": (2.0, 0.05),
+            "OII_doublet": (2.0, 0.20),
         })
         common = dict(z=2.0, method="direct", dust_correct=False,
-                      n_mc=40, progress=False)
+                      n_mc=80, progress=False)
 
         a_fixed = compute_abundances(result, marginalize_logU=False, **common)
         a_marg = compute_abundances(result, marginalize_logU=True, **common)
 
         assert a_fixed.logU is not None and np.isfinite(a_fixed.logU)
-        # Fixed: zero propagated log(U) uncertainty (scalar 0.0 on the
-        # bootstrap path, (0.0, 0.0) on the posterior path).
-        assert np.all(np.asarray(a_fixed.logU_err, dtype=float) == 0.0)
-        # Both should agree on the central value to within the noise.
+        # Error is preserved (not forced to zero) — logU reporting is
+        # decoupled from whether it propagates into the ICFs.
+        err_fixed = np.asarray(a_fixed.logU_err, dtype=float)
+        assert np.any(err_fixed > 0.0)
+        # Central value agrees between the two modes (same reporting posterior).
         assert abs(a_fixed.logU - a_marg.logU) < 0.5
 
     @pytest.mark.skipif(

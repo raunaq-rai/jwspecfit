@@ -1419,32 +1419,39 @@ def _run_direct(
             # for the point estimate, and lock the diagnostic to the one
             # the point estimate selected so every draw uses N43 (or every
             # draw uses O32) — the posterior is never a silent mixture.
-            logU_mc = logU  # default to point estimate
+            # Resample log(U) for this draw so the reported logU posterior
+            # carries its measurement uncertainty.  marginalize_logU sets
+            # whether that scatter propagates into the ICF-based ratios: when
+            # False the ICFs use the fixed point-estimate logU (the analogue
+            # of a fixed A_V applied to every draw), so logU does not inflate
+            # N/O — but logU still gets a reported error bar.
+            logU_sample = logU
             no_in_bounds = True
-            if marginalize_logU and z_zsun_mc is not None and logU_diag is not None:
+            if z_zsun_mc is not None and logU_diag is not None:
                 logU_mc_val, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_high, errors=errors,
                     snr_logU=snr_logU, lock_diag=logU_diag,
                 )
                 if (logU_mc_val is not None and np.isfinite(logU_mc_val)
                         and _LOG_U_VALID[0] <= logU_mc_val <= _LOG_U_VALID[1]):
-                    logU_mc = float(logU_mc_val)
-                else:
-                    # Out-of-range: reject N/O for this draw only (logU=NaN
-                    # -> Martinez ICF returns NaN N/O); O/H etc. still kept.
-                    logU_mc = np.nan
+                    logU_sample = float(logU_mc_val)
+                elif marginalize_logU:
+                    # logU drives the ICF when marginalising: reject N/O for
+                    # this out-of-range draw (O/H etc. still kept).
+                    logU_sample = np.nan
                     no_in_bounds = False
+            logU_icf = logU_sample if marginalize_logU else logU
 
             Te_high_mc.append(Te_h)
             Te_low_mc.append(Te_l)
-            logU_mc_arr.append(logU_mc if logU_mc is not None else np.nan)
+            logU_mc_arr.append(logU_sample if logU_sample is not None else np.nan)
 
             # Gate nitrogen ions using the *original* errors so the
             # same ions are included/excluded as in the point estimate.
             _gate_nitrogen_ions(ionic_mc, mc_fluxes, errors, snr_NO=snr_NO)
 
             totals_mc = compute_total_abundances(
-                ionic_mc, logU=logU_mc, Z_Zsun=z_zsun_mc, ne=ne_high,
+                ionic_mc, logU=logU_icf, Z_Zsun=z_zsun_mc, ne=ne_high,
                 icf_method=icf_method,
                 _lock_NO_icf=NO_icf_name,
             )
@@ -1948,30 +1955,37 @@ def _run_direct_mcmc(
             # point estimate, and lock the diagnostic to the one the point
             # estimate selected so every draw stays on N43 (or every draw
             # on O32) — the log(U) posterior is never a silent mixture.
-            logU_i = logU_pt
+            # Resample log(U) so the reported logU posterior carries its
+            # measurement uncertainty.  marginalize_logU controls whether
+            # that scatter propagates into the ICF ratios: when False the
+            # ICFs use the fixed point-estimate logU (the analogue of a fixed
+            # A_V applied to every draw), so logU does not inflate N/O — but
+            # logU still gets a reported error bar.
+            logU_sample = logU_pt
             no_in_bounds = True
-            if marginalize_logU and z_zsun_i is not None and logU_diag is not None:
+            if z_zsun_i is not None and logU_diag is not None:
                 logU_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_high, errors=med_errors,
                     snr_logU=snr_logU, lock_diag=logU_diag,
                 )
                 if (logU_val is not None and np.isfinite(logU_val)
                         and _LOG_U_VALID[0] <= logU_val <= _LOG_U_VALID[1]):
-                    logU_i = float(logU_val)
-                else:
-                    logU_i = np.nan
+                    logU_sample = float(logU_val)
+                elif marginalize_logU:
+                    logU_sample = np.nan
                     no_in_bounds = False
+            logU_icf = logU_sample if marginalize_logU else logU_pt
 
             Te_high_post.append(Te_h)
             Te_low_post.append(Te_l)
-            logU_post.append(logU_i if logU_i is not None else np.nan)
+            logU_post.append(logU_sample if logU_sample is not None else np.nan)
 
             # Gate nitrogen ions using median errors (same ions as
             # point estimate to prevent tier-switching across samples).
             _gate_nitrogen_ions(ionic_i, sample, med_errors, snr_NO=snr_NO)
 
             totals_i = compute_total_abundances(
-                ionic_i, logU=logU_i, Z_Zsun=z_zsun_i, ne=ne_high,
+                ionic_i, logU=logU_icf, Z_Zsun=z_zsun_i, ne=ne_high,
                 icf_method=icf_method,
                 _lock_NO_icf=NO_icf_name,
             )
@@ -2430,13 +2444,17 @@ def compute_abundances(
         flux is divided by the quadrature-summed error; if this is
         below the threshold, N43 is skipped and O32 is used instead.
     marginalize_logU : bool
-        Whether to resample log(U) in every Monte Carlo / posterior draw
-        (default ``True``).  When ``False``, log(U) is held fixed at the
-        point estimate derived from the median fluxes and that single
-        value is used in every draw — the analogue of keeping ``A_V``
-        fixed at its central value.  The reported ``logU_err`` is then
-        ``(0, 0)`` and the log(U) uncertainty is not propagated into the
-        N/O (and other ICF-based) error budget.
+        Whether to **marginalise over** log(U) — i.e. let it vary per draw
+        and propagate its uncertainty into the ICF-based ratios (default
+        ``True``).  Note ``True`` means log(U) *varies* (it is integrated
+        out), **not** that it is held constant.  When ``True`` the per-draw
+        log(U) feeds each draw's ICFs, so its scatter inflates N/O (and the
+        other ICF ratios).  When ``False`` the ICFs instead use the fixed
+        point-estimate log(U) from the median fluxes — the analogue of
+        applying a fixed ``A_V`` to every draw — so log(U) scatter does not
+        inflate N/O.  In **both** cases log(U) is still resampled for
+        reporting, so ``logU`` and ``logU_err`` always carry the
+        measurement uncertainty (it is not forced to zero when fixed).
     n_mc : int
         Monte Carlo iterations for error propagation (default 1000).
     Te_relation : str
