@@ -1178,6 +1178,7 @@ def _run_direct(
     ne_high_max: float = 5e5,
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
+    marginalize_logU: bool = True,
     icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
@@ -1420,7 +1421,7 @@ def _run_direct(
             # draw uses O32) — the posterior is never a silent mixture.
             logU_mc = logU  # default to point estimate
             no_in_bounds = True
-            if z_zsun_mc is not None and logU_diag is not None:
+            if marginalize_logU and z_zsun_mc is not None and logU_diag is not None:
                 logU_mc_val, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_high, errors=errors,
                     snr_logU=snr_logU, lock_diag=logU_diag,
@@ -1698,6 +1699,7 @@ def _run_direct_mcmc(
     ne_high_max: float = 5e5,
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
+    marginalize_logU: bool = True,
     icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
@@ -1948,7 +1950,7 @@ def _run_direct_mcmc(
             # on O32) — the log(U) posterior is never a silent mixture.
             logU_i = logU_pt
             no_in_bounds = True
-            if z_zsun_i is not None and logU_diag is not None:
+            if marginalize_logU and z_zsun_i is not None and logU_diag is not None:
                 logU_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_high, errors=med_errors,
                     snr_logU=snr_logU, lock_diag=logU_diag,
@@ -2306,6 +2308,7 @@ def compute_abundances(
     ne_high_max: float = 5e5,
     snr_ne: float = 3.0,
     snr_logU: float = 1.5,
+    marginalize_logU: bool = True,
     n_mc: int = 1000,
     Te_relation: str = "desi",
     Rv: float = 3.15,
@@ -2426,6 +2429,14 @@ def compute_abundances(
         computing log(U) from N43 (default 1.5).  The summed doublet
         flux is divided by the quadrature-summed error; if this is
         below the threshold, N43 is skipped and O32 is used instead.
+    marginalize_logU : bool
+        Whether to resample log(U) in every Monte Carlo / posterior draw
+        (default ``True``).  When ``False``, log(U) is held fixed at the
+        point estimate derived from the median fluxes and that single
+        value is used in every draw — the analogue of keeping ``A_V``
+        fixed at its central value.  The reported ``logU_err`` is then
+        ``(0, 0)`` and the log(U) uncertainty is not propagated into the
+        N/O (and other ICF-based) error budget.
     n_mc : int
         Monte Carlo iterations for error propagation (default 1000).
     Te_relation : str
@@ -2712,7 +2723,7 @@ def compute_abundances(
             direct_out = _run_direct_mcmc(
                 posteriors, Te_relation, n_posterior=n_posterior,
                 progress=progress, ne_high_max=ne_high_max,
-                snr_ne=snr_ne, snr_logU=snr_logU,
+                snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                 icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                 continuum_rms_limits=continuum_rms_limits,
                 niv_rejected=_niv_rejected,
@@ -2727,7 +2738,7 @@ def compute_abundances(
             direct_out = _run_direct(
                 fluxes, errors, Te_relation, n_mc,
                 progress=progress, ne_high_max=ne_high_max,
-                snr_ne=snr_ne, snr_logU=snr_logU,
+                snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                 icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                 continuum_rms_limits=continuum_rms_limits,
                 niv_rejected=_niv_rejected,
@@ -2829,7 +2840,7 @@ def compute_abundances(
                         d1666_out = _run_direct_mcmc(
                             post_1666, Te_relation, n_posterior=n_posterior,
                             progress=progress, ne_high_max=ne_high_max,
-                            snr_ne=snr_ne, snr_logU=snr_logU,
+                            snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                             icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
@@ -2844,7 +2855,7 @@ def compute_abundances(
                         d1666_out = _run_direct(
                             fluxes_1666, errors_1666, Te_relation, n_mc,
                             progress=progress, ne_high_max=ne_high_max,
-                            snr_ne=snr_ne, snr_logU=snr_logU,
+                            snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                             icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
@@ -2913,7 +2924,7 @@ def compute_abundances(
                         d_out = _run_direct_mcmc(
                             posteriors, Te_relation, n_posterior=n_posterior,
                             progress=progress, ne_high_max=ne_high_max,
-                            snr_ne=snr_ne, snr_logU=snr_logU,
+                            snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                             icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
@@ -2927,7 +2938,7 @@ def compute_abundances(
                         d_out = _run_direct(
                             fluxes, errors, Te_relation, n_mc,
                             progress=progress, ne_high_max=ne_high_max,
-                            snr_ne=snr_ne, snr_logU=snr_logU,
+                            snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                             icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,

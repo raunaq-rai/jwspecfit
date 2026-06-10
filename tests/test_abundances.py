@@ -592,6 +592,40 @@ class TestComputeAbundances:
         not pytest.importorskip("pyneb", reason="PyNEB required"),
         reason="PyNEB not available",
     )
+    def test_marginalize_logU_false_holds_logU_fixed(self):
+        """marginalize_logU=False uses the median-flux point estimate.
+
+        The log(U) posterior must collapse to a single value (zero error)
+        rather than being resampled per draw — the analogue of a fixed
+        A_V applied to every draw.
+        """
+        from jwspecabund import compute_abundances
+
+        result = self._make_mock_fit_result({
+            "OIII_4363": (0.5, 0.02),
+            "OIII_4959": (3.0, 0.05),
+            "OIII_5007": (9.0, 0.10),
+            "HBETA": (1.0, 0.02),
+            "Ha": (2.86, 0.05),
+            "OII_doublet": (2.0, 0.05),
+        })
+        common = dict(z=2.0, method="direct", dust_correct=False,
+                      n_mc=40, progress=False)
+
+        a_fixed = compute_abundances(result, marginalize_logU=False, **common)
+        a_marg = compute_abundances(result, marginalize_logU=True, **common)
+
+        assert a_fixed.logU is not None and np.isfinite(a_fixed.logU)
+        # Fixed: zero propagated log(U) uncertainty (scalar 0.0 on the
+        # bootstrap path, (0.0, 0.0) on the posterior path).
+        assert np.all(np.asarray(a_fixed.logU_err, dtype=float) == 0.0)
+        # Both should agree on the central value to within the noise.
+        assert abs(a_fixed.logU - a_marg.logU) < 0.5
+
+    @pytest.mark.skipif(
+        not pytest.importorskip("pyneb", reason="PyNEB required"),
+        reason="PyNEB not available",
+    )
     def test_auto_selects_direct_with_4363(self):
         """Auto method should use direct when 4363 has high SNR."""
         from jwspecabund import compute_abundances
