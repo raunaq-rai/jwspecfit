@@ -429,10 +429,16 @@ def _compute_multi_ne(
         ``(ne_low, ne_mid, ne_high, ne_failures)`` in cm^-3.
 
         - ``ne_low``: from [SII] 6718/6732 or [OII] 3726/3729 (~14 eV).
+          Used for O⁺, N⁺, S⁺, C⁺ (low-ionisation zone).
         - ``ne_mid``: from CIII] 1907/1909 (~24 eV); ``None`` if
-          unavailable.  Used for C²⁺, N²⁺, S²⁺, Ar²⁺.
+          unavailable.  Used for O²⁺, Ne²⁺, C²⁺, N²⁺, S²⁺, Ar²⁺.
+          O²⁺ and Ne²⁺ are assigned this intermediate-zone density
+          rather than ``ne_high``: [OIII] 5007/Hβ and [NeIII] 3869/Hβ
+          are density-insensitive below ~10⁴–10⁵ cm⁻³, and CIII]
+          overlaps the O²⁺ zone, so this decouples them from the
+          noisy high-ionisation NIV] density.
         - ``ne_high``: from NIV] 1483/1486 (~47 eV); falls back to
-          ``ne_mid`` then ``ne_low``.  Used for O²⁺, Ne²⁺, N³⁺, C³⁺.
+          ``ne_mid`` then ``ne_low``.  Used for N³⁺, N⁴⁺, C³⁺.
         - ``ne_failures``: dict of density solve failure reasons,
           e.g. ``{"n_e(SII)": "PyNEB solve failed (ratio out of range)"}``.
     """

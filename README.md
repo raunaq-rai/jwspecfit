@@ -68,6 +68,48 @@ abund  = jwspecabund.compute_abundances(result, z=6.0)
 print(abund.summary())
 ```
 
+## Line fitting
+
+Emission lines are fit with a forward model evaluated directly against the
+observed spectrum. Each line is a **resolution-aware Gaussian**, bin-averaged
+over the pixel edges via the error function so that the profile is correct for
+the prism, the gratings, and stacked spectra alike. The lines are summed on top
+of the fitted continuum, and physically-related transitions are tied: doublets
+share kinematics (and, where appropriate, a fixed or bounded flux ratio), and
+the Balmer series can be tied to [O III]. The likelihood is the same weighted
+chi-squared used throughout `jwspecfit`, so the MCMC and the least-squares
+fitter treat the data identically.
+
+The **recommended sampler is NumPyro NUTS** (the No-U-Turn Sampler, a
+self-tuning variant of Hamiltonian Monte Carlo):
+
+```python
+import jwspecmcmc
+
+result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="nuts")
+```
+
+- **JAX-accelerated, gradient-based.** The likelihood is JIT-compiled in JAX
+  and differentiated automatically, so NUTS uses the gradient to propose
+  distant, high-acceptance moves. This explores the high-dimensional parameter
+  space (one amplitude, centroid, and width per line) far more efficiently than
+  random-walk samplers, giving a high effective sample size per step.
+- **Self-tuning.** During warmup NUTS adapts its step size to a target
+  acceptance probability (`target_accept_prob = 0.8`) and the trajectory length
+  to a maximum tree depth (`max_tree_depth = 10`); the No-U-Turn criterion stops
+  each trajectory automatically, with no hand-tuned proposal scale.
+- **Defaults.** 500 warmup (adaptation) steps and 2000 posterior samples per
+  chain, one chain by default. Sampling is initialised at a validated
+  finite-likelihood seed so every transition starts in-bounds.
+- **Output.** Full posterior chains for every parameter, plus a posterior
+  distribution of the **integrated flux of each line**. These per-line flux
+  posteriors are what downstream abundance routines resample to propagate
+  measurement uncertainties through the (non-linear) abundance calculation.
+
+Two other backends are available for cross-checks (`sampler="emcee"`, an affine-
+invariant ensemble sampler, and `sampler="nautilus"`, an importance-nested
+sampler), but NUTS is the default and recommended choice.
+
 ## Documentation
 
 Usage guides, API reference, and methodology:
