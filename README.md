@@ -70,18 +70,8 @@ print(abund.summary())
 
 ## Line fitting
 
-Emission lines are fit with a forward model evaluated directly against the
-observed spectrum. Each line is a **resolution-aware Gaussian**, bin-averaged
-over the pixel edges via the error function so that the profile is correct for
-the prism, the gratings, and stacked spectra alike. The lines are summed on top
-of the fitted continuum, and physically-related transitions are tied: doublets
-share kinematics (and, where appropriate, a fixed or bounded flux ratio), and
-the Balmer series can be tied to [O III]. The likelihood is the same weighted
-chi-squared used throughout `jwspecfit`, so the MCMC and the least-squares
-fitter treat the data identically.
-
-The **recommended sampler is NumPyro NUTS** (the No-U-Turn Sampler, a
-self-tuning variant of Hamiltonian Monte Carlo):
+The recommended fitter is the Bayesian `jwspecmcmc` engine sampled with NumPyro
+NUTS:
 
 ```python
 import jwspecmcmc
@@ -89,25 +79,55 @@ import jwspecmcmc
 result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="nuts")
 ```
 
-- **JAX-accelerated, gradient-based.** The likelihood is JIT-compiled in JAX
-  and differentiated automatically, so NUTS uses the gradient to propose
-  distant, high-acceptance moves. This explores the high-dimensional parameter
-  space (one amplitude, centroid, and width per line) far more efficiently than
-  random-walk samplers, giving a high effective sample size per step.
-- **Self-tuning.** During warmup NUTS adapts its step size to a target
-  acceptance probability (`target_accept_prob = 0.8`) and the trajectory length
-  to a maximum tree depth (`max_tree_depth = 10`); the No-U-Turn criterion stops
-  each trajectory automatically, with no hand-tuned proposal scale.
-- **Defaults.** 500 warmup (adaptation) steps and 2000 posterior samples per
-  chain, one chain by default. Sampling is initialised at a validated
-  finite-likelihood seed so every transition starts in-bounds.
-- **Output.** Full posterior chains for every parameter, plus a posterior
-  distribution of the **integrated flux of each line**. These per-line flux
-  posteriors are what downstream abundance routines resample to propagate
-  measurement uncertainties through the (non-linear) abundance calculation.
+### Model and parameters
 
-Two other backends are available for cross-checks (`sampler="emcee"`, an affine-
-invariant ensemble sampler, and `sampler="nautilus"`, an importance-nested
+The continuum is first estimated with a low-order polynomial fitted to the
+spectrum after masking the regions around known emission lines and iteratively
+rejecting positive outliers, and is then subtracted. Each emission line is
+modelled as a resolution-aware Gaussian, integrated over the wavelength range
+spanned by each spectral pixel (via the error function) so that the model is
+compared to the data on the same footing for the prism, the gratings, and
+stacked spectra alike. The line model is the sum of these Gaussians on top of
+the fitted continuum.
+
+For every line three parameters are fit: an amplitude (the integrated line
+flux), a central wavelength, and a Gaussian width. Physically related
+transitions are tied to reduce the dimensionality and to respect atomic physics:
+the Balmer series can share a common velocity and width with the bright
+rest-optical lines (e.g. [O III] λ5007), doublets share kinematics, and
+unresolved doublets are held at fixed or bounded flux ratios. Centroids and
+widths are bounded to physically motivated ranges set by the instrumental
+resolution and a maximum velocity offset from the systemic redshift.
+
+### Sampling and inference
+
+Inference is fully Bayesian: full posteriors are obtained via Markov Chain Monte
+Carlo using a Gaussian likelihood (identical to the weighted chi-squared used by
+the least-squares engine, so both fitters treat the data identically) with
+uniform priors over the parameter bounds. Sampling uses the No-U-Turn Sampler
+(NUTS), a self-tuning variant of Hamiltonian Monte Carlo. The likelihood is
+JIT-compiled in JAX and differentiated automatically, so the sampler uses the
+gradient to propose distant, high-acceptance moves and explores the
+high-dimensional parameter space far more efficiently than random-walk methods.
+
+During warmup the step size is adapted to a target acceptance probability
+(`target_accept_prob = 0.8`) and the trajectory length is bounded by a maximum
+tree depth (`max_tree_depth = 10`), with the No-U-Turn criterion terminating
+each trajectory automatically; there is no hand-tuned proposal scale. By default
+the chain is run for 500 warmup (adaptation) steps followed by 2000 posterior
+samples, initialised at a validated finite-likelihood seed (a least-squares
+pre-fit) so that every transition starts in bounds.
+
+Uncertainties on the line fluxes are taken as the 16th–84th percentiles of the
+posterior, and all quantities are reported as posterior medians with the
+corresponding credible intervals. The fit yields full posterior chains for every
+parameter, including a posterior distribution of the integrated flux of each
+line; these per-line flux posteriors are resampled by the downstream abundance
+routines to propagate measurement uncertainties through the (non-linear)
+abundance calculation.
+
+Two other backends are available for cross-checks (`sampler="emcee"`, an
+affine-invariant ensemble sampler, and `sampler="nautilus"`, an importance-nested
 sampler), but NUTS is the default and recommended choice.
 
 ## Documentation
