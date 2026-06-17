@@ -135,6 +135,65 @@ line; these per-line flux posteriors are resampled by the downstream abundance
 routines to propagate measurement uncertainties through the (non-linear)
 abundance calculation.
 
+### Convergence and inspecting the chains
+
+Convergence is assessed with the Gelman–Rubin statistic ($\hat{R}$) and the
+effective sample size (ESS), computed for every free parameter. These are
+attached to the result in the `convergence` dictionary:
+
+```python
+conv = result.convergence
+conv["converged"]   # bool: True if R-hat < 1.05 and ESS > 100 for all params
+conv["r_hat_max"]   # worst (largest) R-hat across parameters
+conv["ess_min"]     # smallest effective sample size
+conv["r_hat"]       # per-parameter R-hat array
+conv["ess"]         # per-parameter ESS array
+```
+
+The Gelman–Rubin statistic compares the within-chain and between-chain variance,
+so it is only meaningful with **two or more chains**. Run multiple chains (and
+set `numpyro.set_host_device_count` to at least that many cores, as above) to get
+a usable $\hat{R}$:
+
+```python
+import numpyro
+numpyro.set_host_device_count(4)
+
+result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="nuts", n_chains=4)
+print(result.convergence["r_hat_max"], result.convergence["ess_min"])
+```
+
+The chains themselves can be inspected directly. The raw, per-chain samples are
+available as `result.chains` with shape `(n_chains, n_steps, n_free)` — ideal for
+trace plots to check that the chains are well-mixed and stationary:
+
+```python
+import matplotlib.pyplot as plt
+
+chains = result.chains                       # (n_chains, n_steps, n_free)
+fig, ax = plt.subplots()
+for c in range(chains.shape[0]):
+    ax.plot(chains[c, :, 0], alpha=0.6)      # trace of the first free parameter
+ax.set_xlabel("step"); ax.set_ylabel("parameter 0")
+```
+
+The flattened posterior across all chains is `result.flat_chains`, of shape
+`(n_samples, 3 * n_lines)`, ordered as all amplitudes, then all central
+wavelengths, then all widths, following `result.line_names`. So for line `i`:
+
+```python
+nL = len(result.line_names)
+amp  = result.flat_chains[:, i]            # amplitude (= integrated flux)
+cen  = result.flat_chains[:, nL + i]       # central wavelength
+wid  = result.flat_chains[:, 2 * nL + i]   # width
+```
+
+For convenience, each line also carries its full flux posterior directly:
+
+```python
+result.lines["OIII_5007"].flux_posterior   # 1-D array of flux samples
+```
+
 Two other backends are available for cross-checks (`sampler="emcee"`, an
 affine-invariant ensemble sampler, and `sampler="nautilus"`, an importance-nested
 sampler), but NUTS is the default and recommended choice.
