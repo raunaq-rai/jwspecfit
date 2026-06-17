@@ -198,6 +198,67 @@ Two other backends are available for cross-checks (`sampler="emcee"`, an
 affine-invariant ensemble sampler, and `sampler="nautilus"`, an importance-nested
 sampler), but NUTS is the default and recommended choice.
 
+## Abundances
+
+`jwspecabund` turns a set of fitted line fluxes into gas-phase chemical
+abundances. Fluxes are dust-corrected from the Balmer decrement before any
+abundance is computed, and measurement uncertainties are propagated by resampling
+the line-flux posteriors.
+
+```python
+import jwspecabund
+
+abund = jwspecabund.compute_abundances(result, z=6.0)
+print(abund.summary())
+```
+
+### Direct (T_e-based) metallicity
+
+The direct method measures the gas-phase oxygen abundance from the electron
+temperature, with all atomic physics handled by **PyNEB**. The temperature is set
+by an auroral-to-nebular line ratio — primarily [O III] λ4363/(λ4959+λ5007), or
+the UV intercombination line O III] λ1666 relative to λ5007 when λ4363 is
+unavailable — giving the temperature of the high-ionisation (O²⁺) zone. The
+low-ionisation (O⁺) temperature is obtained either from [N II] λ5755/λ6585 or
+from a temperature–temperature relation. The electron density comes from a
+density-sensitive doublet appropriate to the zone ([S II] λ6716/λ6731 or
+[O II] λ3726/λ3729 at low ionisation, with C III] λ1907/λ1909 and N IV]
+λ1483/λ1486 available for higher-ionisation zones).
+
+The ionic abundances are then computed at the relevant temperature and density:
+O⁺/H⁺ from the [O II] λ3726,3729 doublet and O²⁺/H⁺ from [O III] λ5007, each
+relative to a hydrogen Balmer line. The total oxygen abundance is the direct sum
+
+```
+O/H = O⁺/H⁺ + O²⁺/H⁺
+```
+
+so no ionisation-correction factor is required for the dominant ionisation
+stages.
+
+### Strong-line metallicity
+
+When the auroral lines are too faint for a direct temperature, metallicity is
+estimated from bright strong-line ratios using the **Sanders et al. (2025)**
+calibrations. The implemented diagnostics are **O3** ([O III] λ5007/Hβ),
+**O2** ([O II]/Hβ), **R23** (([O III] λ5007 + [O II])/Hβ), and **O32**
+([O III] λ5007/[O II]). Available diagnostics are solved simultaneously against
+the calibration, with Monte Carlo error propagation.
+
+### C/O and N/O
+
+Carbon and nitrogen abundance ratios are built from whichever ionic stages are
+detected:
+
+- **C/O** uses carbon from C II] λ2326, C III] λ1907,1909, and C IV λ1548,1551,
+  with oxygen from [O II] λ3726,3729 and [O III] λ5007.
+- **N/O** uses nitrogen from [N II] λ6585, N III] λ1750, N IV] λ1486, and
+  N V λ1240, again with oxygen from [O II] λ3726,3729 and [O III] λ5007.
+
+The code automatically uses the ions present in the fit, so UV-only spectra
+(C III], C IV, N III], N IV]) and rest-optical spectra ([N II], [O II], [O III])
+are both supported.
+
 ## Documentation
 
 Usage guides, API reference, and methodology:
