@@ -74,10 +74,19 @@ The recommended fitter is the Bayesian `jwspecmcmc` engine sampled with NumPyro
 NUTS:
 
 ```python
+import numpyro
+numpyro.set_host_device_count(6)  # required: run this before sampling
+
 import jwspecmcmc
 
 result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="nuts")
 ```
+
+> **Important:** call `numpyro.set_host_device_count(6)` (matching the number of
+> CPU cores you want to use) **before** any sampling. NumPyro otherwise sees a
+> single host device, which forces multiple chains to run sequentially and can
+> prevent NUTS from working properly. Set it once, at the top of your script or
+> notebook, before importing/calling the fitter.
 
 ### Model and parameters
 
