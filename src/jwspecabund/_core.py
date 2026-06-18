@@ -398,14 +398,75 @@ def _doublet_snr_ok(
     return True
 
 
+def _compute_ne_arIV(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    snr_ne: float,
+    te_high: float,
+    ne_failures: dict[str, str],
+) -> float | None:
+    """Solve the high-ionisation density from [Ar IV] 4711/4740.
+
+    Deblends the He I 4714 line out of the fitted ``ArIV_4713`` feature
+    using the He I λ4472 anchor and a PyNEB He I emissivity ratio
+    (Berg's method).  Requires the He I anchor to be present so the
+    contamination can be quantified; otherwise the [Ar IV] density is
+    skipped (``None``) and the caller falls back to CIII].
+
+    Returns the [Ar IV] density in cm^-3, or ``None`` if unavailable.
+    """
+    from .direct import compute_ne_ArIV, heI_4714_over_4472
+
+    if "ArIV_4713" not in fluxes or "ArIV_4741" not in fluxes:
+        return None
+    if not _doublet_snr_ok("ArIV_4713", "ArIV_4741", fluxes, errors, snr_ne, combined=True):
+        logger.warning(
+            "n_e(Ar IV) doublet below SNR threshold (%.1f); skipping.", snr_ne,
+        )
+        return None
+
+    f_hei = fluxes.get("HEI_4472", 0.0)
+    if f_hei <= 0:
+        # Cannot quantify the He I 4714 contamination without the anchor.
+        ne_failures["n_e(Ar IV)"] = (
+            "He I 4472 anchor absent; cannot deblend [Ar IV] 4711 — using CIII]"
+        )
+        return None
+
+    try:
+        # He I 4714/4472 ratio is a recombination ratio, only weakly
+        # density-dependent; evaluate at a fiducial n_e = 1e4 cm^-3.
+        ratio = heI_4714_over_4472(te_high, 1e4)
+        f4711 = fluxes["ArIV_4713"] - ratio * f_hei
+        if f4711 <= 0:
+            ne_failures["n_e(Ar IV)"] = (
+                "deblended [Ar IV] 4711 <= 0 (He I-dominated); using CIII]"
+            )
+            return None
+        ne_arIV = compute_ne_ArIV(f4711, fluxes["ArIV_4741"], Te_guess=te_high)
+        logger.info(
+            "n_e(O++ zone) from [Ar IV] = %.0f cm^-3 "
+            "(He I 4714/4472 deblend ratio = %.3f).", ne_arIV, ratio,
+        )
+        return ne_arIV
+    except Exception as exc:
+        logger.warning("n_e(Ar IV) failed; using CIII] fallback.")
+        ne_failures["n_e(Ar IV)"] = f"PyNEB solve failed: {exc}"
+        return None
+
+
 def _compute_multi_ne(
     fluxes: dict[str, float],
     errors: dict[str, float] | None = None,
     snr_ne: float = 3.0,
     ne_high_max: float = 5e5,
     niv_density_invalid: bool = False,
-) -> tuple[float, float | None, float, dict[str, str]]:
-    """Compute 3-zone electron densities (Berg+2025 step 1).
+    z: float = 0.0,
+    te_low: float = 1.5e4,
+    te_int: float = 1.5e4,
+    te_high: float = 1.5e4,
+) -> tuple[float, float | None, float, float, dict[str, str]]:
+    """Compute multi-zone electron densities (Martinez+2025 / Berg+2025).
 
     Parameters
     ----------
@@ -415,34 +476,42 @@ def _compute_multi_ne(
         Dust-corrected flux errors.  Required for SNR gating.
     snr_ne : float
         Minimum SNR for both members of a density-sensitive doublet
-        (default 3.0).  If either member falls below this, the
-        doublet is skipped and the code falls back to the default
-        density.  Set to 0 to disable gating.
+        (default 3.0).  If either member falls below this, the doublet is
+        skipped and the code falls back to the z-dependent default.
     ne_high_max : float
-        Maximum allowed high-ionisation electron density in cm^-3
-        (default 5e5).  If n_e(high) exceeds this, falls back to
-        n_e(mid) (or n_e(low) if no mid measurement).
+        Maximum allowed high-ionisation electron density in cm^-3.
+    niv_density_invalid : bool
+        If ``True``, skip the NIV] density solve (ratio out of range).
+    z : float
+        Source redshift, for the z-dependent density fallbacks
+        (:func:`jwspecabund.direct.ne_zone_fallback`).
+    te_low, te_int, te_high : float
+        Per-zone electron temperatures (K) at which to solve each zone's
+        density.  Defaults to the Martinez+2025 fiducial 1.5e4 K; callers
+        pass the refined zone temperatures on the second pass.
 
     Returns
     -------
     tuple
-        ``(ne_low, ne_mid, ne_high, ne_failures)`` in cm^-3.
+        ``(ne_low, ne_mid, ne_high, ne_Opp, ne_failures)`` in cm^-3.
 
-        - ``ne_low``: from [SII] 6718/6732 or [OII] 3726/3729 (~14 eV).
-          Used for O⁺, N⁺, S⁺, C⁺ (low-ionisation zone).
+        - ``ne_low``: from [SII] 6718/6732 or [OII] 3726/3729 (~14 eV);
+          z-fallback ``54*(1+z)^1.2``.  Used for O⁺, N⁺, S⁺, C⁺.
         - ``ne_mid``: from CIII] 1907/1909 (~24 eV); ``None`` if
-          unavailable.  Used for O²⁺, Ne²⁺, C²⁺, N²⁺, S²⁺, Ar²⁺.
-          O²⁺ and Ne²⁺ are assigned this intermediate-zone density
-          rather than ``ne_high``: [OIII] 5007/Hβ and [NeIII] 3869/Hβ
-          are density-insensitive below ~10⁴–10⁵ cm⁻³, and CIII]
-          overlaps the O²⁺ zone, so this decouples them from the
-          noisy high-ionisation NIV] density.
-        - ``ne_high``: from NIV] 1483/1486 (~47 eV); falls back to
-          ``ne_mid`` then ``ne_low``.  Used for N³⁺, N⁴⁺, C³⁺.
-        - ``ne_failures``: dict of density solve failure reasons,
-          e.g. ``{"n_e(SII)": "PyNEB solve failed (ratio out of range)"}``.
+          unavailable.  Used for C²⁺, N²⁺, S²⁺, Ar²⁺.
+        - ``ne_high``: from NIV] 1483/1486 (~47 eV), then [Ar IV];
+          z-fallback ``5400*(1+z)^1.62``.  Used for N³⁺, N⁴⁺, C³⁺.
+        - ``ne_Opp``: O²⁺/Ne²⁺-zone density — [Ar IV] 4711/4740
+          (preferred, He I-deblended) → CIII] → z-fallback
+          ``1100*(1+z)^1.93``.
+        - ``ne_failures``: dict of density-solve failure reasons.
     """
-    from .direct import NE_DEFAULT, compute_ne, compute_ne_CIII, compute_ne_NIV
+    from .direct import (
+        compute_ne,
+        compute_ne_CIII,
+        compute_ne_NIV,
+        ne_zone_fallback,
+    )
 
     if errors is None:
         errors = {}
@@ -450,30 +519,37 @@ def _compute_multi_ne(
     ne_failures: dict[str, str] = {}
 
     # Low-ionisation zone: [SII] 6718/6732 or [OII] 3726/3729.
-    ne_low = NE_DEFAULT
+    ne_low = ne_zone_fallback("low", z)
+    _fb_low = ne_low
     if "SII_6718" in fluxes and "SII_6732" in fluxes:
         if _doublet_snr_ok("SII_6718", "SII_6732", fluxes, errors, snr_ne):
             try:
-                ne_low = compute_ne(fluxes["SII_6718"], fluxes["SII_6732"], doublet="SII")
+                ne_low = compute_ne(
+                    fluxes["SII_6718"], fluxes["SII_6732"],
+                    doublet="SII", Te_guess=te_low,
+                )
             except Exception as exc:
-                logger.warning("n_e(SII) failed; using %.0f cm^-3.", NE_DEFAULT)
+                logger.warning("n_e(SII) failed; using %.0f cm^-3.", _fb_low)
                 ne_failures["n_e(SII)"] = f"PyNEB solve failed: {exc}"
         else:
             logger.warning(
                 "n_e(SII) doublet below SNR threshold (%.1f); "
-                "using %.0f cm^-3.", snr_ne, NE_DEFAULT,
+                "using z-fallback %.0f cm^-3.", snr_ne, _fb_low,
             )
     elif "OII_3726" in fluxes and "OII_3729" in fluxes:
         if _doublet_snr_ok("OII_3726", "OII_3729", fluxes, errors, snr_ne):
             try:
-                ne_low = compute_ne(fluxes["OII_3726"], fluxes["OII_3729"], doublet="OII")
+                ne_low = compute_ne(
+                    fluxes["OII_3726"], fluxes["OII_3729"],
+                    doublet="OII", Te_guess=te_low,
+                )
             except Exception as exc:
-                logger.warning("n_e(OII) failed; using %.0f cm^-3.", NE_DEFAULT)
+                logger.warning("n_e(OII) failed; using %.0f cm^-3.", _fb_low)
                 ne_failures["n_e(OII)"] = f"PyNEB solve failed: {exc}"
         else:
             logger.warning(
                 "n_e(OII) doublet below SNR threshold (%.1f); "
-                "using %.0f cm^-3.", snr_ne, NE_DEFAULT,
+                "using z-fallback %.0f cm^-3.", snr_ne, _fb_low,
             )
 
     # Mid-ionisation zone: CIII] 1907/1909 (~24 eV).
@@ -481,7 +557,9 @@ def _compute_multi_ne(
     if "CIII]_1907" in fluxes and "CIII]" in fluxes:
         if _doublet_snr_ok("CIII]_1907", "CIII]", fluxes, errors, snr_ne, combined=True):
             try:
-                ne_mid = compute_ne_CIII(fluxes["CIII]_1907"], fluxes["CIII]"])
+                ne_mid = compute_ne_CIII(
+                    fluxes["CIII]_1907"], fluxes["CIII]"], Te_guess=te_int,
+                )
                 logger.info("n_e(mid) from CIII] = %.0f cm^-3.", ne_mid)
             except Exception as exc:
                 logger.warning("n_e(CIII]) failed.")
@@ -491,6 +569,9 @@ def _compute_multi_ne(
                 "n_e(CIII]) doublet below SNR threshold (%.1f); skipping.",
                 snr_ne,
             )
+
+    # High-ionisation density from [Ar IV] (preferred for the O²⁺ zone).
+    ne_arIV = _compute_ne_arIV(fluxes, errors, snr_ne, te_high, ne_failures)
 
     # High-ionisation zone: NIV] 1483/1486 (~47 eV).
     ne_high_raw = None
@@ -504,7 +585,9 @@ def _compute_multi_ne(
     elif "NIV_1483" in fluxes and "NIV_1486" in fluxes:
         if _doublet_snr_ok("NIV_1483", "NIV_1486", fluxes, errors, snr_ne, combined=True):
             try:
-                ne_high_raw = compute_ne_NIV(fluxes["NIV_1483"], fluxes["NIV_1486"])
+                ne_high_raw = compute_ne_NIV(
+                    fluxes["NIV_1483"], fluxes["NIV_1486"], Te_guess=te_high,
+                )
                 logger.info("n_e(high) from NIV] = %.0f cm^-3.", ne_high_raw)
             except Exception as exc:
                 logger.warning("n_e(NIV]) failed.")
@@ -515,33 +598,131 @@ def _compute_multi_ne(
                 snr_ne,
             )
 
-    # Fallback chain: ne_high → ne_mid → ne_low.
+    # High-zone density: NIV] -> [Ar IV] -> z-fallback("high").
     if ne_high_raw is not None:
         ne_high = ne_high_raw
-    elif ne_mid is not None:
-        ne_high = ne_mid
+    elif ne_arIV is not None:
+        ne_high = ne_arIV
     else:
-        ne_high = ne_low
+        ne_high = ne_zone_fallback("high", z)
 
-    # Clamp ne_high if it exceeds the maximum (prevents unphysical
-    # density from noisy doublet ratios).  Always fall back to ne_mid
-    # (never ne_low) — if CIII] is unavailable, keep the raw value.
+    # Clamp ne_high if it exceeds the maximum (noisy doublet ratio).
     if ne_high > ne_high_max:
-        if ne_mid is not None:
-            logger.warning(
-                "n_e(high) = %.0f cm^-3 exceeds ne_high_max=%.0f; "
-                "falling back to n_e(mid) = %.0f cm^-3.",
-                ne_high, ne_high_max, ne_mid,
-            )
-            ne_high = ne_mid
-        else:
-            logger.warning(
-                "n_e(high) = %.0f cm^-3 exceeds ne_high_max=%.0f "
-                "but no n_e(mid) available; keeping raw value.",
-                ne_high, ne_high_max,
-            )
+        _clamp = ne_mid if ne_mid is not None else ne_low
+        logger.warning(
+            "n_e(high) = %.0f cm^-3 exceeds ne_high_max=%.0f; "
+            "falling back to %.0f cm^-3.", ne_high, ne_high_max, _clamp,
+        )
+        ne_high = _clamp
 
-    return ne_low, ne_mid, ne_high, ne_failures
+    # O²⁺/Ne²⁺-zone density: [Ar IV] (preferred) -> CIII] -> z-fallback("mid").
+    if ne_arIV is not None:
+        ne_Opp = ne_arIV
+    elif ne_mid is not None:
+        ne_Opp = ne_mid
+    else:
+        ne_Opp = ne_zone_fallback("mid", z)
+
+    return ne_low, ne_mid, ne_high, ne_Opp, ne_failures
+
+
+def _solve_Te_high(
+    fluxes: dict[str, float], ne: float,
+) -> tuple[float | None, str | None]:
+    """Solve T_e(O++) from [OIII] 4363 (preferred) or O III] 1666.
+
+    Returns ``(Te_high, diagnostic)`` where *diagnostic* is ``"4363"`` or
+    ``"1666"``.  Returns ``(None, None)`` when neither auroral line is
+    present.  Propagates ``ValueError`` from PyNEB if a present line ratio
+    cannot be solved.
+    """
+    from .direct import compute_Te_OIII, compute_Te_OIII_1666
+
+    f4363 = fluxes.get("OIII_4363", 0.0)
+    f5007 = fluxes.get("OIII_5007", 0.0)
+    f4959 = fluxes.get("OIII_4959", 0.0)
+    f1666 = fluxes.get("OIII_1666", 0.0)
+    if f4363 > 0 and f5007 > 0:
+        return compute_Te_OIII(f4363, f5007, f4959, ne), "4363"
+    if f1666 > 0 and f5007 > 0:
+        return compute_Te_OIII_1666(f1666, f5007, f4959, ne), "1666"
+    return None, None
+
+
+def _solve_densities_refined(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    z: float,
+    Te_relation: str,
+    snr_ne: float,
+    ne_high_max: float,
+    niv_rejected: bool,
+    ne_low_override: float | None = None,
+    ne_mid_override: float | None = None,
+    ne_high_override: float | None = None,
+) -> tuple[
+    float, float | None, float, float,
+    float | None, float | None, float | None, str | None,
+    dict[str, str],
+]:
+    """Solve zone densities and temperatures with one refinement iteration.
+
+    Density depends only weakly on T_e (n_e ∝ T_e^0.5), so the densities
+    are first solved at the Martinez+2025 fiducial 1.5e4 K, the zone
+    temperatures are derived from T_e(O++), and the densities are then
+    re-solved once at those zone temperatures.  T_e(O++) is finally
+    recomputed at the refined O²⁺-zone density.
+
+    Returns ``(ne_low, ne_mid, ne_high, ne_Opp, Te_high, Te_int, Te_low,
+    Te_diagnostic, ne_failures)``.  The temperatures are ``None`` when
+    neither [OIII] 4363 nor O III] 1666 is available.  Propagates
+    ``ValueError`` from PyNEB on a failed (present) line solve.
+    """
+    from .direct import Te_int_from_high, Te_low_from_high
+
+    def _apply_overrides(nl, nm, nh, nopp):
+        if ne_low_override is not None:
+            nl = ne_low_override
+        if ne_mid_override is not None:
+            # The mid override also sets the O²⁺-zone density (the previous
+            # behaviour where O²⁺ tracked n_e(mid)).
+            nm = ne_mid_override
+            nopp = ne_mid_override
+        if ne_high_override is not None:
+            nh = ne_high_override
+        return nl, nm, nh, nopp
+
+    # First pass at the fiducial temperature.
+    nl, nm, nh, nopp, fail = _compute_multi_ne(
+        fluxes, errors=errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
+        niv_density_invalid=niv_rejected, z=z,
+    )
+    nl, nm, nh, nopp = _apply_overrides(nl, nm, nh, nopp)
+
+    Te_high, diag = _solve_Te_high(fluxes, nopp)
+    if Te_high is None:
+        return nl, nm, nh, nopp, None, None, None, None, fail
+
+    Te_int = Te_int_from_high(Te_high, Te_relation)
+    Te_low = Te_low_from_high(Te_high, Te_relation)
+
+    # Second pass: re-solve densities at the refined zone temperatures.
+    nl, nm, nh, nopp, fail = _compute_multi_ne(
+        fluxes, errors=errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
+        niv_density_invalid=niv_rejected, z=z,
+        te_low=Te_low, te_int=(Te_int if Te_int is not None else 1.5e4),
+        te_high=Te_high,
+    )
+    nl, nm, nh, nopp = _apply_overrides(nl, nm, nh, nopp)
+
+    # Recompute T_e(O++) at the refined O²⁺-zone density.
+    Te_high2, diag2 = _solve_Te_high(fluxes, nopp)
+    if Te_high2 is not None:
+        Te_high, diag = Te_high2, diag2
+        Te_int = Te_int_from_high(Te_high, Te_relation)
+        Te_low = Te_low_from_high(Te_high, Te_relation)
+
+    return nl, nm, nh, nopp, Te_high, Te_int, Te_low, diag, fail
 
 
 def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
@@ -905,6 +1086,7 @@ def _compute_ionic_upper_limits(
     ne_high: float,
     n_sigma: float = 3.0,
     continuum_rms_limits: dict[str, float] | None = None,
+    ne_Opp: float | None = None,
 ) -> tuple[dict[str, float], dict[str, dict]]:
     """Compute n-sigma upper limits for non-detected ionic abundances.
 
@@ -930,17 +1112,21 @@ def _compute_ionic_upper_limits(
 
     _ul = continuum_rms_limits or {}
 
+    # O²⁺/Ne²⁺ use the O²⁺-zone density ([Ar IV] preferred); fall back to
+    # ne_mid for backward compatibility.
+    ne_opp = ne_Opp if ne_Opp is not None else ne_mid
+
     # Mapping: ion_key -> (element, ion_stage, line_names, wave_labels, Te, ne)
     _ION_MAP = [
         ("O+/H+",   "O", 2, ["OII_doublet"], [3727],       Te_low,  ne_low),
-        ("O++/H+",  "O", 3, ["OIII_5007"],   [5007],       Te_high, ne_mid),
+        ("O++/H+",  "O", 3, ["OIII_5007"],   [5007],       Te_high, ne_opp),
         ("N+/H+",   "N", 2, ["NII_6585"],    [6584],       Te_low,  ne_low),
         ("N++/H+",  "N", 3, ["NIII_1749", "NIII_1752"], [1749, 1752], Te_high, ne_mid),
         ("N+++/H+", "N", 4, ["NIV_1483", "NIV_1486"],   [1483, 1486], Te_high, ne_high),
         ("C+/H+",   "C", 2, ["CII]_2324", "CII]_2326"], [2323, 2325, 2326, 2327, 2328], Te_low, ne_low),
         ("C++/H+",  "C", 3, ["CIII]_1907", "CIII]"],    [1907, 1909], Te_high, ne_mid),
         ("C+++/H+", "C", 4, ["CIV_1", "CIV_2"],         [1548, 1551], Te_high, ne_high),
-        ("Ne++/H+", "Ne", 3, ["NeIII_3869"], [3869],     Te_high, ne_mid),
+        ("Ne++/H+", "Ne", 3, ["NeIII_3869"], [3869],     Te_high, ne_opp),
         ("S+/H+",   "S", 2, ["SII_6718", "SII_6732"], [6718, 6732], Te_low, ne_low),
     ]
 
@@ -1003,6 +1189,8 @@ _ICF_DESCRIPTIONS: dict[str, str] = {
 _TE_RELATION_LABELS: dict[str, str] = {
     "desi": "DESI DR2",
     "classical": "classical (Garnett 1992)",
+    "garnett": "Garnett (1992)",
+    "3_tier": "3-tier Garnett (1992)",
 }
 
 
@@ -1020,6 +1208,8 @@ def _build_diagnostics(
     ne_default: float,
     totals: dict[str, Any] | None = None,
     niv_rejected: bool = False,
+    ne_Opp: float | None = None,
+    Te_int: float | None = None,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -1058,16 +1248,33 @@ def _build_diagnostics(
     totals = totals or {}
     diag: dict[str, str] = {}
 
-    # Te(high) — solved at the O²⁺-zone density (CIII]→low), not NIV].
-    _ne_OIII = ne_mid if ne_mid is not None else ne_low
+    # Te(high) — solved at the O²⁺-zone density ne_Opp.
+    _ne_OIII = ne_Opp if ne_Opp is not None else (
+        ne_mid if ne_mid is not None else ne_low
+    )
+    _has_arIV = "ArIV_4713" in fluxes and "ArIV_4741" in fluxes
+    _opp_src = (
+        "[Ar IV] 4711/4740 (He I-deblended)"
+        if (_has_arIV and ne_Opp is not None and ne_mid is not None
+            and abs(ne_Opp - ne_mid) > 1e-6)
+        or (_has_arIV and ne_mid is None and ne_Opp is not None)
+        else "CIII] 1907/1909 -> z-fallback"
+    )
     if Te_high is not None:
         diag["Te(high)"] = (
             f"[OIII] 4363/(5007+4959) ratio with n_e(O++ zone) = {_ne_OIII:.0f} cm^-3 (PyNEB)"
         )
         diag["O++/H+ density"] = (
-            f"intermediate-zone n_e = {_ne_OIII:.0f} cm^-3 (CIII] 1907/1909 -> low fallback), "
-            "decoupled from NIV]: 5007/Hβ is density-insensitive below ~10^4 cm^-3 and "
-            "CIII] (24-48 eV) overlaps the O²⁺ zone (35-55 eV)"
+            f"O²⁺-zone n_e = {_ne_OIII:.0f} cm^-3 from {_opp_src}; "
+            "[Ar IV] (40-60 eV) is the preferred high-ionisation density "
+            "(Martinez+2025 Table 2), CIII] the fallback"
+        )
+
+    # Te(int) — intermediate (S²⁺) zone, 3-tier Garnett relation.
+    if Te_high is not None and Te_int is not None:
+        diag["Te(int)"] = (
+            f"Garnett (1992) S III relation 0.83*Te(high)+1700 = {Te_int:.0f} K "
+            "(S²⁺/Ar²⁺ intermediate zone)"
         )
 
     # Te(low)
@@ -1193,6 +1400,7 @@ def _run_direct(
     ne_low_override: float | None = None,
     ne_mid_override: float | None = None,
     ne_high_override: float | None = None,
+    z: float = 0.0,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -1233,6 +1441,7 @@ def _run_direct(
     """
     from .direct import (
         NE_DEFAULT,
+        Te_int_from_high,
         Te_low_from_high,
         compute_ionic_abundances,
         compute_Te_OIII,
@@ -1241,53 +1450,41 @@ def _run_direct(
     )
     from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
 
-    # --- Step 1: Multi-phase electron density ---
-    ne_low, ne_mid, ne_high, ne_failures = _compute_multi_ne(
-        fluxes, errors=errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
-        niv_density_invalid=niv_rejected,
+    # --- Steps 1-2: Multi-phase electron density + zone temperatures ---
+    # Densities are solved at the fiducial 1.5e4 K, the zone temperatures
+    # are derived from T_e(O++), and the densities are re-solved once at
+    # those zone temperatures (n_e depends only weakly on T_e).  T_e(O++)
+    # is evaluated at the O²⁺-zone density ne_Opp ([Ar IV] preferred, else
+    # CIII] -> z-fallback).
+    (
+        ne_low, ne_mid, ne_high, ne_Opp,
+        Te_high, Te_int, Te_low, _Te_diagnostic, ne_failures,
+    ) = _solve_densities_refined(
+        fluxes, errors, z, Te_relation, snr_ne, ne_high_max, niv_rejected,
+        ne_low_override=ne_low_override,
+        ne_mid_override=ne_mid_override,
+        ne_high_override=ne_high_override,
     )
-    # Apply user overrides (bypass diagnostic computation).
-    if ne_low_override is not None:
-        ne_low = ne_low_override
-        logger.info("n_e(low) overridden to %.0f cm^-3.", ne_low)
-    if ne_mid_override is not None:
-        ne_mid = ne_mid_override
-        logger.info("n_e(mid) overridden to %.0f cm^-3.", ne_mid)
-    if ne_high_override is not None:
-        ne_high = ne_high_override
-        logger.info("n_e(high) overridden to %.0f cm^-3.", ne_high)
-
-    # --- Step 2: Electron temperature with zone-appropriate ne ---
-    # T_e(O++) is solved at the O²⁺-zone density (CIII]→low fallback),
-    # NOT ne_high (NIV]): the [OIII] 4363 ratio is O²⁺ light, so the
-    # correct density is the intermediate zone that overlaps O²⁺.  This
-    # also keeps the T_e solve consistent with the O²⁺/H+ abundance.
-    ne_OIII = ne_mid if ne_mid is not None else ne_low
-    # Try [OIII] 4363 first; fall back to O III] 1666 if 4363 is missing.
-    _Te_diagnostic = None
-    Te_high = None
-    f_4363 = fluxes.get("OIII_4363", 0.0)
-    f_5007 = fluxes.get("OIII_5007", 0.0)
-    f_4959 = fluxes.get("OIII_4959", 0.0)
-    f_1666 = fluxes.get("OIII_1666", 0.0)
-    if f_4363 > 0 and f_5007 > 0:
-        Te_high = compute_Te_OIII(f_4363, f_5007, f_4959, ne_OIII)
-        _Te_diagnostic = "4363"
-    elif f_1666 > 0 and f_5007 > 0:
-        Te_high = compute_Te_OIII_1666(f_1666, f_5007, f_4959, ne_OIII)
-        _Te_diagnostic = "1666"
+    ne_OIII = ne_Opp
+    if Te_high is None:
+        raise ValueError(
+            "Neither [OIII] 4363 nor O III] 1666 available for T_e computation."
+        )
+    if _Te_diagnostic == "1666":
         logger.info(
             "[OIII] 4363 not available; using O III] 1666/(5007+4959) "
             "for T_e(high) = %.0f K.", Te_high,
         )
-    else:
-        raise ValueError(
-            "Neither [OIII] 4363 nor O III] 1666 available for T_e computation."
-        )
-    Te_low = Te_low_from_high(Te_high, relation=Te_relation)
+    f_4363 = fluxes.get("OIII_4363", 0.0)
+    f_5007 = fluxes.get("OIII_5007", 0.0)
+    f_4959 = fluxes.get("OIII_4959", 0.0)
+    f_1666 = fluxes.get("OIII_1666", 0.0)
 
-    # --- Step 3: Ionic abundances with zone-appropriate ne ---
-    ionic = compute_ionic_abundances(fluxes, Te_high, Te_low, ne_low, ne_mid=ne_mid, ne_high=ne_high)
+    # --- Step 3: Ionic abundances with zone-appropriate ne and Te ---
+    ionic = compute_ionic_abundances(
+        fluxes, Te_high, Te_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+        Te_int=Te_int, ne_Opp=ne_Opp,
+    )
 
     # --- Step 4: O/H and Z/Zsun ---
     OH = (ionic.get("O+/H+", 0.0) + ionic.get("O++/H+", 0.0))
@@ -1316,6 +1513,7 @@ def _run_direct(
         ne_mid if ne_mid is not None else ne_low,
         ne_high if ne_high is not None else ne_low,
         continuum_rms_limits=continuum_rms_limits,
+        ne_Opp=ne_Opp,
     )
 
     totals = compute_total_abundances(
@@ -1353,6 +1551,7 @@ def _run_direct(
         fluxes, Te_high, Te_relation, ne_low, ne_mid, ne_high,
         logU, logU_diag, icf_method, NO_icf_name, NE_DEFAULT,
         totals=totals, niv_rejected=niv_rejected,
+        ne_Opp=ne_Opp, Te_int=Te_int,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -1405,8 +1604,10 @@ def _run_direct(
                     ne_OIII,
                 )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
+            Te_i = Te_int_from_high(Te_h, relation=Te_relation)
             ionic_mc = compute_ionic_abundances(
                 mc_fluxes, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+                Te_int=Te_i, ne_Opp=ne_Opp,
             )
 
             # Compute Z_Zsun for this MC iteration.
@@ -1579,8 +1780,10 @@ def _run_direct(
         try:
             Te_alt = compute_Te_OIII_1666(f_1666, f_5007, f_4959, ne_OIII)
             Te_alt_low = Te_low_from_high(Te_alt, relation=Te_relation)
+            Te_alt_int = Te_int_from_high(Te_alt, relation=Te_relation)
             ionic_alt = compute_ionic_abundances(
                 fluxes, Te_alt, Te_alt_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+                Te_int=Te_alt_int, ne_Opp=ne_Opp,
             )
             OH_alt = ionic_alt.get("O+/H+", 0.0) + ionic_alt.get("O++/H+", 0.0)
             OH_alt_12 = 12.0 + np.log10(OH_alt) if OH_alt > 0 else np.nan
@@ -1603,8 +1806,10 @@ def _run_direct(
                         mc_f.get("OIII_4959", 0), ne_OIII,
                     )
                     Te_a_low = Te_low_from_high(Te_a, relation=Te_relation)
+                    Te_a_int = Te_int_from_high(Te_a, relation=Te_relation)
                     ion_a = compute_ionic_abundances(
                         mc_f, Te_a, Te_a_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+                        Te_int=Te_a_int, ne_Opp=ne_Opp,
                     )
                     oh_a = ion_a.get("O+/H+", 0.0) + ion_a.get("O++/H+", 0.0)
                     if oh_a > 0:
@@ -1632,12 +1837,18 @@ def _run_direct(
         "CO_err": CO_err,
         "Te_high": Te_high,
         "Te_high_err": Te_high_err,
+        "Te_mid": Te_int,
+        "Te_mid_err": (
+            0.83 * Te_high_err
+            if (Te_int is not None and Te_high_err is not None) else None
+        ),
         "Te_low": Te_low,
         "Te_low_err": Te_low_err,
         "ne": ne_low,
         "ne_low": ne_low,
         "ne_mid": ne_mid,
         "ne_high": ne_high,
+        "ne_Opp": ne_Opp,
         "logU": logU,
         "logU_err": logU_err,
         "icf_method": icf_method,
@@ -1721,6 +1932,7 @@ def _run_direct_mcmc(
     ne_low_override: float | None = None,
     ne_mid_override: float | None = None,
     ne_high_override: float | None = None,
+    z: float = 0.0,
     # Per-draw dust resampling (when Av_err is set).
     Av: float | None = None,
     Av_err: float | None = None,
@@ -1779,6 +1991,7 @@ def _run_direct_mcmc(
     """
     from .direct import (
         NE_DEFAULT,
+        Te_int_from_high,
         Te_low_from_high,
         compute_ionic_abundances,
         compute_Te_OIII,
@@ -1822,54 +2035,53 @@ def _run_direct_mcmc(
     med_errors = {name: float(np.std(post)) for name, post in posteriors.items()}
     if _resample_dust:
         med_fluxes = _dust_correct_sample(dict(med_fluxes), Av, dust_law, _dk)
-    ne_low, ne_mid, ne_high, ne_failures = _compute_multi_ne(
-        med_fluxes, errors=med_errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
-        niv_density_invalid=niv_rejected,
-    )
-    # Apply user overrides (bypass diagnostic computation).
-    if ne_low_override is not None:
-        ne_low = ne_low_override
-    if ne_mid_override is not None:
-        ne_mid = ne_mid_override
-    if ne_high_override is not None:
-        ne_high = ne_high_override
 
-    # T_e(O++) is solved at the O²⁺-zone density (CIII]→low fallback),
-    # not ne_high (NIV]); see _run_direct for rationale.
-    ne_OIII = ne_mid if ne_mid is not None else ne_low
-
-    # Point estimate: logU and Z_Zsun from medians.
-    # Try 4363 first; fall back to 1666 if unavailable.
-    _Te_diagnostic = None
+    # Steps 1-2: zone densities + temperatures with one refinement pass.
+    # T_e(O++) is solved at the O²⁺-zone density ne_Opp ([Ar IV] preferred,
+    # else CIII] -> z-fallback).
     try:
-        if med_fluxes.get("OIII_4363", 0) > 0:
-            Te_high_pt = compute_Te_OIII(
-                med_fluxes.get("OIII_4363", 0),
-                med_fluxes.get("OIII_5007", 0),
-                med_fluxes.get("OIII_4959", 0),
-                ne_OIII,
-            )
-            _Te_diagnostic = "4363"
-        elif med_fluxes.get("OIII_1666", 0) > 0:
-            Te_high_pt = compute_Te_OIII_1666(
-                med_fluxes.get("OIII_1666", 0),
-                med_fluxes.get("OIII_5007", 0),
-                med_fluxes.get("OIII_4959", 0),
-                ne_OIII,
-            )
-            _Te_diagnostic = "1666"
+        (
+            ne_low, ne_mid, ne_high, ne_Opp,
+            Te_high_pt, Te_int_pt, Te_low_pt, _Te_diagnostic, ne_failures,
+        ) = _solve_densities_refined(
+            med_fluxes, med_errors, z, Te_relation, snr_ne, ne_high_max,
+            niv_rejected,
+            ne_low_override=ne_low_override,
+            ne_mid_override=ne_mid_override,
+            ne_high_override=ne_high_override,
+        )
+        if Te_high_pt is None:
+            Te_high_pt = np.nan
+            Te_low_pt = np.nan
+            Te_int_pt = None
+        elif _Te_diagnostic == "1666":
             logger.info(
                 "[OIII] 4363 not available; using O III] 1666 for T_e(high) = %.0f K.",
                 Te_high_pt,
             )
-        else:
-            Te_high_pt = np.nan
     except ValueError:
+        # PyNEB could not solve the (present) auroral ratio at the medians.
+        ne_low, ne_mid, ne_high, ne_Opp, ne_failures = _compute_multi_ne(
+            med_fluxes, errors=med_errors, snr_ne=snr_ne,
+            ne_high_max=ne_high_max, niv_density_invalid=niv_rejected, z=z,
+        )
+        if ne_low_override is not None:
+            ne_low = ne_low_override
+        if ne_mid_override is not None:
+            ne_mid = ne_mid_override
+            ne_Opp = ne_mid_override
+        if ne_high_override is not None:
+            ne_high = ne_high_override
         Te_high_pt = np.nan
-    Te_low_pt = Te_low_from_high(Te_high_pt, relation=Te_relation) if np.isfinite(Te_high_pt) else np.nan
+        Te_low_pt = np.nan
+        Te_int_pt = None
+        _Te_diagnostic = None
+
+    ne_OIII = ne_Opp
 
     ionic_pt = compute_ionic_abundances(
-        med_fluxes, Te_high_pt, Te_low_pt, ne_low, ne_mid=ne_mid, ne_high=ne_high
+        med_fluxes, Te_high_pt, Te_low_pt, ne_low, ne_mid=ne_mid,
+        ne_high=ne_high, Te_int=Te_int_pt, ne_Opp=ne_Opp,
     ) if np.isfinite(Te_high_pt) else {}
 
     OH_pt = ionic_pt.get("O+/H+", 0.0) + ionic_pt.get("O++/H+", 0.0)
@@ -1893,6 +2105,7 @@ def _run_direct_mcmc(
             ne_mid if ne_mid is not None else ne_low,
             ne_high if ne_high is not None else ne_low,
             continuum_rms_limits=continuum_rms_limits,
+            ne_Opp=ne_Opp,
         )
 
     totals_pt = compute_total_abundances(
@@ -1944,8 +2157,10 @@ def _run_direct_mcmc(
                     ne_OIII,
                 )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
+            Te_i = Te_int_from_high(Te_h, relation=Te_relation)
             ionic_i = compute_ionic_abundances(
                 sample, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+                Te_int=Te_i, ne_Opp=ne_Opp,
             )
 
             # Z_Zsun for this sample.
@@ -2124,8 +2339,10 @@ def _run_direct_mcmc(
                 med_fluxes.get("OIII_4959", 0), ne_OIII,
             )
             Te_alt_low = Te_low_from_high(Te_alt, relation=Te_relation)
+            Te_alt_int = Te_int_from_high(Te_alt, relation=Te_relation)
             ionic_alt = compute_ionic_abundances(
-                med_fluxes, Te_alt, Te_alt_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+                med_fluxes, Te_alt, Te_alt_low, ne_low, ne_mid=ne_mid,
+                ne_high=ne_high, Te_int=Te_alt_int, ne_Opp=ne_Opp,
             )
             OH_alt = ionic_alt.get("O+/H+", 0.0) + ionic_alt.get("O++/H+", 0.0)
             OH_alt_12 = 12.0 + np.log10(OH_alt) if OH_alt > 0 else np.nan
@@ -2141,8 +2358,10 @@ def _run_direct_mcmc(
                         samp.get("OIII_4959", 0), ne_OIII,
                     )
                     Tl = Te_low_from_high(Ta, relation=Te_relation)
+                    Ti = Te_int_from_high(Ta, relation=Te_relation)
                     ion_a = compute_ionic_abundances(
                         samp, Ta, Tl, ne_low, ne_mid=ne_mid, ne_high=ne_high,
+                        Te_int=Ti, ne_Opp=ne_Opp,
                     )
                     oh_a = ion_a.get("O+/H+", 0.0) + ion_a.get("O++/H+", 0.0)
                     if oh_a > 0:
@@ -2165,6 +2384,19 @@ def _run_direct_mcmc(
         except (ValueError, RuntimeError) as e:
             logger.info("Could not compute alternative Te from 1666: %s", e)
 
+    # Intermediate-zone temperature (deterministic function of T_e(high)).
+    _Te_high_final = (
+        Te_high_med if Te_high_med is not None
+        else (Te_high_pt if np.isfinite(Te_high_pt) else None)
+    )
+    _Te_mid_final = (
+        Te_int_from_high(_Te_high_final, Te_relation)
+        if _Te_high_final is not None else None
+    )
+    _Te_mid_err = None
+    if _Te_mid_final is not None and Te_high_lo is not None:
+        _Te_mid_err = (0.83 * Te_high_lo, 0.83 * Te_high_hi)
+
     return {
         "OH": OH_med,
         "OH_err": (OH_lo, OH_hi),
@@ -2172,14 +2404,17 @@ def _run_direct_mcmc(
         "NO_err": (NO_lo, NO_hi) if NO_lo is not None else None,
         "CO": CO_med,
         "CO_err": (CO_lo, CO_hi) if CO_lo is not None else None,
-        "Te_high": Te_high_med if Te_high_med is not None else (Te_high_pt if np.isfinite(Te_high_pt) else None),
+        "Te_high": _Te_high_final,
         "Te_high_err": (Te_high_lo, Te_high_hi) if Te_high_lo is not None else None,
+        "Te_mid": _Te_mid_final,
+        "Te_mid_err": _Te_mid_err,
         "Te_low": Te_low_med if Te_low_med is not None else (Te_low_pt if np.isfinite(Te_low_pt) else None),
         "Te_low_err": (Te_low_lo, Te_low_hi) if Te_low_lo is not None else None,
         "ne": ne_low,
         "ne_low": ne_low,
         "ne_mid": ne_mid,
         "ne_high": ne_high,
+        "ne_Opp": ne_Opp,
         "logU": logU_med if logU_med is not None else logU_pt,
         "logU_err": (logU_lo, logU_hi) if logU_lo is not None else None,
         "icf_method": icf_method,
@@ -2202,6 +2437,7 @@ def _run_direct_mcmc(
                 Te_relation, ne_low, ne_mid, ne_high, logU_pt, logU_diag,
                 icf_method, NO_icf_name, NE_DEFAULT,
                 totals=totals_pt, niv_rejected=niv_rejected,
+                ne_Opp=ne_Opp, Te_int=_Te_mid_final,
             ),
             **_diag_extra,
         },
@@ -2754,6 +2990,7 @@ def compute_abundances(
                 ne_low_override=ne_low_override,
                 ne_mid_override=ne_mid_override,
                 ne_high_override=ne_high_override,
+                z=z,
                 Av=Av_derived, Av_err=Av_err,
                 Av_prior=Av_prior, dust_law=dust_law,
                 dust_kwargs=dust_kwargs,
@@ -2769,6 +3006,7 @@ def compute_abundances(
                 ne_low_override=ne_low_override,
                 ne_mid_override=ne_mid_override,
                 ne_high_override=ne_high_override,
+                z=z,
             )
 
         primary_result = AbundanceResult(
@@ -2781,6 +3019,8 @@ def compute_abundances(
             CO_err=direct_out.get("CO_err"),
             Te_high=direct_out.get("Te_high"),
             Te_high_err=direct_out.get("Te_high_err"),
+            Te_mid=direct_out.get("Te_mid"),
+            Te_mid_err=direct_out.get("Te_mid_err"),
             Te_low=direct_out.get("Te_low"),
             Te_low_err=direct_out.get("Te_low_err"),
             ne=direct_out.get("ne"),
@@ -2804,6 +3044,7 @@ def compute_abundances(
             ne_low=direct_out.get("ne_low"),
             ne_mid=direct_out.get("ne_mid"),
             ne_high=direct_out.get("ne_high"),
+            ne_Opp=direct_out.get("ne_Opp"),
             icf_method=direct_out.get("icf_method"),
             NO_icf_name=direct_out.get("NO_icf_name"),
             excluded_lines=excluded_lines if excluded_lines else None,
@@ -2870,6 +3111,7 @@ def compute_abundances(
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
+                            z=z,
                             Av=Av_derived, Av_err=Av_err,
                             Av_prior=Av_prior, dust_law=dust_law,
                             dust_kwargs=dust_kwargs,
@@ -2885,6 +3127,7 @@ def compute_abundances(
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
+                            z=z,
                         )
                     # Check if the result is valid (not all NaN).
                     oh_1666 = d1666_out.get("OH")
@@ -2954,6 +3197,7 @@ def compute_abundances(
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
+                            z=z,
                             Av=Av_derived, Av_err=Av_err,
                             Av_prior=Av_prior, dust_law=dust_law,
                             dust_kwargs=dust_kwargs,
@@ -2968,6 +3212,7 @@ def compute_abundances(
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
+                            z=z,
                         )
                     alt["direct"] = AbundanceResult(
                         method="direct",

@@ -175,3 +175,143 @@ class TestIonicWiring:
             fluxes, 1.5e4, 1.2e4, 1e2, ne_mid=1e2, Te_int=0.5 * (1.5e4 + 1.2e4),
         )
         assert none_call["S++/H+"] == pytest.approx(mid_call["S++/H+"], rel=1e-9)
+
+
+class TestMultiNeWiring:
+    """_compute_multi_ne: [Ar IV] preference, He I deblend, z-fallbacks."""
+
+    def _arIV_fluxes(self, ne_true=3000.0, hei=0.5):
+        """Build [Ar IV] + He I fluxes that deblend to a target density."""
+        import pyneb as pn
+
+        from jwspecabund.direct import heI_4714_over_4472
+
+        ar = pn.Atom("Ar", 4)
+        # [Ar IV] 4711/4740 emissivity ratio at the target density.
+        e4711 = ar.getEmissivity(1.5e4, ne_true, wave=4711)
+        e4740 = ar.getEmissivity(1.5e4, ne_true, wave=4740)
+        f4740 = 1.0
+        f4711_true = f4740 * e4711 / e4740
+        # Blend He I 4714 into the fitted ArIV_4713 feature.
+        ratio = heI_4714_over_4472(1.5e4, 1e4)
+        f4713 = f4711_true + ratio * hei
+        return {
+            "ArIV_4713": f4713,
+            "ArIV_4741": f4740,
+            "HEI_4472": hei,
+        }
+
+    def test_returns_five_tuple(self):
+        from jwspecabund._core import _compute_multi_ne
+
+        out = _compute_multi_ne({}, errors={}, snr_ne=0.0, z=5.0)
+        assert len(out) == 5
+
+    def test_arIV_sets_ne_Opp_with_deblend(self):
+        from jwspecabund._core import _compute_multi_ne
+
+        ne_true = 3000.0
+        fluxes = self._arIV_fluxes(ne_true=ne_true, hei=0.5)
+        errors = {k: v / 50.0 for k, v in fluxes.items()}  # high SNR
+        ne_low, ne_mid, ne_high, ne_Opp, fail = _compute_multi_ne(
+            fluxes, errors=errors, snr_ne=3.0, z=0.0,
+        )
+        # O²⁺-zone density recovered from [Ar IV] near the injected value.
+        assert ne_Opp == pytest.approx(ne_true, rel=0.25)
+        assert "n_e(Ar IV)" not in fail
+
+    def test_arIV_skipped_without_heI_anchor(self):
+        from jwspecabund._core import _compute_multi_ne
+        from jwspecabund.direct import ne_zone_fallback
+
+        fluxes = self._arIV_fluxes(ne_true=3000.0, hei=0.5)
+        del fluxes["HEI_4472"]  # remove the anchor -> cannot deblend
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        _, ne_mid, _, ne_Opp, fail = _compute_multi_ne(
+            fluxes, errors=errors, snr_ne=3.0, z=0.0,
+        )
+        # No CIII], no anchor -> ne_Opp uses the mid z-fallback.
+        assert ne_Opp == pytest.approx(ne_zone_fallback("mid", 0.0))
+        assert "n_e(Ar IV)" in fail
+
+    def test_arIV_rejected_when_heI_dominated(self):
+        from jwspecabund._core import _compute_multi_ne
+
+        # Huge He I anchor so the deblended 4711 goes negative.
+        fluxes = self._arIV_fluxes(ne_true=3000.0, hei=0.5)
+        fluxes["HEI_4472"] = 100.0
+        errors = {k: max(v, 1e-3) / 50.0 for k, v in fluxes.items()}
+        _, _, _, _, fail = _compute_multi_ne(
+            fluxes, errors=errors, snr_ne=3.0, z=0.0,
+        )
+        assert "n_e(Ar IV)" in fail
+        assert "He I-dominated" in fail["n_e(Ar IV)"]
+
+    def test_ciii_fallback_when_no_arIV(self):
+        from jwspecabund._core import _compute_multi_ne
+
+        # CIII] doublet present, no [Ar IV] -> ne_Opp comes from CIII].
+        fluxes = {"CIII]_1907": 1.5, "CIII]": 1.0}
+        errors = {"CIII]_1907": 0.02, "CIII]": 0.02}
+        _, ne_mid, _, ne_Opp, _ = _compute_multi_ne(
+            fluxes, errors=errors, snr_ne=3.0, z=0.0,
+        )
+        assert ne_mid is not None
+        assert ne_Opp == pytest.approx(ne_mid)
+
+
+class TestDensityRefinement:
+    """_solve_densities_refined: zone temperatures + refined densities."""
+
+    def _oiii_fluxes(self):
+        # [OIII] auroral + nebular for a hot (~1.5e4 K) metal-poor object,
+        # plus an [SII] doublet for the low-zone density.
+        return {
+            "HBETA": 100.0,
+            "OIII_4363": 12.0,
+            "OIII_5007": 600.0,
+            "OIII_4959": 200.0,
+            "SII_6718": 1.4,
+            "SII_6732": 1.0,
+        }
+
+    def test_zone_temperatures_monotone(self):
+        from jwspecabund._core import _solve_densities_refined
+
+        fluxes = self._oiii_fluxes()
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        (
+            ne_low, ne_mid, ne_high, ne_Opp,
+            Te_high, Te_int, Te_low, diag, fail,
+        ) = _solve_densities_refined(
+            fluxes, errors, z=6.0, Te_relation="3_tier",
+            snr_ne=3.0, ne_high_max=5e5, niv_rejected=False,
+        )
+        assert Te_high is not None and Te_high > 1.1e4
+        assert Te_high >= Te_int >= Te_low
+        assert diag == "4363"
+
+    def test_refinement_uses_zone_density(self):
+        # ne_low solved from [SII] should be finite and physical after the
+        # two-pass refinement.
+        from jwspecabund._core import _solve_densities_refined
+
+        fluxes = self._oiii_fluxes()
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        ne_low = _solve_densities_refined(
+            fluxes, errors, z=0.0, Te_relation="3_tier",
+            snr_ne=3.0, ne_high_max=5e5, niv_rejected=False,
+        )[0]
+        assert np.isfinite(ne_low) and 10 < ne_low < 1e4
+
+    def test_no_auroral_returns_none_temps(self):
+        from jwspecabund._core import _solve_densities_refined
+
+        fluxes = {"HBETA": 100.0, "OIII_5007": 600.0}
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        out = _solve_densities_refined(
+            fluxes, errors, z=0.0, Te_relation="3_tier",
+            snr_ne=3.0, ne_high_max=5e5, niv_rejected=False,
+        )
+        # Te_high, Te_int, Te_low all None when no auroral line.
+        assert out[4] is None and out[5] is None and out[6] is None

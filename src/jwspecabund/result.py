@@ -74,6 +74,8 @@ class AbundanceResult:
     CO_err: float | tuple[float, float] | None = None
     Te_high: float | None = None
     Te_high_err: float | tuple[float, float] | None = None
+    Te_mid: float | None = None
+    Te_mid_err: float | tuple[float, float] | None = None
     Te_low: float | None = None
     Te_low_err: float | tuple[float, float] | None = None
     ne: float | None = None
@@ -97,6 +99,7 @@ class AbundanceResult:
     ne_low: float | None = None
     ne_mid: float | None = None
     ne_high: float | None = None
+    ne_Opp: float | None = None
     icf_method: str | None = None
     NO_icf_name: str | None = None
     lya_f_esc: float | None = None
@@ -156,6 +159,11 @@ class AbundanceResult:
                 lines.append(f"  T_e(high)   = {self.Te_high:.0f} +/- {self.Te_high_err} K")
             else:
                 lines.append(f"  T_e(high)   = {self.Te_high:.0f} K")
+        if self.Te_mid is not None:
+            if self.Te_mid_err is not None:
+                lines.append(f"  T_e(int)    = {self.Te_mid:.0f} +/- {self.Te_mid_err} K")
+            else:
+                lines.append(f"  T_e(int)    = {self.Te_mid:.0f} K")
         if self.Te_low is not None:
             if self.Te_low_err is not None:
                 lines.append(f"  T_e(low)    = {self.Te_low:.0f} +/- {self.Te_low_err} K")
@@ -167,6 +175,8 @@ class AbundanceResult:
             lines.append(f"  n_e(low)    = {self.ne_low:.0f} cm^-3")
             if self.ne_mid is not None:
                 lines.append(f"  n_e(mid)    = {self.ne_mid:.0f} cm^-3")
+            if self.ne_Opp is not None:
+                lines.append(f"  n_e(O++)    = {self.ne_Opp:.0f} cm^-3")
             lines.append(f"  n_e(high)   = {self.ne_high:.0f} cm^-3")
         if self.logU is not None:
             if self.logU_err is not None:

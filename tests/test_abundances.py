@@ -1113,9 +1113,9 @@ class TestNeSNRGating:
     """Tests for SNR gating on density-sensitive doublets."""
 
     def test_low_snr_SII_falls_back_to_default(self):
-        """Low-SNR [SII] doublet should fall back to NE_DEFAULT (300)."""
+        """Low-SNR [SII] doublet should fall back to the z-dependent ne."""
         from jwspecabund._core import _compute_multi_ne
-        from jwspecabund.direct import NE_DEFAULT
+        from jwspecabund.direct import ne_zone_fallback
 
         fluxes = {
             "SII_6718": 0.01,
@@ -1126,10 +1126,15 @@ class TestNeSNRGating:
             "SII_6732": 0.1,   # SNR = 0.1
         }
 
-        ne_low, ne_mid, ne_high, _ = _compute_multi_ne(fluxes, errors=errors, snr_ne=3.0)
-        assert ne_low == NE_DEFAULT
+        ne_low, ne_mid, ne_high, ne_Opp, _ = _compute_multi_ne(
+            fluxes, errors=errors, snr_ne=3.0, z=0.0,
+        )
+        assert ne_low == pytest.approx(ne_zone_fallback("low", 0.0))
         assert ne_mid is None
-        assert ne_high == NE_DEFAULT
+        # No high-zone doublet -> z-dependent high fallback.
+        assert ne_high == pytest.approx(ne_zone_fallback("high", 0.0))
+        # No [Ar IV]/CIII] -> O²⁺-zone uses the mid z-fallback.
+        assert ne_Opp == pytest.approx(ne_zone_fallback("mid", 0.0))
 
     def test_niv_density_invalid_skips_solve_and_falls_back(self):
         """An unphysical NIV] ratio must not be used for the density.
@@ -1146,7 +1151,7 @@ class TestNeSNRGating:
         fluxes = {"NIV_1483": 2.0e-17, "NIV_1486": 1.0e-17}
         errors = {"NIV_1483": 1.0e-19, "NIV_1486": 1.0e-19}  # very high SNR
 
-        _, _, ne_high, failures = _compute_multi_ne(
+        _, _, ne_high, _, failures = _compute_multi_ne(
             fluxes, errors=errors, snr_ne=3.0, niv_density_invalid=True,
         )
         # The failure must be attributed to the ratio, not a PyNEB solve, and
@@ -1160,9 +1165,9 @@ class TestNeSNRGating:
         reason="PyNEB not available",
     )
     def test_high_snr_SII_uses_measured_ne(self):
-        """High-SNR [SII] doublet should produce a measured n_e != NE_DEFAULT."""
+        """High-SNR [SII] doublet should produce a measured n_e (not fallback)."""
         from jwspecabund._core import _compute_multi_ne
-        from jwspecabund.direct import NE_DEFAULT
+        from jwspecabund.direct import ne_zone_fallback
 
         # Ratio ~1.4 → low density regime
         fluxes = {
@@ -1174,9 +1179,11 @@ class TestNeSNRGating:
             "SII_6732": 0.05,  # SNR = 20
         }
 
-        ne_low, ne_mid, ne_high, _ = _compute_multi_ne(fluxes, errors=errors, snr_ne=3.0)
-        # Should be a real measurement, not the default.
-        assert ne_low != NE_DEFAULT
+        ne_low, ne_mid, ne_high, ne_Opp, _ = _compute_multi_ne(
+            fluxes, errors=errors, snr_ne=3.0, z=0.0,
+        )
+        # Should be a real measurement, not the z-fallback.
+        assert ne_low != pytest.approx(ne_zone_fallback("low", 0.0))
         assert 10 < ne_low < 5000
         assert ne_mid is None
 
@@ -1230,10 +1237,13 @@ class TestNeSNRGating:
         assert not _doublet_snr_ok("SII_6718", "SII_6732", fluxes, {}, snr_ne=3.0)
 
         # But _compute_multi_ne with errors=None should use empty dict
-        # and fall back to NE_DEFAULT.
-        from jwspecabund.direct import NE_DEFAULT
-        ne_low, ne_mid, _, _f = _compute_multi_ne(fluxes, errors=None, snr_ne=3.0)
-        assert ne_low == NE_DEFAULT
+        # and fall back to the z-dependent default (gating disabled but the
+        # SNR check returns False without errors, so the doublet is skipped).
+        from jwspecabund.direct import ne_zone_fallback
+        ne_low, ne_mid, _, _, _f = _compute_multi_ne(
+            fluxes, errors=None, snr_ne=3.0, z=0.0,
+        )
+        assert ne_low == pytest.approx(ne_zone_fallback("low", 0.0))
         assert ne_mid is None
 
     def test_missing_doublet_member_fails(self):
