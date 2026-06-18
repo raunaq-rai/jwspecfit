@@ -44,7 +44,7 @@ def compute_ne(
     flux_line1: float,
     flux_line2: float,
     doublet: str = "SII",
-    Te_guess: float = 1e4,
+    Te_guess: float = 1.5e4,
 ) -> float:
     """Compute electron density from a density-sensitive doublet.
 
@@ -99,7 +99,7 @@ def compute_ne(
 def compute_ne_CIII(
     flux_1907: float,
     flux_1909: float,
-    Te_guess: float = 1e4,
+    Te_guess: float = 1.5e4,
 ) -> float:
     """Compute electron density from the CIII] 1907/1909 ratio.
 
@@ -206,7 +206,7 @@ def niv_ratio_at_density(
 def compute_ne_NIV(
     flux_1483: float,
     flux_1486: float,
-    Te_guess: float = 1e4,
+    Te_guess: float = 1.5e4,
 ) -> float:
     """Compute electron density from the NIV] 1483/1486 ratio.
 
@@ -242,6 +242,128 @@ def compute_ne_NIV(
         )
 
     return float(ne)
+
+
+def compute_ne_ArIV(
+    flux_4711: float,
+    flux_4740: float,
+    Te_guess: float = 1.5e4,
+) -> float:
+    """Compute electron density from the [Ar IV] 4711/4740 ratio.
+
+    Probes the high-ionisation zone (Ar³⁺, 40.7-59.8 eV), overlapping the
+    O²⁺ zone, so it is the preferred density for O²⁺ (Martinez+2025
+    Table 2).  ``flux_4711`` must be the He I-deblended [Ar IV] 4711 flux
+    (see :func:`heI_4714_over_4472`); the raw fitted ``ArIV_4713`` line is
+    blended with He I 4714.
+
+    Parameters
+    ----------
+    flux_4711 : float
+        Deblended [Ar IV] 4711 flux.
+    flux_4740 : float
+        [Ar IV] 4740 flux.
+    Te_guess : float
+        Electron temperature guess in K (default 1.5e4).
+
+    Returns
+    -------
+    float
+        Electron density n_e in cm^-3.
+    """
+    pn = _get_pyneb()
+
+    if flux_4740 <= 0:
+        raise ValueError("[Ar IV] 4740 flux <= 0 for density solve")
+    if flux_4711 <= 0:
+        raise ValueError("[Ar IV] 4711 (deblended) flux <= 0 for density solve")
+
+    ratio = flux_4711 / flux_4740
+    atom = pn.Atom("Ar", 4)
+    ne = atom.getTemDen(ratio, tem=Te_guess, wave1=4711, wave2=4740)
+
+    if np.isnan(ne) or ne <= 0:
+        raise ValueError(
+            f"PyNEB returned invalid n_e={ne:.1f} from [Ar IV] "
+            f"ratio={ratio:.3f} (ratio out of valid range)"
+        )
+
+    return float(ne)
+
+
+def heI_4714_over_4472(Te: float, ne: float) -> float:
+    """Predict the He I 4714 / He I 4472 recombination flux ratio.
+
+    Used to deblend the [Ar IV] 4711 line from the He I 4714 line that
+    falls in the same fitted feature (``ArIV_4713``).  The He I 4714
+    contribution is estimated as ``ratio * F(HEI_4472)`` and subtracted:
+
+        F([Ar IV] 4711) = F(ArIV_4713) - ratio * F(HEI_4472).
+
+    The ratio is computed from PyNEB He I recombination emissivities
+    (Storey & Hummer 1995) rather than hard-coded, so it tracks the
+    assumed T_e and n_e (~0.11 at 10⁴ K to ~0.18 at 2x10⁴ K).
+
+    Parameters
+    ----------
+    Te : float
+        Electron temperature in K.
+    ne : float
+        Electron density in cm^-3.
+
+    Returns
+    -------
+    float
+        Expected F(He I 4714) / F(He I 4472).
+    """
+    pn = _get_pyneb()
+    He1 = pn.RecAtom("He", 1)
+    # PyNEB He I labels: 4471 (the 4472 anchor) and 4713 (the 4714 line).
+    Te_eval = min(Te, _PYNEB_HI_TMAX) if Te > 0 else 1.5e4
+    e_4714 = He1.getEmissivity(Te_eval, ne, wave=4713)
+    e_4472 = He1.getEmissivity(Te_eval, ne, wave=4471)
+    if e_4472 <= 0 or not np.isfinite(e_4714):
+        raise ValueError(
+            f"PyNEB returned invalid He I emissivity at T_e={Te:.0f}, n_e={ne:.0f}"
+        )
+    return float(e_4714 / e_4472)
+
+
+# ---------------------------------------------------------------------------
+# z-dependent electron-density fallbacks
+# ---------------------------------------------------------------------------
+
+# Redshift-evolution fits for the per-zone electron density, used when a
+# zone's density-sensitive doublet is unavailable or fails the SNR/solve.
+# Form: n_e = A * (1 + z)^p.
+_NE_ZONE_FALLBACK: dict[str, tuple[float, float]] = {
+    "low": (54.0, 1.2),
+    "mid": (1100.0, 1.93),
+    "high": (5400.0, 1.62),
+}
+
+
+def ne_zone_fallback(zone: str, z: float) -> float:
+    """Return the redshift-dependent electron-density fallback for a zone.
+
+    Parameters
+    ----------
+    zone : str
+        ``"low"``, ``"mid"`` or ``"high"``.
+    z : float
+        Source redshift.
+
+    Returns
+    -------
+    float
+        Fallback electron density in cm^-3.
+    """
+    if zone not in _NE_ZONE_FALLBACK:
+        raise ValueError(
+            f"Unknown density zone: {zone!r}. Use 'low', 'mid' or 'high'."
+        )
+    A, p = _NE_ZONE_FALLBACK[zone]
+    return float(A * (1.0 + z) ** p)
 
 
 # ---------------------------------------------------------------------------
@@ -428,30 +550,69 @@ def compute_Te_NII(
     return float(Te)
 
 
-def Te_low_from_high(Te_high: float, relation: str = "desi") -> float:
+def Te_low_from_high(Te_high: float, relation: str = "3_tier") -> float:
     """Derive T_e(low) from T_e(high) using an empirical T_e-T_e relation.
+
+    The low-ionisation zone traces O⁺/N⁺ (14.5-29.6 eV).
 
     Parameters
     ----------
     Te_high : float
         T_e(O++) in K.
     relation : str
-        ``"desi"`` (default) — DESI DR2 (arXiv:2601.02463):
-        T_low = 0.648 * T_high + 3270
-        ``"classical"`` — Garnett (1992):
-        T_low = 0.7 * T_high + 3000
+        ``"3_tier"`` (default) — Garnett (1992) O⁺ zone, as adopted by
+        Martinez+2025 (arXiv:2510.21960): T_low = 0.70 * T_high + 3000.
+        Pairs with :func:`Te_int_from_high` for the intermediate zone so
+        the zones stay monotone (T_high >= T_int >= T_low).
+        ``"classical"`` / ``"garnett"`` — alias of the Garnett (1992) low
+        relation (identical to ``"3_tier"`` for the low zone).
+        ``"desi"`` — DESI DR2 (arXiv:2601.02463):
+        T_low = 0.648 * T_high + 3270.
 
     Returns
     -------
     float
         T_e(low) in K.
     """
-    if relation == "desi":
-        return 0.648 * Te_high + 3270.0
-    elif relation == "classical":
+    if relation in ("3_tier", "classical", "garnett"):
         return 0.7 * Te_high + 3000.0
+    elif relation == "desi":
+        return 0.648 * Te_high + 3270.0
     else:
-        raise ValueError(f"Unknown T_e relation: {relation!r}. Use 'desi' or 'classical'.")
+        raise ValueError(
+            f"Unknown T_e relation: {relation!r}. "
+            "Use '3_tier', 'classical', or 'desi'."
+        )
+
+
+def Te_int_from_high(Te_high: float, relation: str = "3_tier") -> float | None:
+    """Derive T_e(intermediate) from T_e(high) for the S²⁺ zone.
+
+    The intermediate-ionisation zone traces S²⁺ (23.3-34.8 eV) and is
+    used for S²⁺ and Ar²⁺.  Garnett (1992) gives t(S III) = 0.83 t(O III)
+    + 0.17 (in 10⁴ K), i.e. T_int = 0.83 * T_high + 1700.  This is the
+    relation adopted by Martinez+2025 (arXiv:2510.21960) for the
+    intermediate zone.
+
+    Parameters
+    ----------
+    Te_high : float
+        T_e(O++) in K.
+    relation : str
+        ``"3_tier"`` (default), ``"classical"`` or ``"garnett"`` return the
+        Garnett (1992) S III relation.  Any other relation (e.g. ``"desi"``)
+        returns ``None`` — no intermediate relation is defined, and callers
+        fall back to the T_high/T_low midpoint as before.
+
+    Returns
+    -------
+    float or None
+        T_e(intermediate) in K, or ``None`` if the relation defines no
+        intermediate zone.
+    """
+    if relation in ("3_tier", "classical", "garnett"):
+        return 0.83 * Te_high + 1700.0
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +735,8 @@ def compute_ionic_abundances(
     ne: float,
     ne_mid: float | None = None,
     ne_high: float | None = None,
+    Te_int: float | None = None,
+    ne_Opp: float | None = None,
 ) -> dict[str, float]:
     """Compute all available ionic abundances.
 
@@ -602,6 +765,15 @@ def compute_ionic_abundances(
         Electron density for the high-ionisation zone (cm^-3).
         Traced by NIV] 1483/1486 (~47 eV).  If ``None``, defaults to
         *ne_mid*.  Used for N³⁺, N⁴⁺, C³⁺.
+    Te_int : float, optional
+        Intermediate-zone (S²⁺) electron temperature in K, used for S²⁺
+        and Ar²⁺.  If ``None`` (default), the legacy ``0.5*(Te_high +
+        Te_low)`` midpoint is used.
+    ne_Opp : float, optional
+        Electron density for the O²⁺/Ne²⁺ zone (cm^-3), preferentially
+        from [Ar IV] 4711/4740 (Martinez+2025 Table 2).  If ``None``
+        (default), falls back to *ne_mid* (CIII] → *ne*), preserving the
+        previous behaviour.
 
     Returns
     -------
@@ -616,13 +788,18 @@ def compute_ionic_abundances(
     ne_lo = ne
     ne_md = ne_mid if ne_mid is not None else ne
     ne_hi = ne_high if ne_high is not None else ne_md
+    # O²⁺/Ne²⁺ zone density: [Ar IV] when available, else the CIII]
+    # intermediate density (previous behaviour).
+    ne_opp = ne_Opp if ne_Opp is not None else ne_md
+    # Intermediate-zone (S²⁺) temperature: Garnett relation when supplied,
+    # else the legacy T_high/T_low midpoint.
+    Te_mid = Te_int if Te_int is not None else 0.5 * (Te_high + Te_low)
 
-    # O++/H+ from [OIII] 5007 — T_high zone, intermediate-zone density.
-    # Uses ne_md (CIII]→low fallback), not ne_hi (NIV]): 5007/Hβ is
-    # density-insensitive below ~10⁴ cm⁻³ and CIII] overlaps the O²⁺ zone,
-    # so this avoids the noisy high-ionisation N IV] density.
+    # O++/H+ from [OIII] 5007 — T_high zone, O²⁺-zone density.
+    # Prefers ne_opp ([Ar IV], high-ionisation, overlaps O²⁺); falls back
+    # to ne_md (CIII]→low).  5007/Hβ is density-insensitive below ~10⁴ cm⁻³.
     if "OIII_5007" in fluxes and fluxes["OIII_5007"] > 0:
-        ionic["O++/H+"] = _ionic_abundance("O", 3, fluxes["OIII_5007"], Hb, Te_high, ne_md, 5007)
+        ionic["O++/H+"] = _ionic_abundance("O", 3, fluxes["OIII_5007"], Hb, Te_high, ne_opp, 5007)
 
     # O+/H+ from [OII] 3726+3729 — T_low zone
     oii = 0.0
@@ -644,21 +821,18 @@ def compute_ionic_abundances(
     if sii > 0:
         ionic["S+/H+"] = _ionic_abundance("S", 2, sii, Hb, Te_low, ne_lo, [6718, 6732])
 
-    # S++/H+ from [SIII] 9069 — T_mid zone (use average of T_high, T_low)
+    # S++/H+ from [SIII] 9069 — intermediate (S²⁺) zone temperature
     if "SIII_9069" in fluxes and fluxes["SIII_9069"] > 0:
-        Te_mid = 0.5 * (Te_high + Te_low)
         ionic["S++/H+"] = _ionic_abundance("S", 3, fluxes["SIII_9069"], Hb, Te_mid, ne_md, 9069)
 
-    # Ne++/H+ from [NeIII] 3869 — T_high zone, intermediate-zone density.
-    # Like O²⁺, [NeIII] 3869 is density-insensitive below ~10⁵ cm⁻³, so it
-    # uses ne_md (CIII]→low) rather than the noisy high-ionisation N IV]
-    # density (ne_hi).
+    # Ne++/H+ from [NeIII] 3869 — T_high zone, O²⁺-zone density.
+    # Like O²⁺, [NeIII] 3869 is density-insensitive below ~10⁵ cm⁻³ and Ne²⁺
+    # overlaps the O²⁺ zone, so it uses ne_opp ([Ar IV] → CIII] → low).
     if "NeIII_3869" in fluxes and fluxes["NeIII_3869"] > 0:
-        ionic["Ne++/H+"] = _ionic_abundance("Ne", 3, fluxes["NeIII_3869"], Hb, Te_high, ne_md, 3869)
+        ionic["Ne++/H+"] = _ionic_abundance("Ne", 3, fluxes["NeIII_3869"], Hb, Te_high, ne_opp, 3869)
 
-    # Ar++/H+ from [ArIII] 7136 — T_mid zone
+    # Ar++/H+ from [ArIII] 7136 — intermediate (S²⁺) zone temperature
     if "ArIII_7136" in fluxes and fluxes["ArIII_7136"] > 0:
-        Te_mid = 0.5 * (Te_high + Te_low)
         ionic["Ar++/H+"] = _ionic_abundance("Ar", 3, fluxes["ArIII_7136"], Hb, Te_mid, ne_md, 7136)
 
     # --- UV ionic abundances (all use T_high zone) ---

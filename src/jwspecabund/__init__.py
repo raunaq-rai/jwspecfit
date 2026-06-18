@@ -39,9 +39,11 @@ except PackageNotFoundError:  # running from a source tree without an install
 from ._core import compute_abundances
 from .forward import forward_model, hbeta_emissivity_aller84
 from .direct import (
+    Te_int_from_high,
     Te_low_from_high,
     compute_ionic_abundances,
     compute_ne,
+    compute_ne_ArIV,
     compute_ne_CIII,
     compute_ne_NIV,
     compute_Te_NII,
@@ -49,6 +51,8 @@ from .direct import (
     compute_Te_OIII_1666,
     compute_total_abundances,
     ciii_ratio_at_density,
+    heI_4714_over_4472,
+    ne_zone_fallback,
     niv_ratio_at_density,
 )
 from .martinez25_icf import (
@@ -72,6 +76,7 @@ from .strong_line import compute_line_ratios, sanders25_metallicity
 
 __all__ = [
     "AbundanceResult",
+    "Te_int_from_high",
     "Te_low_from_high",
     "cardelli_extinction",
     "compute_abundances",
@@ -83,8 +88,11 @@ __all__ = [
     "compute_ionic_abundances",
     "compute_line_ratios",
     "compute_ne",
+    "compute_ne_ArIV",
     "compute_ne_CIII",
     "compute_ne_NIV",
+    "heI_4714_over_4472",
+    "ne_zone_fallback",
     "compute_NO_martinez25",
     "compute_Te_NII",
     "compute_Te_OIII",
