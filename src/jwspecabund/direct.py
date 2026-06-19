@@ -336,9 +336,18 @@ def heI_4714_over_4472(Te: float, ne: float) -> float:
 # Redshift-evolution fits for the per-zone electron density, used when a
 # zone's density-sensitive doublet is unavailable or fails the SNR/solve.
 # Form: n_e = A * (1 + z)^p.
+#
+# - mid / high: Martinez+2025 (arXiv:2510.21960) Eqs (4) and (5):
+#     ne,int  = 1.11e3 * (1 + z)^1.93   (intermediate-ionisation zone)
+#     ne,high = 5.40e3 * (1 + z)^1.62   (high-ionisation zone)
+# - low: Topping+2025a (AURORA, arXiv:2502.08712) find the low-ionisation
+#   density evolving as (1 + z)^1.5, with median n_e = 268, 350, 480 cm^-3 at
+#   z ~ 2.1, 3.2, 5.3.  Topping give no single normalisation, so A is the
+#   log-space least-squares fit to those three medians at the fixed slope 1.5
+#   (A ~ 39 cm^-3).
 _NE_ZONE_FALLBACK: dict[str, tuple[float, float]] = {
-    "low": (54.0, 1.2),
-    "mid": (1100.0, 1.93),
+    "low": (39.0, 1.5),
+    "mid": (1110.0, 1.93),
     "high": (5400.0, 1.62),
 }
 
