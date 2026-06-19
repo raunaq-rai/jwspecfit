@@ -2566,7 +2566,7 @@ def compute_abundances(
     snr_logU: float = 1.5,
     marginalize_logU: bool = True,
     n_mc: int = 1000,
-    Te_relation: str = "desi",
+    Te_relation: str = "3_tier",
     Rv: float = 3.15,
     delta: float = -0.35,
     B_bump: float = 2.27,
@@ -2700,7 +2700,15 @@ def compute_abundances(
     n_mc : int
         Monte Carlo iterations for error propagation (default 1000).
     Te_relation : str
-        T_e-T_e relation: ``"desi"`` (default) or ``"classical"``.
+        T_e-T_e relation used to derive the intermediate- and low-zone
+        electron temperatures from T_e(O++).  ``"3_tier"`` (default)
+        follows Martinez+2025 (arXiv:2510.21960) with Garnett (1992)
+        throughout: T_int = 0.83*T_high + 1700 (S²⁺ zone) and
+        T_low = 0.70*T_high + 3000 (O⁺/N⁺ zone), giving monotone zones
+        (T_high >= T_int >= T_low for T_high >~ 1e4 K).  ``"classical"`` /
+        ``"garnett"`` are aliases.  ``"desi"`` uses the DESI DR2 low
+        relation (T_low = 0.648*T_high + 3270) with no intermediate zone
+        (S²⁺/Ar²⁺ then fall back to the T_high/T_low midpoint).
     Rv : float
         Total-to-selective ratio for Salim law (default 3.15).
     delta : float

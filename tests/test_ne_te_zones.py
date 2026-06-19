@@ -177,6 +177,38 @@ class TestIonicWiring:
         assert none_call["S++/H+"] == pytest.approx(mid_call["S++/H+"], rel=1e-9)
 
 
+class TestDefaultRelation:
+    """The 3-tier Garnett scheme is the compute_abundances default."""
+
+    def test_compute_abundances_default_is_3tier(self):
+        import inspect
+
+        from jwspecabund import compute_abundances
+
+        sig = inspect.signature(compute_abundances)
+        assert sig.parameters["Te_relation"].default == "3_tier"
+
+    def test_run_direct_reports_Te_mid(self):
+        # A default ("3_tier") _run_direct run must populate Te_mid (the
+        # intermediate-zone temperature) and keep zones monotone.
+        from jwspecabund._core import _run_direct
+
+        fluxes = {
+            "HBETA": 100.0,
+            "OIII_4363": 12.0,
+            "OIII_5007": 600.0,
+            "OIII_4959": 200.0,
+            "OII_3726": 30.0,
+            "OII_3729": 40.0,
+        }
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=20, progress=False, seed=1, z=6.0,
+        )
+        assert out["Te_mid"] is not None
+        assert out["Te_high"] >= out["Te_mid"] >= out["Te_low"]
+
+
 class TestMultiNeWiring:
     """_compute_multi_ne: [Ar IV] preference, He I deblend, z-fallbacks."""
 
