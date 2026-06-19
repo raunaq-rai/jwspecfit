@@ -287,6 +287,34 @@ class TestMultiNeWiring:
         assert "n_e(Ar IV)" in fail
         assert "He I-dominated" in fail["n_e(Ar IV)"]
 
+    def test_siIII_uv_low_ion_fallback(self):
+        # No optical [SII]/[OII]; [Si III] 1883/1892 should set ne_low.
+        from jwspecabund._core import _compute_multi_ne
+        from jwspecabund.direct import ne_zone_fallback
+
+        fluxes = {"SiIII_1": 1.5, "SiIII_2": 1.0}
+        errors = {"SiIII_1": 0.02, "SiIII_2": 0.02}
+        ne_low, _, _, _, _ = _compute_multi_ne(
+            fluxes, errors=errors, snr_ne=3.0, z=0.0,
+        )
+        # Measured from [Si III], not the z-fallback.
+        assert ne_low != pytest.approx(ne_zone_fallback("low", 0.0))
+        assert 10 < ne_low < 1e5
+
+    def test_optical_low_ion_preferred_over_siIII(self):
+        # When both [SII] and [Si III] are present, [SII] wins (optical first).
+        from jwspecabund._core import _compute_multi_ne
+        from jwspecabund.direct import compute_ne
+
+        fluxes = {
+            "SII_6718": 1.4, "SII_6732": 1.0,
+            "SiIII_1": 1.5, "SiIII_2": 1.0,
+        }
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        ne_low = _compute_multi_ne(fluxes, errors=errors, snr_ne=3.0, z=0.0)[0]
+        ne_sii = compute_ne(1.4, 1.0, doublet="SII", Te_guess=1.5e4)
+        assert ne_low == pytest.approx(ne_sii, rel=1e-6)
+
     def test_ciii_fallback_when_no_arIV(self):
         from jwspecabund._core import _compute_multi_ne
 

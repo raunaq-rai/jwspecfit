@@ -244,6 +244,50 @@ def compute_ne_NIV(
     return float(ne)
 
 
+def compute_ne_SiIII(
+    flux_1883: float,
+    flux_1892: float,
+    Te_guess: float = 1.5e4,
+) -> float:
+    """Compute electron density from the [Si III] 1883/1892 ratio.
+
+    A UV density diagnostic (Si²⁺, 16-33 eV).  Used as the low-ionisation
+    density fallback for O⁺/N⁺ when the optical [SII]/[OII] doublets are
+    out of coverage (e.g. high-z UV-only stacks; Martinez+2025 Table 2
+    list n_e(Si²⁺) for the low/intermediate zone).
+
+    Parameters
+    ----------
+    flux_1883 : float
+        [Si III] 1883 flux.
+    flux_1892 : float
+        Si III] 1892 flux.
+    Te_guess : float
+        Electron temperature guess in K (default 1.5e4).
+
+    Returns
+    -------
+    float
+        Electron density n_e in cm^-3.
+    """
+    pn = _get_pyneb()
+
+    if flux_1892 <= 0:
+        raise ValueError("Si III] 1892 flux <= 0 for density solve")
+
+    ratio = flux_1883 / flux_1892
+    atom = pn.Atom("Si", 3)
+    ne = atom.getTemDen(ratio, tem=Te_guess, wave1=1883, wave2=1892)
+
+    if np.isnan(ne) or ne <= 0:
+        raise ValueError(
+            f"PyNEB returned invalid n_e={ne:.1f} from [Si III] "
+            f"ratio={ratio:.3f} (ratio out of valid range)"
+        )
+
+    return float(ne)
+
+
 def compute_ne_ArIV(
     flux_4711: float,
     flux_4740: float,

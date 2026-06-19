@@ -510,6 +510,7 @@ def _compute_multi_ne(
         compute_ne,
         compute_ne_CIII,
         compute_ne_NIV,
+        compute_ne_SiIII,
         ne_zone_fallback,
     )
 
@@ -549,6 +550,26 @@ def _compute_multi_ne(
         else:
             logger.warning(
                 "n_e(OII) doublet below SNR threshold (%.1f); "
+                "using z-fallback %.0f cm^-3.", snr_ne, _fb_low,
+            )
+    elif "SiIII_1" in fluxes and "SiIII_2" in fluxes:
+        # UV fallback: optical [SII]/[OII] not covered (e.g. high-z UV
+        # stacks).  [Si III] 1883/1892 is the bluest low-ionisation
+        # density diagnostic (Martinez+2025 Table 2 n_e(Si²⁺)).
+        if _doublet_snr_ok("SiIII_1", "SiIII_2", fluxes, errors, snr_ne, combined=True):
+            try:
+                ne_low = compute_ne_SiIII(
+                    fluxes["SiIII_1"], fluxes["SiIII_2"], Te_guess=te_low,
+                )
+                logger.info(
+                    "n_e(low) from [Si III] (UV fallback) = %.0f cm^-3.", ne_low,
+                )
+            except Exception as exc:
+                logger.warning("n_e([Si III]) failed; using %.0f cm^-3.", _fb_low)
+                ne_failures["n_e([Si III])"] = f"PyNEB solve failed: {exc}"
+        else:
+            logger.warning(
+                "n_e([Si III]) doublet below SNR threshold (%.1f); "
                 "using z-fallback %.0f cm^-3.", snr_ne, _fb_low,
             )
 
