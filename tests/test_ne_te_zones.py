@@ -285,6 +285,50 @@ class TestZneDecoupling:
         assert nh7 > nh0
 
 
+class TestNeDiagnosticLabels:
+    """ne(low)/ne(high) diagnostic strings name the true source."""
+
+    def _oiii(self):
+        return {
+            "HBETA": 100.0, "OIII_4363": 12.0,
+            "OIII_5007": 600.0, "OIII_4959": 200.0,
+        }
+
+    def test_ne_low_labels_sii_doublet(self):
+        from jwspecabund._core import _run_direct
+
+        fluxes = {**self._oiii(), "SII_6718": 1.4, "SII_6732": 1.0}
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=10, progress=False, seed=1, z=7.0,
+        )
+        assert "[SII]" in out["diagnostics"]["ne(low)"]
+        assert "fallback" not in out["diagnostics"]["ne(low)"]
+
+    def test_ne_low_labels_zfallback(self):
+        # No low-ion doublet -> ne(low) must say z-fallback, not a doublet.
+        from jwspecabund._core import _run_direct
+
+        fluxes = self._oiii()
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=10, progress=False, seed=1, z=7.0,
+        )
+        s = out["diagnostics"]["ne(low)"]
+        assert s.startswith("z-fallback")
+        assert "doublet ratio" not in s
+
+    def test_ne_high_labels_zfallback(self):
+        from jwspecabund._core import _run_direct
+
+        fluxes = self._oiii()  # no NIV]/[Ar IV]
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=10, progress=False, seed=1, z=7.0,
+        )
+        assert "fallback" in out["diagnostics"]["ne(high)"].lower()
+
+
 class TestMultiNeWiring:
     """_compute_multi_ne: [Ar IV] preference, He I deblend, z-fallbacks."""
 

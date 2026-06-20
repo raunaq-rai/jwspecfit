@@ -1232,6 +1232,7 @@ def _build_diagnostics(
     ne_Opp: float | None = None,
     Te_int: float | None = None,
     te_high_diag: str | None = None,
+    z: float = 0.0,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -1314,27 +1315,35 @@ def _build_diagnostics(
             f"{rel_label} Te-Te relation from Te(high) = {Te_high:.0f} K"
         )
 
-    # ne(low)
+    # ne(low) — measured from a doublet iff ne_low differs from the
+    # z-dependent fallback (on a failed/absent solve ne_low IS the fallback).
+    from .direct import ne_zone_fallback
+    _fb_low = ne_zone_fallback("low", z)
     _has_sii = "SII_6718" in fluxes and "SII_6732" in fluxes
     _has_oii = "OII_3726" in fluxes and "OII_3729" in fluxes
-    if ne_low != ne_default:
+    _has_siiii = "SiIII_1" in fluxes and "SiIII_2" in fluxes
+    _measured_low = abs(ne_low - _fb_low) > 1e-6
+    if _measured_low:
         if _has_sii:
             diag["ne(low)"] = f"[SII] 6718/6732 doublet ratio -> {ne_low:.0f} cm^-3"
         elif _has_oii:
             diag["ne(low)"] = f"[OII] 3726/3729 doublet ratio -> {ne_low:.0f} cm^-3"
-    else:
-        if _has_sii:
+        elif _has_siiii:
             diag["ne(low)"] = (
-                f"default ({ne_default:.0f} cm^-3) — [SII] doublet failed SNR cut or solve"
-            )
-        elif _has_oii:
-            diag["ne(low)"] = (
-                f"default ({ne_default:.0f} cm^-3) — [OII] doublet failed SNR cut or solve"
+                f"[Si III] 1883/1892 doublet ratio (UV) -> {ne_low:.0f} cm^-3"
             )
         else:
-            diag["ne(low)"] = (
-                f"default ({ne_default:.0f} cm^-3) — no [SII] or [OII] doublet available"
-            )
+            diag["ne(low)"] = f"{ne_low:.0f} cm^-3"
+    else:
+        _why = (
+            "[SII] doublet failed SNR cut or solve" if _has_sii else
+            "[OII] doublet failed SNR cut or solve" if _has_oii else
+            "[Si III] doublet failed SNR cut or solve" if _has_siiii else
+            "no [SII]/[OII]/[Si III] doublet available"
+        )
+        diag["ne(low)"] = (
+            f"z-fallback ({_fb_low:.0f} cm^-3, Topping+2025a) — {_why}"
+        )
 
     # ne(mid)
     _has_ciii = "CIII]_1907" in fluxes and "CIII]" in fluxes
@@ -1349,28 +1358,31 @@ def _build_diagnostics(
             f"fallback to ne(low) = {ne_low:.0f} cm^-3 — no CIII] doublet available"
         )
 
-    # ne(high)
+    # ne(high) — NIV] (preferred) -> [Ar IV] -> z-fallback (Martinez+2025).
+    _fb_high = ne_zone_fallback("high", z)
     _has_niv = "NIV_1483" in fluxes and "NIV_1486" in fluxes
-    ne_mid_or_low = ne_mid if ne_mid is not None else ne_low
-    if _has_niv and ne_high != ne_mid_or_low:
+    _has_arIV = "ArIV_4713" in fluxes and "ArIV_4741" in fluxes
+    _is_fb_high = abs(ne_high - _fb_high) <= 1e-6
+    if _has_niv and not niv_rejected and not _is_fb_high:
         diag["ne(high)"] = f"NIV] 1483/1486 doublet ratio -> {ne_high:.0f} cm^-3"
+    elif _has_arIV and not _is_fb_high and ne_Opp is not None \
+            and abs(ne_high - ne_Opp) <= 1e-6:
+        diag["ne(high)"] = (
+            f"[Ar IV] 4711/4740 (He I-deblended) -> {ne_high:.0f} cm^-3"
+        )
+    elif _is_fb_high:
+        _why = (
+            "NIV] rejected (ratio out of range)" if niv_rejected else
+            "NIV] failed SNR cut or solve" if _has_niv else
+            "no NIV]/[Ar IV] high-ion doublet available"
+        )
+        diag["ne(high)"] = (
+            f"z-fallback ({_fb_high:.0f} cm^-3, Martinez+2025) — {_why}"
+        )
     else:
-        fallback_label = "ne(mid)" if ne_mid is not None else "ne(low)"
-        if niv_rejected:
-            diag["ne(high)"] = (
-                f"fallback to {fallback_label} = {ne_mid_or_low:.0f} cm^-3 "
-                f"— NIV] rejected (doublet ratio outside physical range)"
-            )
-        elif _has_niv:
-            diag["ne(high)"] = (
-                f"fallback to {fallback_label} = {ne_mid_or_low:.0f} cm^-3 "
-                f"— NIV] failed SNR cut or solve"
-            )
-        else:
-            diag["ne(high)"] = (
-                f"fallback to {fallback_label} = {ne_mid_or_low:.0f} cm^-3 "
-                f"— no NIV] doublet available"
-            )
+        # Clamped to ne(mid)/ne(low) because the solved value exceeded
+        # ne_high_max.
+        diag["ne(high)"] = f"clamped to {ne_high:.0f} cm^-3 (exceeded ne_high_max)"
 
     # log(U)
     if logU is not None:
@@ -1581,7 +1593,7 @@ def _run_direct(
         fluxes, Te_high, Te_relation, ne_low, ne_mid, ne_high,
         logU, logU_diag, icf_method, NO_icf_name, NE_DEFAULT,
         totals=totals, niv_rejected=niv_rejected,
-        ne_Opp=ne_Opp, Te_int=Te_int, te_high_diag=_Te_diagnostic,
+        ne_Opp=ne_Opp, Te_int=Te_int, te_high_diag=_Te_diagnostic, z=z,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -2468,7 +2480,7 @@ def _run_direct_mcmc(
                 icf_method, NO_icf_name, NE_DEFAULT,
                 totals=totals_pt, niv_rejected=niv_rejected,
                 ne_Opp=ne_Opp, Te_int=_Te_mid_final,
-                te_high_diag=_Te_diagnostic,
+                te_high_diag=_Te_diagnostic, z=z,
             ),
             **_diag_extra,
         },
