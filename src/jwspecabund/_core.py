@@ -1231,6 +1231,7 @@ def _build_diagnostics(
     niv_rejected: bool = False,
     ne_Opp: float | None = None,
     Te_int: float | None = None,
+    te_high_diag: str | None = None,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -1282,8 +1283,16 @@ def _build_diagnostics(
         else "CIII] 1907/1909 -> z-fallback"
     )
     if Te_high is not None:
+        _te_line = (
+            "O III] 1666/(5007+4959)" if te_high_diag == "1666"
+            else "[OIII] 4363/(5007+4959)"
+        )
+        # Compact method label (line + temperature) for table display.
+        diag["Te(high) method"] = (
+            f"{_te_line} -> T_e = {Te_high:.0f} K (PyNEB)"
+        )
         diag["Te(high)"] = (
-            f"[OIII] 4363/(5007+4959) ratio with n_e(O++ zone) = {_ne_OIII:.0f} cm^-3 (PyNEB)"
+            f"{_te_line} ratio with n_e(O++ zone) = {_ne_OIII:.0f} cm^-3 (PyNEB)"
         )
         diag["O++/H+ density"] = (
             f"O²⁺-zone n_e = {_ne_OIII:.0f} cm^-3 from {_opp_src}; "
@@ -1572,7 +1581,7 @@ def _run_direct(
         fluxes, Te_high, Te_relation, ne_low, ne_mid, ne_high,
         logU, logU_diag, icf_method, NO_icf_name, NE_DEFAULT,
         totals=totals, niv_rejected=niv_rejected,
-        ne_Opp=ne_Opp, Te_int=Te_int,
+        ne_Opp=ne_Opp, Te_int=Te_int, te_high_diag=_Te_diagnostic,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -2459,6 +2468,7 @@ def _run_direct_mcmc(
                 icf_method, NO_icf_name, NE_DEFAULT,
                 totals=totals_pt, niv_rejected=niv_rejected,
                 ne_Opp=ne_Opp, Te_int=_Te_mid_final,
+                te_high_diag=_Te_diagnostic,
             ),
             **_diag_extra,
         },

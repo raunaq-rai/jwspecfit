@@ -196,6 +196,46 @@ class TestDefaultRelation:
         sig = inspect.signature(compute_abundances)
         assert sig.parameters["Te_relation"].default == "3_tier"
 
+    def test_diagnostics_report_te_method_4363(self):
+        # The Te(high) method string must name the actual auroral line.
+        from jwspecabund._core import _run_direct
+
+        fluxes = {
+            "HBETA": 100.0,
+            "OIII_4363": 12.0,
+            "OIII_5007": 600.0,
+            "OIII_4959": 200.0,
+            "OII_3726": 30.0,
+            "OII_3729": 40.0,
+        }
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=20, progress=False, seed=1, z=6.0,
+        )
+        diag = out["diagnostics"]
+        assert "Te(high) method" in diag
+        assert "4363" in diag["Te(high) method"]
+        assert "1666" not in diag["Te(high) method"]
+
+    def test_diagnostics_report_te_method_1666(self):
+        # With only O III] 1666 (no 4363), the method must say 1666.
+        from jwspecabund._core import _run_direct
+
+        fluxes = {
+            "HBETA": 100.0,
+            "OIII_1666": 15.0,
+            "OIII_5007": 600.0,
+            "OIII_4959": 200.0,
+            "OII_3726": 30.0,
+            "OII_3729": 40.0,
+        }
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=20, progress=False, seed=1, z=6.0,
+        )
+        diag = out["diagnostics"]
+        assert "1666" in diag["Te(high) method"]
+
     def test_run_direct_reports_Te_mid(self):
         # A default ("3_tier") _run_direct run must populate Te_mid (the
         # intermediate-zone temperature) and keep zones monotone.
