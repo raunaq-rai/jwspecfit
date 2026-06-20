@@ -79,16 +79,16 @@ class TestNeZoneFallback:
     """Redshift-dependent electron-density fallbacks."""
 
     def test_z0_values(self):
-        # At z=0, n_e = A. low: Topping+2025a (slope 1.5, A~39);
-        # mid/high: Martinez+2025 Eqs (4)/(5).
-        assert ne_zone_fallback("low", 0.0) == pytest.approx(39.0)
+        # At z=0, n_e = A. low: Topping+2025a stated z=0 value (40 cm^-3,
+        # slope 1.5); mid/high: Martinez+2025 Eqs (4)/(5).
+        assert ne_zone_fallback("low", 0.0) == pytest.approx(40.0)
         assert ne_zone_fallback("mid", 0.0) == pytest.approx(1110.0)
         assert ne_zone_fallback("high", 0.0) == pytest.approx(5400.0)
 
     def test_martinez_topping_slopes(self):
         # Slopes: low=1.5 (Topping), mid=1.93, high=1.62 (Martinez).
         z = 4.0
-        assert ne_zone_fallback("low", z) == pytest.approx(39.0 * (1 + z) ** 1.5)
+        assert ne_zone_fallback("low", z) == pytest.approx(40.0 * (1 + z) ** 1.5)
         assert ne_zone_fallback("mid", z) == pytest.approx(1110.0 * (1 + z) ** 1.93)
         assert ne_zone_fallback("high", z) == pytest.approx(5400.0 * (1 + z) ** 1.62)
 

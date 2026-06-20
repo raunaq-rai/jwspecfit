@@ -385,12 +385,11 @@ def heI_4714_over_4472(Te: float, ne: float) -> float:
 #     ne,int  = 1.11e3 * (1 + z)^1.93   (intermediate-ionisation zone)
 #     ne,high = 5.40e3 * (1 + z)^1.62   (high-ionisation zone)
 # - low: Topping+2025a (AURORA, arXiv:2502.08712) find the low-ionisation
-#   density evolving as (1 + z)^1.5, with median n_e = 268, 350, 480 cm^-3 at
-#   z ~ 2.1, 3.2, 5.3.  Topping give no single normalisation, so A is the
-#   log-space least-squares fit to those three medians at the fixed slope 1.5
-#   (A ~ 39 cm^-3).
+#   density evolving as (1 + z)^1.5 (median n_e = 268/350/480 cm^-3 at
+#   z ~ 2.1/3.2/5.3).  They state this best-fit trend extrapolates to
+#   n_e = 40 (-30/+60) cm^-3 at z = 0 -> A = 40 (their published z=0 value).
 _NE_ZONE_FALLBACK: dict[str, tuple[float, float]] = {
-    "low": (39.0, 1.5),
+    "low": (40.0, 1.5),
     "mid": (1110.0, 1.93),
     "high": (5400.0, 1.62),
 }
