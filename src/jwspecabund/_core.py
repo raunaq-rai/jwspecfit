@@ -2608,6 +2608,9 @@ def compute_abundances(
     ne_low_override: float | None = None,
     ne_mid_override: float | None = None,
     ne_high_override: float | None = None,
+    # Physical redshift for the z-dependent n_e fallbacks (decoupled from
+    # the geometric *z*; set for rest-frame stacks fit at z=0).
+    z_ne: float | None = None,
     # Balmer decrement SNR floor for A_V derivation
     snr_balmer: float = 3.0,
     # Balmer decrement anchor line for A_V derivation
@@ -2773,6 +2776,15 @@ def compute_abundances(
         If set, use this value (cm^-3) for the high-ionisation zone
         density instead of deriving it from NIV] (or the fallback
         chain).  Useful when the CIII]-derived fallback is suspect.
+    z_ne : float or None
+        Physical redshift used **only** for the z-dependent electron-
+        density fallbacks (:func:`jwspecabund.direct.ne_zone_fallback`),
+        decoupled from the geometric *z*.  Defaults to *z* when ``None``.
+        Set this for rest-frame stacks fit at ``z=0``: pass ``z=0`` (so
+        the continuum-RMS line windows stay rest-frame) and
+        ``z_ne=<sample median redshift>`` so a zone whose doublet is
+        missing/failed still falls back to the correct high-z density.
+        Only matters when a density zone has no usable doublet.
     forward_sampler : str
         Sampler for forward model: ``"emcee"`` or ``"dynesty"`` (default ``"emcee"``).
     forward_n_walkers : int
@@ -2800,6 +2812,10 @@ def compute_abundances(
     AbundanceResult
         Chemical abundance measurement.
     """
+    # Physical redshift for the z-dependent n_e fallbacks (decoupled from
+    # the geometric z used for continuum-RMS line windows).
+    _z_ne = z_ne if z_ne is not None else z
+
     # --- Extract fluxes ---
     fluxes, errors, is_mcmc = _extract_fluxes(result)
     posteriors = _extract_posteriors(result) if is_mcmc else {}
@@ -3029,7 +3045,7 @@ def compute_abundances(
                 ne_low_override=ne_low_override,
                 ne_mid_override=ne_mid_override,
                 ne_high_override=ne_high_override,
-                z=z,
+                z=_z_ne,
                 Av=Av_derived, Av_err=Av_err,
                 Av_prior=Av_prior, dust_law=dust_law,
                 dust_kwargs=dust_kwargs,
@@ -3045,7 +3061,7 @@ def compute_abundances(
                 ne_low_override=ne_low_override,
                 ne_mid_override=ne_mid_override,
                 ne_high_override=ne_high_override,
-                z=z,
+                z=_z_ne,
             )
 
         primary_result = AbundanceResult(
@@ -3150,7 +3166,7 @@ def compute_abundances(
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
-                            z=z,
+                            z=_z_ne,
                             Av=Av_derived, Av_err=Av_err,
                             Av_prior=Av_prior, dust_law=dust_law,
                             dust_kwargs=dust_kwargs,
@@ -3166,7 +3182,7 @@ def compute_abundances(
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
-                            z=z,
+                            z=_z_ne,
                         )
                     # Check if the result is valid (not all NaN).
                     oh_1666 = d1666_out.get("OH")
@@ -3236,7 +3252,7 @@ def compute_abundances(
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
-                            z=z,
+                            z=_z_ne,
                             Av=Av_derived, Av_err=Av_err,
                             Av_prior=Av_prior, dust_law=dust_law,
                             dust_kwargs=dust_kwargs,
@@ -3251,7 +3267,7 @@ def compute_abundances(
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
-                            z=z,
+                            z=_z_ne,
                         )
                     alt["direct"] = AbundanceResult(
                         method="direct",

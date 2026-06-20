@@ -257,6 +257,34 @@ class TestDefaultRelation:
         assert out["Te_high"] >= out["Te_mid"] >= out["Te_low"]
 
 
+class TestZneDecoupling:
+    """z_ne drives the n_e fallback independently of the geometric z."""
+
+    def test_z_ne_overrides_fallback_redshift(self):
+        from jwspecabund._core import _solve_densities_refined
+        from jwspecabund.direct import ne_zone_fallback
+
+        # No high-zone doublet -> ne_high uses the z-fallback.  Passing a
+        # high z must raise ne_high relative to z=0 even with no z change
+        # elsewhere (mimics z=0 geometry, z_ne=7 physical).
+        fluxes = {
+            "HBETA": 100.0, "OIII_4363": 12.0,
+            "OIII_5007": 600.0, "OIII_4959": 200.0,
+        }
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        nh0 = _solve_densities_refined(
+            fluxes, errors, z=0.0, Te_relation="3_tier",
+            snr_ne=3.0, ne_high_max=5e5, niv_rejected=False,
+        )[2]
+        nh7 = _solve_densities_refined(
+            fluxes, errors, z=7.0, Te_relation="3_tier",
+            snr_ne=3.0, ne_high_max=5e5, niv_rejected=False,
+        )[2]
+        assert nh0 == pytest.approx(ne_zone_fallback("high", 0.0))
+        assert nh7 == pytest.approx(ne_zone_fallback("high", 7.0))
+        assert nh7 > nh0
+
+
 class TestMultiNeWiring:
     """_compute_multi_ne: [Ar IV] preference, He I deblend, z-fallbacks."""
 
