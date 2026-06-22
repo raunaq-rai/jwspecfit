@@ -837,11 +837,15 @@ def compute_ionic_abundances(
         return ionic
 
     ne_lo = ne
-    ne_md = ne_mid if ne_mid is not None else ne
-    ne_hi = ne_high if ne_high is not None else ne_md
     # O²⁺/Ne²⁺ zone density: [Ar IV] when available, else the CIII]
-    # intermediate density (previous behaviour).
-    ne_opp = ne_Opp if ne_Opp is not None else ne_md
+    # intermediate density, else the (z-dependent) value supplied as ne_mid;
+    # always a valid number when the caller passes ne_Opp.
+    ne_opp = ne_Opp if ne_Opp is not None else (ne_mid if ne_mid is not None else ne)
+    # Intermediate-zone density for C²⁺/N²⁺/S²⁺/Ar²⁺: CIII] when measured,
+    # otherwise fall back to the O²⁺-zone density (which carries the
+    # z-dependent intermediate fallback) rather than the low-ionisation ne.
+    ne_md = ne_mid if ne_mid is not None else ne_opp
+    ne_hi = ne_high if ne_high is not None else ne_opp
     # Intermediate-zone (S²⁺) temperature: Garnett relation when supplied,
     # else the legacy T_high/T_low midpoint.
     Te_mid = Te_int if Te_int is not None else 0.5 * (Te_high + Te_low)

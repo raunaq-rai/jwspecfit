@@ -201,6 +201,30 @@ class TestIonicWiring:
         )
         assert a["S++/H+"] != pytest.approx(b["S++/H+"], rel=1e-6)
 
+    def test_mid_density_falls_back_to_ne_Opp_not_low(self):
+        # When CIII] fails (ne_mid=None), the intermediate ions C²⁺/N²⁺ must
+        # use the supplied O²⁺-zone density (z-fallback mid), NOT ne_low.
+        fluxes = {
+            "HBETA": 100.0,
+            "CIII]_1907": 8.0, "CIII]": 6.0,
+            "NIII_1749": 5.0, "NIII_1752": 4.0,
+        }
+        # ne_mid=None, ne_low=600, ne_Opp=6e4 (a z-fallback mid value).
+        viafallback = compute_ionic_abundances(
+            fluxes, 1.8e4, 1.2e4, 600.0, ne_mid=None, ne_Opp=6e4, Te_int=1.4e4,
+        )
+        # Same call but explicitly at ne_mid=6e4 should match the fallback.
+        explicit = compute_ionic_abundances(
+            fluxes, 1.8e4, 1.2e4, 600.0, ne_mid=6e4, ne_Opp=6e4, Te_int=1.4e4,
+        )
+        # And it must NOT equal the (wrong) ne_low=600 result.
+        atlow = compute_ionic_abundances(
+            fluxes, 1.8e4, 1.2e4, 600.0, ne_mid=600.0, ne_Opp=6e4, Te_int=1.4e4,
+        )
+        for ion in ("C++/H+", "N++/H+"):
+            assert viafallback[ion] == pytest.approx(explicit[ion], rel=1e-9)
+            assert viafallback[ion] != pytest.approx(atlow[ion], rel=1e-6)
+
     def test_Te_int_none_falls_back_to_midpoint(self):
         # When Te_int is None the legacy 0.5*(Th+Tl) midpoint is used.
         fluxes = self._base_fluxes()
