@@ -1409,7 +1409,7 @@ def compute_total_abundances(
         Ne_pp = ionic.get("Ne++/H+", 0.0)
         if Ne_pp > 0 and O_pp > 0:
             icf_ne = icf_neon(O_plus, OH)
-            raw_neo = Ne_pp / O_pp
+            raw_neo = Ne_pp / OH if OH > 0 else 0
             totals["Ne/O"] = icf_ne * raw_neo
             icf_dict["Ne/O"] = {
                 "icf": icf_ne, "method": "Izotov+06",

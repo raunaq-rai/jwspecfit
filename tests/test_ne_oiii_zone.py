@@ -72,13 +72,19 @@ def test_Nppp_still_uses_high_zone_density():
 
 
 def test_Npp_uses_intermediate_zone_density():
-    """N²⁺/H+ (N III]) must use the intermediate density (regression)."""
+    """N²⁺/H+ (N III]) must use the intermediate density and temperature.
+
+    Since commit f97b7d3, N²⁺ sits in the intermediate zone for *both* the
+    density (ne_mid) and the temperature (Te_int, defaulting to the
+    midpoint 0.5*(Te_high+Te_low) when Te_int is not supplied).
+    """
     ionic = compute_ionic_abundances(
         _FLUXES, _TE_HIGH, _TE_LOW, _NE_LOW, ne_mid=_NE_MID, ne_high=_NE_HIGH,
     )
+    te_mid = 0.5 * (_TE_HIGH + _TE_LOW)
     expected_mid = _ionic_abundance(
         "N", 3, _FLUXES["NIII_1749"] + _FLUXES["NIII_1752"], _FLUXES["HBETA"],
-        _TE_HIGH, _NE_MID, [1749, 1752],
+        te_mid, _NE_MID, [1749, 1752],
     )
     assert np.isclose(ionic["N++/H+"], expected_mid, rtol=1e-6)
 

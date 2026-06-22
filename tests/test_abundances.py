@@ -2049,3 +2049,45 @@ class TestLogUDiagnosticLock:
             errors=self.ERRS, lock_diag="N43",
         )
         assert val is None and diag is None
+
+
+class TestNeonICF:
+    """Izotov+06 eq. 19 ICF for neon (regression for the dropped 1/w term)."""
+
+    def test_icf_unity_at_high_ionisation(self):
+        # w = O++/(O++O++) ~ 1 (fully doubly ionised) => ICF -> ~1.
+        from jwspecabund.icf import icf_neon
+        O_total = 10 ** (7.8 - 12)
+        O_plus = 0.02 * O_total  # 98% O++
+        icf = icf_neon(O_plus, O_total)
+        assert 0.95 < icf < 1.10
+
+    def test_icf_increases_as_ionisation_drops(self):
+        from jwspecabund.icf import icf_neon
+        O_total = 10 ** (7.8 - 12)
+        icf_high = icf_neon(0.05 * O_total, O_total)  # high ionisation
+        icf_low = icf_neon(0.50 * O_total, O_total)   # more O+ => more unseen Ne+
+        assert icf_low > icf_high >= 1.0
+
+    def test_icf_never_below_unity(self):
+        from jwspecabund.icf import icf_neon
+        O_total = 10 ** (8.5 - 12)  # high-Z branch dips below 1 before clamp
+        for f in (0.02, 0.1, 0.3, 0.6, 0.9):
+            assert icf_neon(f * O_total, O_total) >= 1.0
+
+    def test_metallicity_branches_selected(self):
+        # Exercise all three eq. 19 branches at fixed ionisation.
+        from jwspecabund.icf import icf_neon
+        w_frac = 0.1  # O+/O => w = 0.9
+        vals = {oh: icf_neon(w_frac * 10 ** (oh - 12), 10 ** (oh - 12))
+                for oh in (7.0, 7.8, 8.5)}
+        # All physical (~1) but the branches differ.
+        assert all(0.9 < v < 1.3 for v in vals.values())
+        assert len({round(v, 4) for v in vals.values()}) == 3
+
+    def test_regression_not_old_buggy_value(self):
+        # The old (buggy) formula returned ~0.37 here; the fix must be ~1.
+        from jwspecabund.icf import icf_neon
+        O_total = 10 ** (7.8 - 12)
+        icf = icf_neon(0.1 * O_total, O_total)
+        assert icf > 0.9  # would have been 0.372 with the dropped 1/w term

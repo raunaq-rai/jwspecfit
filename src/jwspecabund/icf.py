@@ -47,30 +47,38 @@ def icf_nitrogen(O_plus: float, O_total: float) -> float:
 def icf_neon(O_plus: float, O_total: float) -> float:
     """ICF for neon (Izotov+06 eq. 19).
 
-    Ne/O = ICF_Ne * Ne++/O++.
+    Elemental correction: Ne/H = ICF_Ne * Ne++/H+.  To form Ne/O, divide
+    the corrected Ne abundance by the total oxygen abundance, i.e.
+    Ne/O = ICF_Ne * (Ne++/H+) / (O/H).
 
     Parameters
     ----------
     O_plus : float
         Ionic abundance O+/H+.
     O_total : float
-        Total oxygen abundance O/H.
+        Total oxygen abundance O/H (= O+/H+ + O++/H+).
 
     Returns
     -------
     float
-        ICF_Ne.
+        ICF_Ne (>= 1; ~1 for high-ionisation HII regions).
     """
     if O_total <= 0 or O_plus <= 0:
         return 1.0
-    x = O_plus / O_total
-    # Eq. 19
-    icf = -0.385 * x**2 + 0.405 * x + 0.335
-    # ICF = Ne_total / Ne++ * O++ / O_total
-    # Normalised so that when x ~ 0 (fully ionised), ICF ~ 0.335 + ...
-    # The actual prescription: Ne/O = ICF * Ne++/O++
-    # ICF ~ 1 for typical HII regions.
-    return max(icf, 0.1)
+    # Elemental ICF: Ne/H = ICF * Ne++/H+.  Izotov+06 eq. 19 is a fit in
+    # the O++ ionisation fraction w = O++/(O+ + O++), with three branches
+    # selected by metallicity.  ICF -> 1 at high ionisation (w -> 1, all
+    # oxygen doubly ionised so Ne++ captures all Ne) and rises as w falls
+    # (unseen Ne+ in the low-ionisation zone).
+    w = float(np.clip((O_total - O_plus) / O_total, 1e-3, 1.0))
+    oh = 12.0 + np.log10(O_total)
+    if oh <= 7.2:
+        icf = -0.385 * w + 1.365 + 0.022 / w  # eq. 19a (low Z)
+    elif oh >= 8.2:
+        icf = -0.591 * w + 0.927 + 0.546 / w  # eq. 19c (high Z)
+    else:
+        icf = -0.405 * w + 1.382 + 0.021 / w  # eq. 19b (intermediate Z)
+    return max(icf, 1.0)
 
 
 def icf_sulfur(O_plus: float, O_total: float) -> float:
