@@ -4,6 +4,48 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## 1.1.5 — 2026-06-22
+
+### Direct-Te abundances: three-zone temperature & density framework
+
+- **New default `Te_relation="3_tier"`** (`jwspecabund`). The direct-Te
+  method now resolves three ionisation zones with Garnett (1992) Te–Te
+  relations throughout (following Martinez+2025, "Under Pressure",
+  arXiv:2510.21960): `Te_int = 0.83·Te_high + 1700` and
+  `Te_low = 0.70·Te_high + 3000`, with `Te_high` measured from
+  [O III] λ4363 (or λ1666). Ions are assigned to zones by ionisation
+  potential — O²⁺/Ne²⁺/N³⁺/C³⁺ to the high zone, N²⁺/C²⁺/S²⁺/Ar²⁺ to the
+  intermediate zone, and O⁺/N⁺/S⁺ to the low zone. `AbundanceResult` gains
+  `Te_mid`, `Te_mid_err`, and `ne_Opp`.
+
+- **[Ar IV] λλ4711,4740 as the preferred O²⁺-zone density**, with the
+  λ4711 / He I λ4714 blend deblended via the He I λ4472 anchor and a PyNEB
+  He I emissivity ratio (`compute_ne_ArIV`, `heI_4714_over_4472`); C III]
+  is the fallback.
+
+- **[Si III] λλ1883,1892 added as a UV low-ion density fallback** for the
+  O⁺/N⁺ zone (`compute_ne_SiIII`), for UV-only high-z stacks where the
+  optical [S II]/[O II] doublets are unavailable.
+
+- **Redshift-dependent density fallbacks** when a doublet is missing or its
+  solve fails (`ne_zone_fallback`): `ne_low = 54·(1+z)^1.2`
+  (Abdurro'uf+2024), and `ne_mid = 1110·(1+z)^1.93`,
+  `ne_high = 5400·(1+z)^1.62` (Martinez+2025 Eqs 4/5). Densities are solved
+  at a 1.5×10⁴ K fiducial and refined once at the zone temperature.
+
+- **New `z_ne` parameter** on `compute_abundances` decouples the redshift
+  used for density fallbacks from the geometric redshift (e.g. rest-frame
+  z=0 stacks of a physically high-z sample).
+
+### Bug fixes
+
+- Intermediate-zone ions (C²⁺/N²⁺/S²⁺/Ar²⁺) now fall back to the O²⁺-zone
+  density `ne_Opp` (carrying the z-dependent intermediate fallback) rather
+  than the low-zone density when the C III] solve fails.
+- `ne(low)`/`ne(high)` diagnostic labels are now truthful after a
+  z-fallback, and the `Te(high)` diagnostic reports the actual auroral
+  line used (λ4363 vs λ1666).
+
 ## 1.1.4 — 2026-06-07
 
 ### Bug fixes
