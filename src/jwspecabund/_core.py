@@ -1108,6 +1108,7 @@ def _compute_ionic_upper_limits(
     n_sigma: float = 3.0,
     continuum_rms_limits: dict[str, float] | None = None,
     ne_Opp: float | None = None,
+    Te_int: float | None = None,
 ) -> tuple[dict[str, float], dict[str, dict]]:
     """Compute n-sigma upper limits for non-detected ionic abundances.
 
@@ -1136,16 +1137,19 @@ def _compute_ionic_upper_limits(
     # O²⁺/Ne²⁺ use the O²⁺-zone density ([Ar IV] preferred); fall back to
     # ne_mid for backward compatibility.
     ne_opp = ne_Opp if ne_Opp is not None else ne_mid
+    # Intermediate (S²⁺/C²⁺/N²⁺) temperature; fall back to the midpoint.
+    Te_mid = Te_int if Te_int is not None else 0.5 * (Te_high + Te_low)
 
     # Mapping: ion_key -> (element, ion_stage, line_names, wave_labels, Te, ne)
+    # C²⁺/N²⁺ use the intermediate temperature Te_mid (Martinez+2025 §5.4).
     _ION_MAP = [
         ("O+/H+",   "O", 2, ["OII_doublet"], [3727],       Te_low,  ne_low),
         ("O++/H+",  "O", 3, ["OIII_5007"],   [5007],       Te_high, ne_opp),
         ("N+/H+",   "N", 2, ["NII_6585"],    [6584],       Te_low,  ne_low),
-        ("N++/H+",  "N", 3, ["NIII_1749", "NIII_1752"], [1749, 1752], Te_high, ne_mid),
+        ("N++/H+",  "N", 3, ["NIII_1749", "NIII_1752"], [1749, 1752], Te_mid, ne_mid),
         ("N+++/H+", "N", 4, ["NIV_1483", "NIV_1486"],   [1483, 1486], Te_high, ne_high),
         ("C+/H+",   "C", 2, ["CII]_2324", "CII]_2326"], [2323, 2325, 2326, 2327, 2328], Te_low, ne_low),
-        ("C++/H+",  "C", 3, ["CIII]_1907", "CIII]"],    [1907, 1909], Te_high, ne_mid),
+        ("C++/H+",  "C", 3, ["CIII]_1907", "CIII]"],    [1907, 1909], Te_mid, ne_mid),
         ("C+++/H+", "C", 4, ["CIV_1", "CIV_2"],         [1548, 1551], Te_high, ne_high),
         ("Ne++/H+", "Ne", 3, ["NeIII_3869"], [3869],     Te_high, ne_opp),
         ("S+/H+",   "S", 2, ["SII_6718", "SII_6732"], [6718, 6732], Te_low, ne_low),
@@ -1555,7 +1559,7 @@ def _run_direct(
         ne_mid if ne_mid is not None else ne_low,
         ne_high if ne_high is not None else ne_low,
         continuum_rms_limits=continuum_rms_limits,
-        ne_Opp=ne_Opp,
+        ne_Opp=ne_Opp, Te_int=Te_int,
     )
 
     totals = compute_total_abundances(
@@ -2147,7 +2151,7 @@ def _run_direct_mcmc(
             ne_mid if ne_mid is not None else ne_low,
             ne_high if ne_high is not None else ne_low,
             continuum_rms_limits=continuum_rms_limits,
-            ne_Opp=ne_Opp,
+            ne_Opp=ne_Opp, Te_int=Te_int_pt,
         )
 
     totals_pt = compute_total_abundances(

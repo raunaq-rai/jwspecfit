@@ -887,7 +887,11 @@ def compute_ionic_abundances(
     if "ArIII_7136" in fluxes and fluxes["ArIII_7136"] > 0:
         ionic["Ar++/H+"] = _ionic_abundance("Ar", 3, fluxes["ArIII_7136"], Hb, Te_mid, ne_md, 7136)
 
-    # --- UV ionic abundances (all use T_high zone) ---
+    # --- UV ionic abundances ---
+    # Zone assignment follows Martinez+2025 (arXiv:2510.21960, §5.4/6.1):
+    # the intermediate-ionisation ions C²⁺ and N²⁺ use the intermediate
+    # temperature (Te_mid) and density (ne_md); the high-ionisation ions
+    # C³⁺, N³⁺, N⁴⁺ use Te_high and ne_hi.
     # For doublets: if both members are present, sum fluxes and use total
     # emissivity.  If only one member is present, use that member's flux
     # with its single-line emissivity to avoid underestimating the
@@ -908,15 +912,15 @@ def compute_ionic_abundances(
             "C", 2, cii_flux, Hb, Te_low, ne_lo, _CII_MULTIPLET_WAVES,
         )
 
-    # C2+/H+ from CIII] 1907 + 1909 — mid-ionisation zone
+    # C2+/H+ from CIII] 1907 + 1909 — intermediate zone (Te_mid, ne_md)
     _c1907 = fluxes.get("CIII]_1907", 0.0)
     _c1909 = fluxes.get("CIII]", 0.0)
     if _c1907 > 0 and _c1909 > 0:
-        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1907 + _c1909, Hb, Te_high, ne_md, [1907, 1909])
+        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1907 + _c1909, Hb, Te_mid, ne_md, [1907, 1909])
     elif _c1907 > 0:
-        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1907, Hb, Te_high, ne_md, 1907)
+        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1907, Hb, Te_mid, ne_md, 1907)
     elif _c1909 > 0:
-        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1909, Hb, Te_high, ne_md, 1909)
+        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1909, Hb, Te_mid, ne_md, 1909)
 
     # C3+/H+ from CIV 1548 + 1551 — T_high zone
     _civ1 = fluxes.get("CIV_1", 0.0)
@@ -928,15 +932,16 @@ def compute_ionic_abundances(
     elif _civ2 > 0:
         ionic["C+++/H+"] = _ionic_abundance("C", 4, _civ2, Hb, Te_high, ne_hi, 1551)
 
-    # N2+/H+ from NIII] 1749 + 1752 — mid-ionisation zone
+    # N2+/H+ from NIII] 1749 + 1752 — intermediate zone (Te_mid, ne_md)
+    # Martinez+2025 §5.4: N²⁺ uses Te_int and ne_int.
     _n1749 = fluxes.get("NIII_1749", 0.0)
     _n1752 = fluxes.get("NIII_1752", 0.0)
     if _n1749 > 0 and _n1752 > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749 + _n1752, Hb, Te_high, ne_md, [1749, 1752])
+        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749 + _n1752, Hb, Te_mid, ne_md, [1749, 1752])
     elif _n1749 > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749, Hb, Te_high, ne_md, 1749)
+        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749, Hb, Te_mid, ne_md, 1749)
     elif _n1752 > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1752, Hb, Te_high, ne_md, 1752)
+        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1752, Hb, Te_mid, ne_md, 1752)
 
     # N3+/H+ from NIV] 1483 + 1486 — T_high zone
     _n1483 = fluxes.get("NIV_1483", 0.0)
