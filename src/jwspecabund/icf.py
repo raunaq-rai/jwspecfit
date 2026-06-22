@@ -17,8 +17,10 @@ import numpy as np
 def icf_nitrogen(O_plus: float, O_total: float) -> float:
     """ICF for nitrogen (Izotov+06 eq. 18).
 
-    N/O = ICF_N * N+/O+, where ICF_N accounts for the contribution of
-    higher ionisation states of nitrogen.
+    Elemental correction: N/H = ICF_N * N+/H+.  To form N/O, divide the
+    corrected nitrogen abundance by the total oxygen abundance, i.e.
+    N/O = ICF_N * (N+/H+) / (O/H).  Izotov+06 eq. 18 is a fit in the O+
+    ionisation fraction v = O+/(O+ + O++), with three metallicity branches.
 
     Parameters
     ----------
@@ -30,17 +32,18 @@ def icf_nitrogen(O_plus: float, O_total: float) -> float:
     Returns
     -------
     float
-        ICF_N.  Returns 1.0 for the standard assumption N/O ~ N+/O+.
+        ICF_N (>= 1; accounts for unseen N++, N+++).
     """
     if O_total <= 0 or O_plus <= 0:
         return 1.0
-    x = O_plus / O_total
-    # Eq. 18: ICF(N) = (O/O+) * correction factor
-    # For low-ionisation galaxies (x > 0.5), ICF ~ 1.
-    # Standard assumption: ICF_N = 1 (widely used).
-    # Izotov+06 eq. 18 gives a small correction:
-    icf = -0.825 * x**2 + 0.718 * x + 0.853
-    # Note: this is a fit to ICF = N_total/N+ * O+/O_total
+    v = float(np.clip(O_plus / O_total, 1e-3, 1.0))
+    oh = 12.0 + np.log10(O_total)
+    if oh <= 7.2:
+        icf = -0.825 * v + 0.718 + 0.853 / v  # eq. 18a (low Z)
+    elif oh >= 8.2:
+        icf = -1.476 * v + 1.752 + 0.688 / v  # eq. 18c (high Z)
+    else:
+        icf = -0.809 * v + 0.712 + 0.852 / v  # eq. 18b (intermediate Z)
     return max(icf, 1.0)
 
 
@@ -84,25 +87,32 @@ def icf_neon(O_plus: float, O_total: float) -> float:
 def icf_sulfur(O_plus: float, O_total: float) -> float:
     """ICF for sulfur (Izotov+06 eq. 20).
 
-    S/O = ICF_S * (S+ + S++)/O.
+    Elemental correction: S/H = ICF_S * (S+ + S++)/H+, accounting for
+    unseen S+++ in the high-ionisation zone.  Izotov+06 eq. 20 is a fit
+    in v = O+/(O+ + O++), with three metallicity branches.
 
     Parameters
     ----------
     O_plus : float
         Ionic abundance O+/H+.
     O_total : float
-        Total oxygen abundance O/H.
+        Total oxygen abundance O/H (= O+/H+ + O++/H+).
 
     Returns
     -------
     float
-        ICF_S.
+        ICF_S (>= 1).
     """
     if O_total <= 0 or O_plus <= 0:
         return 1.0
-    x = O_plus / O_total
-    # Eq. 20: accounts for S3+ not captured by optical lines
-    icf = 0.013 + x * (5.986 + x * (-21.085 + x * (26.462 - x * 11.282)))
+    v = float(np.clip(O_plus / O_total, 1e-3, 1.0))
+    oh = 12.0 + np.log10(O_total)
+    if oh <= 7.2:
+        icf = 0.121 * v + 0.511 + 0.161 / v  # eq. 20a (low Z)
+    elif oh >= 8.2:
+        icf = 0.178 * v + 0.610 + 0.153 / v  # eq. 20c (high Z)
+    else:
+        icf = 0.155 * v + 0.849 + 0.062 / v  # eq. 20b (intermediate Z)
     return max(icf, 1.0)
 
 
@@ -138,25 +148,33 @@ def icf_carbon(O_plus: float, O_pp: float) -> float:
 
 
 def icf_argon(O_plus: float, O_total: float) -> float:
-    """ICF for argon (Izotov+06 eqs. 22/23).
+    """ICF for argon (Izotov+06 eq. 22).
 
-    Ar/O = ICF_Ar * Ar++/O++.
+    Elemental correction from Ar++ alone: Ar/H = ICF_Ar * Ar++/H+,
+    accounting for unseen Ar+ and Ar+++.  To form Ar/O, divide by the
+    total oxygen abundance: Ar/O = ICF_Ar * (Ar++/H+) / (O/H).  Izotov+06
+    eq. 22 is a fit in v = O+/(O+ + O++), with three metallicity branches.
 
     Parameters
     ----------
     O_plus : float
         Ionic abundance O+/H+.
     O_total : float
-        Total oxygen abundance O/H.
+        Total oxygen abundance O/H (= O+/H+ + O++/H+).
 
     Returns
     -------
     float
-        ICF_Ar.
+        ICF_Ar (>= 1).
     """
     if O_total <= 0 or O_plus <= 0:
         return 1.0
-    x = O_plus / O_total
-    # Eqs. 22/23: combined ICF for Ar++ → Ar_total
-    icf = 0.157 + x * (3.119 + x * (-6.185 + x * 4.517))
+    v = float(np.clip(O_plus / O_total, 1e-3, 1.0))
+    oh = 12.0 + np.log10(O_total)
+    if oh <= 7.2:
+        icf = 0.278 * v + 0.836 + 0.121 / v  # eq. 22a (low Z)
+    elif oh >= 8.2:
+        icf = 0.517 * v + 0.763 + 0.042 / v  # eq. 22c (high Z)
+    else:
+        icf = 0.285 * v + 0.833 + 0.051 / v  # eq. 22b (intermediate Z)
     return max(icf, 1.0)

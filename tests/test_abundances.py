@@ -322,13 +322,21 @@ class TestStrongLine:
 class TestICF:
     """Tests for Izotov+06 ICF prescriptions."""
 
-    def test_icf_nitrogen_unity_approx(self):
-        """ICF(N) should be near unity for typical HII regions."""
+    def test_icf_nitrogen_ratio_near_unity(self):
+        """N/O ~ N+/O+ for typical HII regions.
+
+        icf_nitrogen returns the *elemental* ICF (N/H = ICF*N+/H+), which
+        is ~2 at moderate ionisation.  The physically meaningful invariant
+        is that the effective ratio correction ICF * v (v = O+/O) stays
+        near unity, i.e. N/O = ICF*N+/(O+ + O++) ~ N+/O+.
+        """
         from jwspecabund.icf import icf_nitrogen
 
-        # x = O+/O ~ 0.5 for a moderately ionised nebula
-        icf = icf_nitrogen(0.5e-4, 1.0e-4)
-        assert 0.9 <= icf <= 1.5
+        O_plus, O_total = 0.5e-4, 1.0e-4   # v = O+/O ~ 0.5
+        icf = icf_nitrogen(O_plus, O_total)
+        assert icf > 1.5                    # elemental ICF, not ~1
+        v = O_plus / O_total
+        assert 0.9 <= icf * v <= 1.15       # N/O ~ N+/O+
 
     def test_icf_neon_positive(self):
         """ICF(Ne) should be positive."""
@@ -2091,3 +2099,40 @@ class TestNeonICF:
         O_total = 10 ** (7.8 - 12)
         icf = icf_neon(0.1 * O_total, O_total)
         assert icf > 0.9  # would have been 0.372 with the dropped 1/w term
+
+
+class TestSulfurArgonNitrogenICF:
+    """Izotov+06 eqs. 18/20/22 (regression for the dropped 1/v term)."""
+
+    def test_sulfur_above_unity_at_high_ionisation(self):
+        from jwspecabund.icf import icf_sulfur
+        O_total = 10 ** (7.8 - 12)
+        icf = icf_sulfur(0.1 * O_total, O_total)
+        assert 1.3 < icf < 1.7  # was clamped to 1.0 with the buggy quartic
+
+    def test_argon_above_unity_at_high_ionisation(self):
+        from jwspecabund.icf import icf_argon
+        O_total = 10 ** (7.8 - 12)
+        icf = icf_argon(0.1 * O_total, O_total)
+        assert 1.2 < icf < 1.6  # was clamped to 1.0 with the buggy cubic
+
+    def test_nitrogen_elemental_icf_large_at_high_ionisation(self):
+        from jwspecabund.icf import icf_nitrogen
+        O_total = 10 ** (7.8 - 12)
+        # Elemental N/H ICF grows as ionisation rises (unseen N++, N+++).
+        assert icf_nitrogen(0.1 * O_total, O_total) > 5.0
+
+    def test_all_three_increase_as_ionisation_rises(self):
+        from jwspecabund.icf import icf_sulfur, icf_argon, icf_nitrogen
+        O_total = 10 ** (7.8 - 12)
+        for fn in (icf_sulfur, icf_argon, icf_nitrogen):
+            hi = fn(0.05 * O_total, O_total)  # high ionisation
+            lo = fn(0.60 * O_total, O_total)  # low ionisation
+            assert hi > lo >= 1.0
+
+    def test_metallicity_branches_distinct(self):
+        from jwspecabund.icf import icf_sulfur, icf_argon, icf_nitrogen
+        for fn in (icf_sulfur, icf_argon, icf_nitrogen):
+            vals = {oh: fn(0.1 * 10 ** (oh - 12), 10 ** (oh - 12))
+                    for oh in (7.0, 7.8, 8.5)}
+            assert len({round(v, 4) for v in vals.values()}) == 3

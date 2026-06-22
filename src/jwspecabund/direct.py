@@ -1173,7 +1173,7 @@ def compute_total_abundances(
             elif N_plus > 0 and O_plus > 0:
                 # Tier 4: optical fallback — Izotov+06
                 icf_n = icf_nitrogen(O_plus, OH)
-                raw_no_iz = N_plus / O_plus
+                raw_no_iz = N_plus / OH if OH > 0 else 0
                 totals["N/O"] = icf_n * raw_no_iz
                 totals["icf_method"] = "izotov06"
                 totals["NO_icf_name"] = "izotov06_fallback"
@@ -1275,14 +1275,14 @@ def compute_total_abundances(
                         totals["NO_icf_name"] = "Npp_Opp"
                 elif N_plus > 0 and O_plus > 0:
                     icf_n = icf_nitrogen(O_plus, OH)
-                    totals["N/O"] = icf_n * N_plus / O_plus
+                    totals["N/O"] = icf_n * N_plus / OH if OH > 0 else 0
                     totals["icf_method"] = "izotov06"
                     totals["NO_icf_name"] = "izotov06_fallback"
         else:
             N_plus = ionic.get("N+/H+", 0.0)
             if N_plus > 0 and O_plus > 0:
                 icf_n = icf_nitrogen(O_plus, OH)
-                totals["N/O"] = icf_n * N_plus / O_plus
+                totals["N/O"] = icf_n * N_plus / OH if OH > 0 else 0
                 totals["icf_method"] = "izotov06"
 
         # Record N/O failure reason if not computed.
@@ -1425,7 +1425,7 @@ def compute_total_abundances(
         Ar_pp = ionic.get("Ar++/H+", 0.0)
         if Ar_pp > 0 and O_pp > 0:
             icf_ar = icf_argon(O_plus, OH)
-            raw_aro = Ar_pp / O_pp
+            raw_aro = Ar_pp / OH if OH > 0 else 0
             totals["Ar/O"] = icf_ar * raw_aro
             icf_dict["Ar/O"] = {
                 "icf": icf_ar, "method": "Izotov+06",
