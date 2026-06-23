@@ -4,6 +4,24 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## 1.1.6 — 2026-06-23
+
+### Bug fixes — Izotov+2006 ionisation correction factors
+
+- **Corrected the neon, sulfur, argon and nitrogen ICFs**
+  (`jwspecabund.icf`). The four Izotov+2006 ICFs had been implemented as
+  invented polynomials in the O⁺ fraction that dropped the dominant `c/f`
+  term of the true `a·f + b + c/f` form (eqs. 18–22), returning ICF ≈ 0.3–1.0
+  where the correct value is ≈ 1.0–1.5. They are now the proper
+  metallicity-dependent Izotov forms (three branches in 12+log(O/H), verified
+  against PyNeb), return the elemental ICF (X/H = ICF·ion/H⁺), and the
+  abundance ratios divide by the total oxygen abundance. Effect on reported
+  ratios: **Ne/O ~+0.45 dex** (a spuriously low log(Ne/O) ≈ −1.2 is corrected
+  to ≈ −0.8, consistent with the α-element locus), **S/O ~+0.17 dex**,
+  **Ar/O ~+0.10 dex**. N/O via the Izotov tier changes by < 0.04 dex; the
+  default Martinez+2025 / ICF-5 nitrogen path is unaffected. Carbon
+  (Garnett+1997) was already correct. Regression tests added for all four.
+
 ## 1.1.5 — 2026-06-22
 
 ### Direct-Te abundances: three-zone temperature & density framework
