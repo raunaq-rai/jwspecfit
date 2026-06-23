@@ -320,3 +320,10 @@ the per-version DOI from the "Versions" list on the Zenodo page.
 ## Licence
 
 MIT — see [LICENCE](LICENCE).
+
+## AI usage declaration
+
+AI-based coding assistants were used during the development of this
+package (for example to help draft code, tests, and documentation). All
+contributions were reviewed, tested, and validated by the author, who
+takes full responsibility for the scientific correctness of the code.
