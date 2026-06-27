@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 # and plot_2d_1d so labels stay consistent.
 _DEFAULT_MARKER_NAMES: list[str] = [
     "Lya", "NIV_doublet", "CIV_doublet", "HEII_1640",
-    "NIII_doublet", "CIII]",
+    "NIII_doublet", "SiIII_1", "SiIII_2", "CIII]",
     "OII_doublet", "NeIII_3869",
     "HEI_4027", "HDELTA", "HEI_4145", "HEII_4200", "HGAMMA", "OIII_4363",
     "FeII_4584", "NIII_4642", "FeIII_4660", "HeII_4687",
@@ -37,7 +37,9 @@ _DEFAULT_MARKER_NAMES: list[str] = [
 _DEFAULT_MARKER_LABELS: dict[str, str] = {
     "Lya": "Lyα", "NIV_doublet": "NIV", "CIV_doublet": "CIV",
     "HEII_1640": "HeII 1640",
-    "NIII_doublet": "NIII 1750", "CIII]": "CIII]",
+    "NIII_doublet": "NIII 1750",
+    "SiIII_1": "SiIII] 1883", "SiIII_2": "SiIII] 1892",
+    "CIII]": "CIII]",
     "OII_doublet": "[OII]", "NeIII_3869": "[NeIII]",
     "HEI_4027": "HeI 4027",
     "HDELTA": "Hδ",
