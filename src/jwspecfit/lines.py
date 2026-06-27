@@ -92,9 +92,11 @@ REST_LINES_A: dict[str, float] = {
     "ArIII_7138": 7137.770,
     # Blue diagnostic lines (4500–4750 Å region)
     "FeII_4584": 4584.11922116,   
-    "NIII_4642": 4641.93950581,    
+    "NIII_4642": 4641.93950581,    # N III 4640 multiplet (WR blue bump, WN); air 4640.64
+    "CIII_4650": 4651.5521,        # C III 4647-51 multiplet (WR blue bump, WC); air 4650.25
     "FeIII_4660": 4659.35411192,  
-    "HeII_4687": 4687.02143223,   
+    "HeII_4687": 4687.02143223,    # He II 4686 (WR blue bump / nebular); air 4685.71
+    "FeIII_4702": 4702.8456,       # [Fe III] 4702 (nebular); air 4701.53
     "ArIV_4713": 4712.57819671,   
     "FeII_4732": 4732.76354118,   
     "ArIV_4741": 4741.44584045,   
@@ -214,8 +216,10 @@ _GRATING_LINES = [
     # Blue diagnostic lines (4500–4750 Å)
     "FeII_4584",
     "NIII_4642",
+    "CIII_4650",        # WR blue-bump carbon (C III 4647-51)
     "FeIII_4660",
     "HeII_4687",
+    "FeIII_4702",
     "ArIV_4713",        # blended with HeI 4713
     "FeII_4732",
     "ArIV_4741",
