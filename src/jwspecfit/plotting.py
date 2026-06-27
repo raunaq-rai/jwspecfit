@@ -30,8 +30,9 @@ _DEFAULT_MARKER_NAMES: list[str] = [
     "CIV_5803", "CIV_5814",
     "HEI_5877", "OI_6302",
     "Ha", "NII_6585", "HEI_6680",
-    "SII_6718", "SII_6732",
+    "SIII_6314", "SII_6718", "SII_6732",
     "HEI_7067", "ArIII_7138",
+    "SIII_9071", "SIII_9533",
 ]
 
 _DEFAULT_MARKER_LABELS: dict[str, str] = {
@@ -56,9 +57,11 @@ _DEFAULT_MARKER_LABELS: dict[str, str] = {
     "OI_6302": "[OI] 6302",
     "Ha": "Hα", "NII_6585": "[NII] 6585",
     "HEI_6680": "HeI 6680",
+    "SIII_6314": "[SIII]6312",
     "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
     "HEI_7067": "HeI 7065",
     "ArIII_7138": "[ArIII] 7138",
+    "SIII_9071": "[SIII]9069", "SIII_9533": "[SIII]9531",
 }
 
 

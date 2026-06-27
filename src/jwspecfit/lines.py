@@ -86,10 +86,13 @@ REST_LINES_A: dict[str, float] = {
     "NII_6585": 6585.2784,
     "HEI_6680": 6680.000,
     # Sulphur
+    "SIII_6314": 6313.81,        # [S III] auroral (Te diagnostic); air 6312.06
     "SII_6718": 6718.2942,
     "SII_6732": 6732.6681,
     "HEI_7067": 7067.138,
     "ArIII_7138": 7137.770,
+    "SIII_9071": 9071.1,         # [S III] nebular; air 9068.6
+    "SIII_9533": 9533.2,         # [S III] nebular (strongest); air 9530.6
     # Blue diagnostic lines (4500–4750 Å region)
     "FeII_4584": 4584.11922116,   
     "NIII_4642": 4641.93950581,    # N III 4640 multiplet (WR blue bump, WN); air 4640.64
