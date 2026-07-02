@@ -59,14 +59,28 @@ Requires Python ≥ 3.10. See the [installation guide](https://jwspecfit.readthe
 ## Example
 
 ```python
-import jwspecfit, jwspecabund
+import numpyro
+numpyro.set_host_device_count(6)   # before sampling: one host device per chain
+
+import jwspecfit, jwspecmcmc, jwspecabund
 
 spec   = jwspecfit.read_fits("spectrum.fits", z=6.0)
-result = jwspecfit.fit_lines(spec, z=6.0)
-abund  = jwspecabund.compute_abundances(result, z=6.0)
+result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="nuts")   # Bayesian NUTS fit
 
+# Assess convergence before trusting the posteriors
+conv = result.convergence
+print(f"converged={conv['converged']}  "        # True iff R-hat<1.05 & ESS>100 (all params)
+      f"R-hat_max={conv['r_hat_max']:.3f}  "     # worst R-hat — quote this
+      f"ESS_min={conv['ess_min']:.0f}")
+
+abund = jwspecabund.compute_abundances(result, z=6.0)
 print(abund.summary())
 ```
+
+> For a quick, non-Bayesian look you can swap the fit for the least-squares
+> engine — `result = jwspecfit.fit_lines(spec, z=6.0)` — but it has no chains, so
+> `result.convergence` is empty; use the NUTS fit above for science-quality
+> posteriors and a meaningful $\hat{R}$.
 
 ## Line fitting
 
