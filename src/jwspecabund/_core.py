@@ -2837,13 +2837,41 @@ def compute_abundances(
     AbundanceResult
         Chemical abundance measurement.
     """
+    # --- Fail-fast validation of string-choice inputs ---
+    # Every choice parameter raises here with the valid options rather
+    # than falling back silently or failing deep inside the pipeline.
+    from .dust import _BALMER_LADDER, _VALID_BALMER_ANCHORS
+    from .martinez25_icf import VALID_NO_ICF_TIERS
+
+    _choices = {
+        "method": (method, ("auto", "direct", "forward", "strong_line")),
+        "dust_law": (dust_law, ("salim", "cardelli")),
+        "Av_prior": (Av_prior, ("gaussian", "uniform")),
+        "Te_relation": (Te_relation, ("3_tier", "classical", "garnett", "desi")),
+        "icf_method": (icf_method, ("auto", "martinez25", "izotov06", "direct_sum")),
+        "forward_sampler": (forward_sampler, ("emcee", "dynesty")),
+        "balmer_anchor": (balmer_anchor, _VALID_BALMER_ANCHORS),
+    }
     if icf_tier is not None:
-        from .martinez25_icf import VALID_NO_ICF_TIERS
-        if icf_tier not in VALID_NO_ICF_TIERS:
+        _choices["icf_tier"] = (icf_tier, VALID_NO_ICF_TIERS)
+    for _name, (_value, _valid) in _choices.items():
+        if _value not in _valid:
             raise ValueError(
-                f"Invalid icf_tier {icf_tier!r}; "
-                f"valid options are {', '.join(VALID_NO_ICF_TIERS)}."
+                f"Invalid {_name} {_value!r}; "
+                f"valid options are {', '.join(_valid)}."
             )
+    if balmer_pair is not None:
+        if len(balmer_pair) != 2:
+            raise ValueError(
+                f"balmer_pair must be a (numerator, denominator) pair of "
+                f"Balmer line names, got {balmer_pair!r}."
+            )
+        for _nm in balmer_pair:
+            if _nm not in _BALMER_LADDER:
+                raise ValueError(
+                    f"Invalid balmer_pair line {_nm!r}; "
+                    f"valid options are {', '.join(_BALMER_LADDER)}."
+                )
 
     # Physical redshift for the z-dependent n_e fallbacks (decoupled from
     # the geometric z used for continuum-RMS line windows).

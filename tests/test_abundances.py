@@ -2201,3 +2201,93 @@ class TestIcfTierValidation:
             n_mc=50, icf_tier="NpOp", progress=False,
         )
         assert abund.method == "strong_line"
+
+
+class TestInputValidation:
+    """compute_abundances rejects invalid string-choice inputs up front.
+
+    Every choice parameter must raise ValueError listing the valid
+    options — never fall back silently (Av_prior used to default to
+    gaussian on a typo, icf_method to Izotov+06).
+    """
+
+    INVALID_CASES = [
+        ("method", "bogus", ("auto", "direct", "forward", "strong_line")),
+        ("dust_law", "calzetti", ("salim", "cardelli")),
+        ("Av_prior", "unifrom", ("gaussian", "uniform")),
+        ("Te_relation", "2_tier", ("3_tier", "classical", "garnett", "desi")),
+        ("icf_method", "martinez", ("auto", "martinez25", "izotov06", "direct_sum")),
+        ("forward_sampler", "nautilus", ("emcee", "dynesty")),
+        ("balmer_anchor", "HALPHA", ("HBETA", "Ha")),
+    ]
+
+    def _make_mock_fit_result(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockLineResult:
+            name: str
+            flux: float
+            flux_err: float
+            snr: float
+
+        @dataclass
+        class MockFitResult:
+            lines: dict
+
+        line_fluxes = {
+            "OIII_5007": (5.0, 0.1),
+            "HBETA": (1.0, 0.02),
+            "Ha": (2.86, 0.05),
+            "OII_doublet": (2.0, 0.1),
+        }
+        lines = {
+            name: MockLineResult(name, flux, err, flux / err)
+            for name, (flux, err) in line_fluxes.items()
+        }
+        return MockFitResult(lines=lines)
+
+    @pytest.mark.parametrize("param,bad,valid", INVALID_CASES)
+    def test_invalid_choice_raises_with_options(self, param, bad, valid):
+        from jwspecabund import compute_abundances
+
+        with pytest.raises(ValueError) as excinfo:
+            compute_abundances(
+                self._make_mock_fit_result(), z=2.0, **{param: bad},
+            )
+        msg = str(excinfo.value)
+        assert bad in msg
+        for option in valid:
+            assert option in msg
+
+    def test_invalid_balmer_pair_line_raises_with_options(self):
+        from jwspecabund import compute_abundances
+
+        with pytest.raises(ValueError) as excinfo:
+            compute_abundances(
+                self._make_mock_fit_result(), z=2.0, balmer_pair=("Ha", "HB"),
+            )
+        msg = str(excinfo.value)
+        for option in ("Ha", "HBETA", "HGAMMA", "HDELTA", "H9", "H10"):
+            assert option in msg
+
+    def test_wrong_length_balmer_pair_raises(self):
+        from jwspecabund import compute_abundances
+
+        with pytest.raises(ValueError, match="balmer_pair"):
+            compute_abundances(
+                self._make_mock_fit_result(), z=2.0, balmer_pair=("Ha",),
+            )
+
+    def test_valid_choices_accepted(self):
+        from jwspecabund import compute_abundances
+
+        # Non-default (but valid) choices must pass validation and
+        # complete on the strong-line path.
+        abund = compute_abundances(
+            self._make_mock_fit_result(), z=2.0, method="strong_line",
+            dust_law="cardelli", Av_prior="uniform", Te_relation="garnett",
+            icf_method="direct_sum", balmer_anchor="Ha",
+            balmer_pair=("Ha", "HBETA"), n_mc=50, progress=False,
+        )
+        assert abund.method == "strong_line"

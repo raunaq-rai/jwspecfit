@@ -632,7 +632,7 @@ def Te_low_from_high(Te_high: float, relation: str = "3_tier") -> float:
     else:
         raise ValueError(
             f"Unknown T_e relation: {relation!r}. "
-            "Use '3_tier', 'classical', or 'desi'."
+            "Use '3_tier', 'classical', 'garnett', or 'desi'."
         )
 
 
