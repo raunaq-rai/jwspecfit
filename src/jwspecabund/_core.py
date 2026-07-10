@@ -2782,6 +2782,15 @@ def compute_abundances(
         quadrature-summed error.  Ions below this threshold are
         excluded from the direct sum, causing the code to fall
         through to a lower tier (or Izotov+06).
+    icf_tier : str or None
+        Lock the Martinez+25 N/O ICF to a specific tier instead of
+        the automatic cascade.  One of ``"NpOp"`` (ICF 1: N⁺/O⁺),
+        ``"NppOpp"`` (ICF 2: N²⁺/O²⁺), ``"NpppOpp"`` (ICF 3:
+        N³⁺/O²⁺), ``"NpNpp_OpOpp"`` (ICF 4: (N⁺+N²⁺)/(O⁺+O²⁺)) or
+        ``"NppNppp_Opp"`` (ICF 5: (N²⁺+N³⁺)/O²⁺).  When locked, no
+        fallback to other tiers occurs; if the required ions are
+        missing, N/O is reported as failed.  Any other string raises
+        ``ValueError``.  Default ``None`` (automatic cascade).
     ne_low_override : float or None
         If set, use this value (cm^-3) for the low-ionisation zone
         density instead of deriving it from [SII] or [OII].
@@ -2828,6 +2837,14 @@ def compute_abundances(
     AbundanceResult
         Chemical abundance measurement.
     """
+    if icf_tier is not None:
+        from .martinez25_icf import VALID_NO_ICF_TIERS
+        if icf_tier not in VALID_NO_ICF_TIERS:
+            raise ValueError(
+                f"Invalid icf_tier {icf_tier!r}; "
+                f"valid options are {', '.join(VALID_NO_ICF_TIERS)}."
+            )
+
     # Physical redshift for the z-dependent n_e fallbacks (decoupled from
     # the geometric z used for continuum-RMS line windows).
     _z_ne = z_ne if z_ne is not None else z

@@ -456,6 +456,17 @@ def icf_NppNppp_Opp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
 # Orchestrator: compute N/O using the best available ICF
 # =========================================================================
 
+#: Valid tier names for locking the Martinez+25 N/O ICF (``icf_tier``),
+#: ordered by ICF number (Martinez+2025 Table 4).
+VALID_NO_ICF_TIERS = (
+    "NpOp",          # ICF 1: N+/O+
+    "NppOpp",        # ICF 2: N2+/O2+
+    "NpppOpp",       # ICF 3: N3+/O2+
+    "NpNpp_OpOpp",   # ICF 4: (N+ + N2+)/(O+ + O2+)
+    "NppNppp_Opp",   # ICF 5: (N2+ + N3+)/O2+
+)
+
+
 def compute_NO_martinez25(
     ionic: dict[str, float],
     logU: float,
@@ -557,7 +568,17 @@ def compute_NO_martinez25_locked(
     -------
     float or None
         N/O value, or None if the required ions are not available.
+
+    Raises
+    ------
+    ValueError
+        If *icf_name* is not one of :data:`VALID_NO_ICF_TIERS`.
     """
+    if icf_name not in VALID_NO_ICF_TIERS:
+        raise ValueError(
+            f"Unknown N/O ICF tier {icf_name!r}; "
+            f"valid options are {', '.join(VALID_NO_ICF_TIERS)}."
+        )
     N_plus = ionic.get("N+/H+", 0.0)
     N_pp = ionic.get("N++/H+", 0.0)
     N_ppp = ionic.get("N+++/H+", 0.0)

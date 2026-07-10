@@ -2136,3 +2136,68 @@ class TestSulfurArgonNitrogenICF:
             vals = {oh: fn(0.1 * 10 ** (oh - 12), 10 ** (oh - 12))
                     for oh in (7.0, 7.8, 8.5)}
             assert len({round(v, 4) for v in vals.values()}) == 3
+
+
+class TestIcfTierValidation:
+    """compute_abundances must reject unknown icf_tier names up front.
+
+    Regression test: ``icf_tier="Np_Op"`` (invalid; the tier is named
+    ``"NpOp"``) used to fail silently and degrade N/O to an unlabelled
+    Izotov+06 fallback instead of raising.
+    """
+
+    def _make_mock_fit_result(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class MockLineResult:
+            name: str
+            flux: float
+            flux_err: float
+            snr: float
+
+        @dataclass
+        class MockFitResult:
+            lines: dict
+
+        line_fluxes = {
+            "OIII_5007": (5.0, 0.1),
+            "HBETA": (1.0, 0.02),
+            "Ha": (2.86, 0.05),
+            "OII_doublet": (2.0, 0.1),
+        }
+        lines = {
+            name: MockLineResult(name, flux, err, flux / err)
+            for name, (flux, err) in line_fluxes.items()
+        }
+        return MockFitResult(lines=lines)
+
+    def test_invalid_tier_raises_value_error(self):
+        from jwspecabund import compute_abundances
+
+        with pytest.raises(ValueError, match="Np_Op"):
+            compute_abundances(
+                self._make_mock_fit_result(), z=2.0, icf_tier="Np_Op",
+            )
+
+    def test_error_message_lists_valid_tiers(self):
+        from jwspecabund import compute_abundances
+        from jwspecabund.martinez25_icf import VALID_NO_ICF_TIERS
+
+        with pytest.raises(ValueError) as excinfo:
+            compute_abundances(
+                self._make_mock_fit_result(), z=2.0, icf_tier="bogus",
+            )
+        for tier in VALID_NO_ICF_TIERS:
+            assert tier in str(excinfo.value)
+
+    def test_valid_tier_passes_validation(self):
+        from jwspecabund import compute_abundances
+
+        # Strong-line path ignores icf_tier; the call must complete
+        # without an icf_tier ValueError.
+        abund = compute_abundances(
+            self._make_mock_fit_result(), z=2.0, method="strong_line",
+            n_mc=50, icf_tier="NpOp", progress=False,
+        )
+        assert abund.method == "strong_line"
