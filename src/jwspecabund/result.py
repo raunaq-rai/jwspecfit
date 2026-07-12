@@ -12,6 +12,21 @@ from typing import Any
 import numpy as np
 
 
+def _fmt_err(err: float | tuple[float, float], prec: int = 3) -> str:
+    """Format an uncertainty for display.
+
+    Error tuples are stored as ``(lo, hi)`` 68 % CI half-widths
+    (median − 16th pct, 84th pct − median), so the *upper* error is
+    printed first: ``(+hi/-lo)``.  Scalars print as ``+/- err``.
+    """
+    if err is None:
+        return ""
+    if isinstance(err, (tuple, list)):
+        lo, hi = err
+        return f"(+{hi:.{prec}f}/-{lo:.{prec}f})"
+    return f"+/- {err:.{prec}f}"
+
+
 @dataclass
 class AbundanceResult:
     """Container for a chemical abundance measurement.
@@ -131,42 +146,42 @@ class AbundanceResult:
 
         # --- Abundances ---
         _f = self.failures or {}
-        lines.append(f"  12+log(O/H) = {self.OH:.3f} +/- {self.OH_err}")
+        lines.append(f"  12+log(O/H) = {self.OH:.3f} {_fmt_err(self.OH_err)}")
         if self.NO is not None:
-            lines.append(f"  log(N/O)    = {self.NO:.3f} +/- {self.NO_err}")
+            lines.append(f"  log(N/O)    = {self.NO:.3f} {_fmt_err(self.NO_err)}")
         elif "N/O" in _f:
             lines.append(f"  log(N/O)    = FAILED — {_f['N/O']}")
         if self.CO is not None:
-            lines.append(f"  log(C/O)    = {self.CO:.3f} +/- {self.CO_err}")
+            lines.append(f"  log(C/O)    = {self.CO:.3f} {_fmt_err(self.CO_err)}")
         elif "C/O" in _f:
             lines.append(f"  log(C/O)    = FAILED — {_f['C/O']}")
         if self.SO is not None:
-            lines.append(f"  log(S/O)    = {self.SO:.3f} +/- {self.SO_err}")
+            lines.append(f"  log(S/O)    = {self.SO:.3f} {_fmt_err(self.SO_err)}")
         elif "S/O" in _f:
             lines.append(f"  log(S/O)    = FAILED — {_f['S/O']}")
         if self.NeO is not None:
-            lines.append(f"  log(Ne/O)   = {self.NeO:.3f} +/- {self.NeO_err}")
+            lines.append(f"  log(Ne/O)   = {self.NeO:.3f} {_fmt_err(self.NeO_err)}")
         elif "Ne/O" in _f:
             lines.append(f"  log(Ne/O)   = FAILED — {_f['Ne/O']}")
         if self.ArO is not None:
-            lines.append(f"  log(Ar/O)   = {self.ArO:.3f} +/- {self.ArO_err}")
+            lines.append(f"  log(Ar/O)   = {self.ArO:.3f} {_fmt_err(self.ArO_err)}")
         elif "Ar/O" in _f:
             lines.append(f"  log(Ar/O)   = FAILED — {_f['Ar/O']}")
 
         # --- Physical conditions ---
         if self.Te_high is not None:
             if self.Te_high_err is not None:
-                lines.append(f"  T_e(high)   = {self.Te_high:.0f} +/- {self.Te_high_err} K")
+                lines.append(f"  T_e(high)   = {self.Te_high:.0f} {_fmt_err(self.Te_high_err, 0)} K")
             else:
                 lines.append(f"  T_e(high)   = {self.Te_high:.0f} K")
         if self.Te_mid is not None:
             if self.Te_mid_err is not None:
-                lines.append(f"  T_e(int)    = {self.Te_mid:.0f} +/- {self.Te_mid_err} K")
+                lines.append(f"  T_e(int)    = {self.Te_mid:.0f} {_fmt_err(self.Te_mid_err, 0)} K")
             else:
                 lines.append(f"  T_e(int)    = {self.Te_mid:.0f} K")
         if self.Te_low is not None:
             if self.Te_low_err is not None:
-                lines.append(f"  T_e(low)    = {self.Te_low:.0f} +/- {self.Te_low_err} K")
+                lines.append(f"  T_e(low)    = {self.Te_low:.0f} {_fmt_err(self.Te_low_err, 0)} K")
             else:
                 lines.append(f"  T_e(low)    = {self.Te_low:.0f} K")
         if self.ne is not None:
@@ -180,7 +195,7 @@ class AbundanceResult:
             lines.append(f"  n_e(high)   = {self.ne_high:.0f} cm^-3")
         if self.logU is not None:
             if self.logU_err is not None:
-                lines.append(f"  log(U)      = {self.logU:.2f} +/- {self.logU_err}")
+                lines.append(f"  log(U)      = {self.logU:.2f} {_fmt_err(self.logU_err, 2)}")
             else:
                 lines.append(f"  log(U)      = {self.logU:.2f}")
         if self.Av is not None:
@@ -392,16 +407,16 @@ class AbundanceResult:
             lines.append("Alternative methods (not selected):")
             for alt_name, alt in self.alt_results.items():
                 lines.append(f"  [{alt_name}]")
-                lines.append(f"    12+log(O/H) = {alt.OH:.3f} +/- {alt.OH_err}")
+                lines.append(f"    12+log(O/H) = {alt.OH:.3f} {_fmt_err(alt.OH_err)}")
                 if alt.NO is not None:
-                    lines.append(f"    log(N/O)    = {alt.NO:.3f} +/- {alt.NO_err}")
+                    lines.append(f"    log(N/O)    = {alt.NO:.3f} {_fmt_err(alt.NO_err)}")
                 if alt.CO is not None:
-                    lines.append(f"    log(C/O)    = {alt.CO:.3f} +/- {alt.CO_err}")
+                    lines.append(f"    log(C/O)    = {alt.CO:.3f} {_fmt_err(alt.CO_err)}")
                 if alt.ratios_used:
                     lines.append(f"    Ratios used = {alt.ratios_used}")
                 if alt.Te_high is not None:
                     if alt.Te_high_err is not None:
-                        lines.append(f"    T_e(high)   = {alt.Te_high:.0f} +/- {alt.Te_high_err} K")
+                        lines.append(f"    T_e(high)   = {alt.Te_high:.0f} {_fmt_err(alt.Te_high_err, 0)} K")
                     else:
                         lines.append(f"    T_e(high)   = {alt.Te_high:.0f} K")
 

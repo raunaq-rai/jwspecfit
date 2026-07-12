@@ -713,6 +713,49 @@ class TestAbundanceResult:
         assert "8.000" in s
         assert "15000" in s
 
+    def test_summary_asymmetric_errors_plus_first(self):
+        """Error tuples are stored (lo, hi); summary must print (+hi/-lo).
+
+        Regression test: raw tuples used to be printed after '+/-',
+        which read as +lo/-hi — the wrong way around.
+        """
+        from jwspecabund.result import AbundanceResult
+
+        res = AbundanceResult(
+            method="direct",
+            OH=7.699, OH_err=(0.154, 0.239),
+            NO=-0.719, NO_err=(0.213, 0.164),
+            NeO=-0.447, NeO_err=(0.039, 0.058),
+            Te_high=18972.0, Te_high_err=(3829.1, 4135.0),
+            logU=-3.19, logU_err=(0.03, 0.05),
+        )
+        s = res.summary()
+        assert "12+log(O/H) = 7.699 (+0.239/-0.154)" in s
+        assert "log(N/O)    = -0.719 (+0.164/-0.213)" in s
+        assert "log(Ne/O)   = -0.447 (+0.058/-0.039)" in s
+        assert "T_e(high)   = 18972 (+4135/-3829) K" in s
+        assert "log(U)      = -3.19 (+0.05/-0.03)" in s
+
+    def test_summary_scalar_errors_keep_plus_minus(self):
+        """Scalar (symmetric) errors still print as '+/- x'."""
+        from jwspecabund.result import AbundanceResult
+
+        res = AbundanceResult(method="direct", OH=8.0, OH_err=0.1)
+        assert "12+log(O/H) = 8.000 +/- 0.100" in res.summary()
+
+    def test_summary_alt_results_asymmetric_errors(self):
+        """Alternative-method lines use the same (+hi/-lo) format."""
+        from jwspecabund.result import AbundanceResult
+
+        alt = AbundanceResult(
+            method="strong_line", OH=7.841, OH_err=(0.172, 0.209),
+        )
+        res = AbundanceResult(
+            method="direct", OH=7.699, OH_err=(0.154, 0.239),
+            alt_results={"strong_line": alt},
+        )
+        assert "12+log(O/H) = 7.841 (+0.209/-0.172)" in res.summary()
+
     def test_default_none_fields(self):
         """Optional fields should default to None."""
         from jwspecabund.result import AbundanceResult
