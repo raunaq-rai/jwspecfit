@@ -38,6 +38,10 @@ _Z_ZSUN_VALID = (0.05, 0.40)
 _LOG_O32_VALID = (-1.0, 2.5)
 _LOG_N43_VALID = (-3.0, 0.5)
 
+# C/O ICF validity (Martinez, in prep.): 12+log(O/H) in [6.95, 8.55],
+# i.e. a wider metallicity range than the N/O ICFs.  Same log(U) grid.
+_Z_ZSUN_VALID_CO = (10 ** (6.95 - LOG_OH_SOLAR), 10 ** (8.55 - LOG_OH_SOLAR))
+
 
 # =========================================================================
 # Coefficient tables
@@ -109,6 +113,18 @@ _COEFF_ICF_NppNppp_Opp: dict[float, list[float]] = {
     4: [ 0.94769, -0.01451,  0.25282,  0.16544,  0.03802, -0.30544, -0.14786, -0.00045,  0.01579,  0.04361],
     5: [ 0.93356, -0.01832,  0.32434,  0.17688,  0.04019, -0.47628, -0.17401, -0.00391,  0.01642,  0.18150],
     6: [ 0.84213, -0.08984,  0.67947,  0.32963,  0.02188, -1.01073, -0.29574,  0.00886,  0.01486,  0.42906],
+}
+
+
+# --- C/O ICF: C2+/O2+ -> C/O (Martinez, in prep.; column "C3O3") ---
+# x = log(U), y = Z/Zsun.  Linear ICF: apply as C/O = ICF * (C2+/O2+).
+# Same bicubic form and density grid as the N/O ICFs.
+_COEFF_ICF_CppOpp: dict[float, list[float]] = {
+    2: [ 2.18642737,  1.24630928, -0.95858862, -0.78792753,  0.52724440, -2.03158924, -0.07464697, -0.15311207,  0.09318595,  3.06213840],
+    3: [ 3.25416873,  2.27833960, -3.06989592, -2.21406503,  0.85585721, -1.27285388,  0.36598875, -0.37609622,  0.12787315,  3.84699750],
+    4: [ 3.99284589,  2.99876376, -4.92689350, -3.33098719,  1.08625277,  0.48893384,  0.88292673, -0.53897536,  0.15222799,  3.37530269],
+    5: [ 4.24758308,  3.24100715, -5.46839777, -3.67127157,  1.16139628,  0.88151990,  1.03043088, -0.58833025,  0.15993755,  3.38762274],
+    6: [ 4.16440334,  3.17175973, -4.82503603, -3.34788105,  1.14347769, -0.05746862,  0.80310048, -0.54723311,  0.15853322,  3.79360777],
 }
 
 
@@ -369,6 +385,45 @@ def icf_NppOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     """
     logU, Z_Zsun = _reject_icf_inputs(logU, Z_Zsun)
     return _interp_ne(ne, _COEFF_ICF_NppOpp, logU, Z_Zsun)
+
+
+def icf_CppOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
+    """C/O ICF from C2+/O2+ (Martinez, in prep.).
+
+    Corrects the observed ``C2+/O2+`` ratio (from C III] 1907,1909 and
+    [O III] 4959,5007) to the total ``C/O`` abundance:
+
+        C/O = ICF x (C2+/O2+)
+
+    This is the carbon analog of :func:`icf_NppOpp` (N2+/O2+) and shares
+    the same bicubic surface form, log(U) grid, and density grid.  The
+    surface returns the **linear** ICF (not log).
+
+    Parameters
+    ----------
+    logU : float
+        Ionisation parameter log(U).
+    Z_Zsun : float
+        Gas-phase metallicity in solar units.
+    ne : float
+        Electron density in cm^-3 (default 100).
+
+    Returns
+    -------
+    float
+        Linear ICF (multiplicative correction to C2+/O2+), or NaN if
+        ``logU`` or ``Z_Zsun`` lie outside the calibration domain
+        (log(U) in [-3.5, -1.0]; 12+log(O/H) in [6.95, 8.55]).
+
+    Notes
+    -----
+    Derived from the Cloudy grid of Martinez+2025; to be published in
+    Martinez (in prep.).  The metallicity validity is wider than the
+    N/O ICFs (:data:`_Z_ZSUN_VALID_CO` vs :data:`_Z_ZSUN_VALID`).
+    """
+    logU = _warn_and_reject(logU, _LOG_U_VALID, "log(U)")
+    Z_Zsun = _warn_and_reject(Z_Zsun, _Z_ZSUN_VALID_CO, "Z/Zsun (C/O)")
+    return _interp_ne(ne, _COEFF_ICF_CppOpp, logU, Z_Zsun)
 
 
 def icf_NpppOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
