@@ -1081,6 +1081,7 @@ def compute_total_abundances(
     Z_Zsun: float | None = None,
     ne: float | None = None,
     icf_method: str = "auto",
+    co_icf_method: str = "auto",
     ionic_upper_limits: dict[str, float] | None = None,
     _lock_NO_icf: str | None = None,
 ) -> dict[str, float]:
@@ -1132,6 +1133,19 @@ def compute_total_abundances(
             use_martinez = True
     elif icf_method == "auto" and logU is not None and Z_Zsun is not None:
         use_martinez = True
+
+    # Decide whether to use the Martinez (in prep.) C/O ICF (C2+/O2+).
+    use_martinez_co = False
+    if co_icf_method == "martinez25":
+        if logU is None or Z_Zsun is None:
+            logger.warning(
+                "Martinez C/O ICF requires logU and Z_Zsun; "
+                "falling back to Garnett+97."
+            )
+        else:
+            use_martinez_co = True
+    elif co_icf_method == "auto" and logU is not None and Z_Zsun is not None:
+        use_martinez_co = True
 
     # O/H = O+/H+ + O++/H+ (no ICF needed)
     if O_plus > 0 or O_pp > 0:
@@ -1437,34 +1451,59 @@ def compute_total_abundances(
         else:
             failures["Ar/O"] = "no O++ ion for Ar/O normalisation"
 
-        # C/O — tiered approach:
-        #   1. Direct sum (C+ + C2+ + C3+) / (O+ + O2+) when C+ detected
-        #   2. Garnett+1997 ICF × (C2+ + C3+) / O2+ when C+ not detected
-        #   3. Raw (C2+ + C3+) / O2+ when O+ also missing (ICF=1)
+        # C/O:
+        #   Martinez (in prep.) ICF × (C2+ / O2+) when logU+Z available
+        #   (co_icf_method 'auto'/'martinez25'), otherwise the legacy tiered
+        #   approach:
+        #     1. Direct sum (C+ + C2+ + C3+) / (O+ + O2+) when C+ detected
+        #     2. Garnett+1997 ICF × (C2+ + C3+) / O2+ when C+ not detected
+        #     3. Raw (C2+ + C3+) / O2+ when O+ also missing (ICF=1)
         C_p = ionic.get("C+/H+", 0.0)
         C_pp = ionic.get("C++/H+", 0.0)
         C_ppp = ionic.get("C+++/H+", 0.0)
         C_uv = C_pp + C_ppp
-        if C_p > 0 and C_uv > 0 and OH > 0:
-            # Direct sum — all C ions detected, use total O
-            totals["C/O"] = (C_p + C_uv) / OH
-            totals["CO_method"] = "direct_sum"
-        elif C_uv > 0 and O_pp > 0:
-            # Apply Garnett+1997 ICF to correct for missing C+
-            icf_c = icf_carbon(O_plus, O_pp)
-            raw_co = C_uv / O_pp
-            totals["C/O"] = icf_c * raw_co
-            totals["CO_method"] = "garnett97_icf"
-            totals["CO_icf_value"] = icf_c
-            icf_dict["C/O"] = {
-                "icf": icf_c, "method": "Garnett+97",
-                "raw": np.log10(raw_co) if raw_co > 0 else None,
-                "corrected": np.log10(totals["C/O"]) if totals["C/O"] > 0 else None,
-            }
-        elif C_uv <= 0 and C_p <= 0:
-            failures["C/O"] = "no carbon ions detected (CII]/CIII]/CIV missing)"
-        else:
-            failures["C/O"] = "no O++ ion for C/O normalisation"
+        co_done = False
+        if use_martinez_co and C_pp > 0 and O_pp > 0:
+            from .martinez25_icf import icf_CppOpp
+            ne_icf = ne if ne is not None else NE_DEFAULT
+            icf_c = icf_CppOpp(logU, Z_Zsun, ne_icf)
+            if np.isfinite(icf_c):
+                raw_co = C_pp / O_pp
+                totals["C/O"] = icf_c * raw_co
+                totals["CO_method"] = "martinez25"
+                totals["CO_icf_value"] = icf_c
+                icf_dict["C/O"] = {
+                    "icf": icf_c, "method": "Martinez (in prep.)",
+                    "raw": np.log10(raw_co) if raw_co > 0 else None,
+                    "corrected": np.log10(totals["C/O"]) if totals["C/O"] > 0 else None,
+                }
+                co_done = True
+        if not co_done:
+            if co_icf_method == "martinez25" and use_martinez_co:
+                logger.warning(
+                    "Martinez C/O ICF unavailable (needs C2+ and O2+ within "
+                    "calibration validity); falling back to Garnett+97."
+                )
+            if C_p > 0 and C_uv > 0 and OH > 0:
+                # Direct sum — all C ions detected, use total O
+                totals["C/O"] = (C_p + C_uv) / OH
+                totals["CO_method"] = "direct_sum"
+            elif C_uv > 0 and O_pp > 0:
+                # Apply Garnett+1997 ICF to correct for missing C+
+                icf_c = icf_carbon(O_plus, O_pp)
+                raw_co = C_uv / O_pp
+                totals["C/O"] = icf_c * raw_co
+                totals["CO_method"] = "garnett97_icf"
+                totals["CO_icf_value"] = icf_c
+                icf_dict["C/O"] = {
+                    "icf": icf_c, "method": "Garnett+97",
+                    "raw": np.log10(raw_co) if raw_co > 0 else None,
+                    "corrected": np.log10(totals["C/O"]) if totals["C/O"] > 0 else None,
+                }
+            elif C_uv <= 0 and C_p <= 0:
+                failures["C/O"] = "no carbon ions detected (CII]/CIII]/CIV missing)"
+            else:
+                failures["C/O"] = "no O++ ion for C/O normalisation"
 
         # UV N/O — raw ionic sum without ICF (for comparison).
         N_pp = ionic.get("N++/H+", 0.0)

@@ -1439,6 +1439,7 @@ def _run_direct(
     snr_logU: float = 1.5,
     marginalize_logU: bool = True,
     icf_method: str = "auto",
+    co_icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
     continuum_rms_limits: dict[str, float] | None = None,
@@ -1565,6 +1566,7 @@ def _run_direct(
     totals = compute_total_abundances(
         ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
         icf_method=icf_method,
+        co_icf_method=co_icf_method,
         ionic_upper_limits=ionic_upper_limits,
         _lock_NO_icf=icf_tier,
     )
@@ -1706,6 +1708,7 @@ def _run_direct(
             totals_mc = compute_total_abundances(
                 ionic_mc, logU=logU_icf, Z_Zsun=z_zsun_mc, ne=ne_high,
                 icf_method=icf_method,
+                co_icf_method=co_icf_method,
                 _lock_NO_icf=NO_icf_name,
             )
 
@@ -1971,6 +1974,7 @@ def _run_direct_mcmc(
     snr_logU: float = 1.5,
     marginalize_logU: bool = True,
     icf_method: str = "auto",
+    co_icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
     continuum_rms_limits: dict[str, float] | None = None,
@@ -2157,6 +2161,7 @@ def _run_direct_mcmc(
     totals_pt = compute_total_abundances(
         ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
         icf_method=icf_method,
+        co_icf_method=co_icf_method,
         ionic_upper_limits=ionic_upper_limits,
         _lock_NO_icf=icf_tier,
     ) if ionic_pt else {}
@@ -2254,6 +2259,7 @@ def _run_direct_mcmc(
             totals_i = compute_total_abundances(
                 ionic_i, logU=logU_icf, Z_Zsun=z_zsun_i, ne=ne_high,
                 icf_method=icf_method,
+                co_icf_method=co_icf_method,
                 _lock_NO_icf=NO_icf_name,
             )
 
@@ -2618,6 +2624,7 @@ def compute_abundances(
     delta: float = -0.35,
     B_bump: float = 2.27,
     icf_method: str = "auto",
+    co_icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
     # Electron density overrides (bypass diagnostic computation)
@@ -2775,6 +2782,20 @@ def compute_abundances(
         ``"direct_sum"``: sum all detected nitrogen ions directly
         (Topping+2024, Yanagisawa+2025, Cameron+2023).  No ICF or logU
         needed; falls back to Izotov+06 if only N⁺ is available.
+
+        This controls **N/O only**; use ``co_icf_method`` for C/O.
+    co_icf_method : str
+        ICF scheme for C/O in the direct method (independent of
+        ``icf_method``).
+        ``"auto"`` (default) and ``"martinez25"``: apply the Martinez
+        (in prep.) C/O ICF to C²⁺/O²⁺ (from C III] and [O III]) when
+        logU and Z are available — a Cloudy-calibrated correction that
+        uses **only C²⁺** (no C III/λ1548 dependence).
+        ``"garnett97"``: the legacy tiered approach — direct sum
+        (C⁺ + C²⁺ + C³⁺)/(O⁺ + O²⁺) when C⁺ is detected, else the
+        Garnett+1997 ICF applied to (C²⁺ + C³⁺)/O²⁺.
+        ``"martinez25"`` falls back to ``"garnett97"`` (with a warning)
+        when logU/Z or C²⁺/O²⁺ are unavailable.
     snr_NO : float
         Minimum total-line SNR for each nitrogen ion when using
         ``icf_method="direct_sum"`` (default 2.0).  For doublets
@@ -2849,6 +2870,7 @@ def compute_abundances(
         "Av_prior": (Av_prior, ("gaussian", "uniform")),
         "Te_relation": (Te_relation, ("3_tier", "classical", "garnett", "desi")),
         "icf_method": (icf_method, ("auto", "martinez25", "izotov06", "direct_sum")),
+        "co_icf_method": (co_icf_method, ("auto", "martinez25", "garnett97")),
         "forward_sampler": (forward_sampler, ("emcee", "dynesty")),
         "balmer_anchor": (balmer_anchor, _VALID_BALMER_ANCHORS),
     }
@@ -3100,7 +3122,7 @@ def compute_abundances(
                 posteriors, Te_relation, n_posterior=n_posterior,
                 progress=progress, ne_high_max=ne_high_max,
                 snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                 continuum_rms_limits=continuum_rms_limits,
                 niv_rejected=_niv_rejected,
                 ne_low_override=ne_low_override,
@@ -3116,7 +3138,7 @@ def compute_abundances(
                 fluxes, errors, Te_relation, n_mc,
                 progress=progress, ne_high_max=ne_high_max,
                 snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                 continuum_rms_limits=continuum_rms_limits,
                 niv_rejected=_niv_rejected,
                 ne_low_override=ne_low_override,
@@ -3222,7 +3244,7 @@ def compute_abundances(
                             post_1666, Te_relation, n_posterior=n_posterior,
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                            icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                            icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
@@ -3238,7 +3260,7 @@ def compute_abundances(
                             fluxes_1666, errors_1666, Te_relation, n_mc,
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                            icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                            icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
@@ -3308,7 +3330,7 @@ def compute_abundances(
                             posteriors, Te_relation, n_posterior=n_posterior,
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                            icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                            icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
@@ -3323,7 +3345,7 @@ def compute_abundances(
                             fluxes, errors, Te_relation, n_mc,
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                            icf_method=icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                            icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,

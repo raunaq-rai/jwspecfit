@@ -2260,6 +2260,7 @@ class TestInputValidation:
         ("Av_prior", "unifrom", ("gaussian", "uniform")),
         ("Te_relation", "2_tier", ("3_tier", "classical", "garnett", "desi")),
         ("icf_method", "martinez", ("auto", "martinez25", "izotov06", "direct_sum")),
+        ("co_icf_method", "garnett", ("auto", "martinez25", "garnett97")),
         ("forward_sampler", "nautilus", ("emcee", "dynesty")),
         ("balmer_anchor", "HALPHA", ("HBETA", "Ha")),
     ]

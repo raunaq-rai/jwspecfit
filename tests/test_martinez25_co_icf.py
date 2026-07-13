@@ -70,3 +70,47 @@ class TestCOICFValidity:
         assert z > _Z_ZSUN_VALID[1]          # outside N/O range
         assert z < _Z_ZSUN_VALID_CO[1]       # inside C/O range
         assert np.isfinite(icf_CppOpp(-2.5, z))
+
+
+class TestCOMethodSelection:
+    """co_icf_method selects the C/O pathway in compute_total_abundances."""
+
+    IONIC = {
+        "O+/H+": 8.2e-6, "O++/H+": 4.5e-5,
+        "C++/H+": 2.4e-5, "C+++/H+": 4.3e-6,
+    }
+
+    def test_martinez25_uses_CppOpp_only(self):
+        from jwspecabund.direct import compute_total_abundances
+        logU, Z = -2.5, _Z(8.0)
+        totals = compute_total_abundances(
+            self.IONIC, logU=logU, Z_Zsun=Z, ne=1e3, co_icf_method="martinez25",
+        )
+        assert totals["CO_method"] == "martinez25"
+        # C/O = icf_CppOpp * (C2+/O2+), using C2+ only (no C3+).
+        expected = icf_CppOpp(logU, Z, 1e3) * (2.4e-5 / 4.5e-5)
+        assert totals["C/O"] == pytest.approx(expected, rel=1e-6)
+
+    def test_garnett97_uses_C2plus_C3plus(self):
+        from jwspecabund.direct import compute_total_abundances
+        totals = compute_total_abundances(
+            self.IONIC, logU=-2.5, Z_Zsun=_Z(8.0), ne=1e3,
+            co_icf_method="garnett97",
+        )
+        assert totals["CO_method"] == "garnett97_icf"
+        # Garnett uses (C2+ + C3+)/O2+ — includes C3+, so higher than Martinez.
+        assert totals["C/O"] > 0
+
+    def test_methods_give_different_CO(self):
+        from jwspecabund.direct import compute_total_abundances
+        kw = dict(logU=-2.5, Z_Zsun=_Z(8.0), ne=1e3)
+        m = compute_total_abundances(self.IONIC, co_icf_method="martinez25", **kw)
+        g = compute_total_abundances(self.IONIC, co_icf_method="garnett97", **kw)
+        assert m["CO_method"] != g["CO_method"]
+        assert m["C/O"] != g["C/O"]
+
+    def test_martinez_falls_back_without_logU(self):
+        # No logU/Z -> Martinez ineligible -> legacy Garnett path.
+        from jwspecabund.direct import compute_total_abundances
+        totals = compute_total_abundances(self.IONIC, co_icf_method="martinez25")
+        assert totals["CO_method"] == "garnett97_icf"
