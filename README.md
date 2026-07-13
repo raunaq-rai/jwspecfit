@@ -212,6 +212,16 @@ Two other backends are available for cross-checks (`sampler="emcee"`, an
 affine-invariant ensemble sampler, and `sampler="nautilus"`, an importance-nested
 sampler), but NUTS is the default and recommended choice.
 
+The animation below shows NUTS in action on a single emission line decomposed
+into narrow, medium-broad, and very-broad kinematic components. The left panel
+shows the data with the running best-fit model (black) and its component
+decomposition; the right-hand grid tracks the per-component flux, width
+($\sigma_v$), and centroid velocity offset as the six chains evolve; and the
+lower-left panel follows the Gelman–Rubin $\hat{R}$ collapsing below the
+$\hat{R} = 1.01$ convergence threshold as warmup gives way to sampling.
+
+![NUTS multi-component line fit with live Gelman–Rubin convergence](docs/anim/multicomponent_line.gif)
+
 ## Abundances
 
 `jwspecabund` turns a set of fitted line fluxes into gas-phase chemical

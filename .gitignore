@@ -16,7 +16,7 @@ venv/
 .vscode/
 *.swp
 *.swo
-
+.claude/
 # OS
 .DS_Store
 Thumbs.db
@@ -35,3 +35,6 @@ docs/api_reference/generated/
 
 # Local task tracking / plans / lessons (not version-controlled)
 tasks/
+
+# Local animation / figure builder scripts (not version-controlled)
+scripts/
