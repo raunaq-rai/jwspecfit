@@ -1082,6 +1082,8 @@ def compute_total_abundances(
     ne: float | None = None,
     icf_method: str = "auto",
     co_icf_method: str = "auto",
+    co_logU: float | None = None,
+    co_ne: float | None = None,
     ionic_upper_limits: dict[str, float] | None = None,
     _lock_NO_icf: str | None = None,
 ) -> dict[str, float]:
@@ -1134,17 +1136,25 @@ def compute_total_abundances(
     elif icf_method == "auto" and logU is not None and Z_Zsun is not None:
         use_martinez = True
 
+    # C/O uses the intermediate (C2+/O2+) ionisation zone: Martinez confirms
+    # log(U_int) is the appropriate ionisation parameter for the C2+/O2+ ICF,
+    # and the matching density is the intermediate zone (from CIII], the C2+
+    # density diagnostic).  ``co_logU``/``co_ne`` carry those; they fall back
+    # to the shared logU/ne (high zone) when not supplied.
+    _co_logU = co_logU if co_logU is not None else logU
+    _co_ne = co_ne if co_ne is not None else ne
+
     # Decide whether to use the Martinez (in prep.) C/O ICF (C2+/O2+).
     use_martinez_co = False
     if co_icf_method == "martinez25":
-        if logU is None or Z_Zsun is None:
+        if _co_logU is None or Z_Zsun is None:
             logger.warning(
                 "Martinez C/O ICF requires logU and Z_Zsun; "
                 "falling back to Garnett+97."
             )
         else:
             use_martinez_co = True
-    elif co_icf_method == "auto" and logU is not None and Z_Zsun is not None:
+    elif co_icf_method == "auto" and _co_logU is not None and Z_Zsun is not None:
         use_martinez_co = True
 
     # O/H = O+/H+ + O++/H+ (no ICF needed)
@@ -1465,8 +1475,8 @@ def compute_total_abundances(
         co_done = False
         if use_martinez_co and C_pp > 0 and O_pp > 0:
             from .martinez25_icf import icf_CppOpp
-            ne_icf = ne if ne is not None else NE_DEFAULT
-            icf_c = icf_CppOpp(logU, Z_Zsun, ne_icf)
+            ne_icf = _co_ne if _co_ne is not None else NE_DEFAULT
+            icf_c = icf_CppOpp(_co_logU, Z_Zsun, ne_icf)
             if np.isfinite(icf_c):
                 raw_co = C_pp / O_pp
                 totals["C/O"] = icf_c * raw_co

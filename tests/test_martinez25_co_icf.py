@@ -114,3 +114,29 @@ class TestCOMethodSelection:
         from jwspecabund.direct import compute_total_abundances
         totals = compute_total_abundances(self.IONIC, co_icf_method="martinez25")
         assert totals["CO_method"] == "garnett97_icf"
+
+    def test_co_logU_and_co_ne_override_the_CO_icf(self):
+        # C/O must use co_logU/co_ne (intermediate zone), not the shared
+        # logU/ne (high zone) that N/O uses.
+        from jwspecabund.direct import compute_total_abundances
+        logU_hi, ne_hi = -3.2, 6e4       # high-zone (for N/O)
+        logU_mid, ne_mid = -2.5, 2.7e4   # intermediate (for C/O)
+        totals = compute_total_abundances(
+            self.IONIC, logU=logU_hi, Z_Zsun=_Z(8.0), ne=ne_hi,
+            co_icf_method="martinez25", co_logU=logU_mid, co_ne=ne_mid,
+        )
+        expected = icf_CppOpp(logU_mid, _Z(8.0), ne_mid) * (2.4e-5 / 4.5e-5)
+        assert totals["C/O"] == pytest.approx(expected, rel=1e-6)
+        # and NOT what the high-zone logU/ne would give
+        wrong = icf_CppOpp(logU_hi, _Z(8.0), ne_hi) * (2.4e-5 / 4.5e-5)
+        assert abs(totals["C/O"] - wrong) > 1e-3
+
+    def test_co_params_default_to_shared_logU_ne(self):
+        # Backward compatibility: without co_* the C/O uses logU/ne.
+        from jwspecabund.direct import compute_total_abundances
+        t = compute_total_abundances(
+            self.IONIC, logU=-2.5, Z_Zsun=_Z(8.0), ne=1e3,
+            co_icf_method="martinez25",
+        )
+        expected = icf_CppOpp(-2.5, _Z(8.0), 1e3) * (2.4e-5 / 4.5e-5)
+        assert t["C/O"] == pytest.approx(expected, rel=1e-6)

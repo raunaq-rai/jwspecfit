@@ -1545,10 +1545,20 @@ def _run_direct(
     # --- Step 5: Ionisation parameter ---
     logU = None
     logU_diag = None
+    logU_co = None
     if Z_Zsun is not None:
         logU, logU_diag = _compute_logU(
             fluxes, Z_Zsun, ne_high, errors=errors, snr_logU=snr_logU,
         )
+        # C/O ICF: recompute log U at the intermediate (C2+) zone density.
+        # Only the density-sensitive O32 diagnostic changes; N43 is
+        # density-insensitive so this is a no-op there.
+        logU_co = logU
+        if logU_diag is not None and ne_mid is not None:
+            logU_co, _ = _compute_logU(
+                fluxes, Z_Zsun, ne_mid, errors=errors, snr_logU=snr_logU,
+                lock_diag=logU_diag,
+            )
 
     # --- Step 6: Total abundances with ICFs ---
     # SNR-gate nitrogen ions to avoid noise-dominated N/O.
@@ -1567,6 +1577,7 @@ def _run_direct(
         ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
         icf_method=icf_method,
         co_icf_method=co_icf_method,
+        co_logU=logU_co, co_ne=ne_mid,
         ionic_upper_limits=ionic_upper_limits,
         _lock_NO_icf=icf_tier,
     )
@@ -1697,6 +1708,18 @@ def _run_direct(
                     no_in_bounds = False
             logU_icf = logU_sample if marginalize_logU else logU
 
+            # C/O log U at the intermediate (C2+) zone density.
+            logU_co_sample = logU_co
+            if (marginalize_logU and z_zsun_mc is not None
+                    and logU_diag is not None and ne_mid is not None):
+                logU_co_mc, _ = _compute_logU(
+                    mc_fluxes, z_zsun_mc, ne_mid, errors=errors,
+                    snr_logU=snr_logU, lock_diag=logU_diag,
+                )
+                if logU_co_mc is not None and np.isfinite(logU_co_mc):
+                    logU_co_sample = float(logU_co_mc)
+            logU_co_icf = logU_co_sample if marginalize_logU else logU_co
+
             Te_high_mc.append(Te_h)
             Te_low_mc.append(Te_l)
             logU_mc_arr.append(logU_sample if logU_sample is not None else np.nan)
@@ -1709,6 +1732,7 @@ def _run_direct(
                 ionic_mc, logU=logU_icf, Z_Zsun=z_zsun_mc, ne=ne_high,
                 icf_method=icf_method,
                 co_icf_method=co_icf_method,
+                co_logU=logU_co_icf, co_ne=ne_mid,
                 _lock_NO_icf=NO_icf_name,
             )
 
@@ -2138,11 +2162,19 @@ def _run_direct_mcmc(
     Z_Zsun_pt = 10.0 ** (12.0 + np.log10(OH_pt) - LOG_OH_SOLAR) if OH_pt > 0 else None
     logU_pt = None
     logU_diag = None
+    logU_co_pt = None
     if Z_Zsun_pt is not None:
         logU_pt, logU_diag = _compute_logU(
             med_fluxes, Z_Zsun_pt, ne_high, errors=med_errors,
             snr_logU=snr_logU,
         )
+        # C/O ICF: log U at the intermediate (C2+) zone density.
+        logU_co_pt = logU_pt
+        if logU_diag is not None and ne_mid is not None:
+            logU_co_pt, _ = _compute_logU(
+                med_fluxes, Z_Zsun_pt, ne_mid, errors=med_errors,
+                snr_logU=snr_logU, lock_diag=logU_diag,
+            )
 
     if ionic_pt:
         _gate_nitrogen_ions(ionic_pt, med_fluxes, med_errors, snr_NO=snr_NO)
@@ -2162,6 +2194,7 @@ def _run_direct_mcmc(
         ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
         icf_method=icf_method,
         co_icf_method=co_icf_method,
+        co_logU=logU_co_pt, co_ne=ne_mid,
         ionic_upper_limits=ionic_upper_limits,
         _lock_NO_icf=icf_tier,
     ) if ionic_pt else {}
@@ -2248,6 +2281,18 @@ def _run_direct_mcmc(
                     no_in_bounds = False
             logU_icf = logU_sample if marginalize_logU else logU_pt
 
+            # C/O log U at the intermediate (C2+) zone density.
+            logU_co_sample = logU_co_pt
+            if (marginalize_logU and z_zsun_i is not None
+                    and logU_diag is not None and ne_mid is not None):
+                logU_co_val, _ = _compute_logU(
+                    sample, z_zsun_i, ne_mid, errors=med_errors,
+                    snr_logU=snr_logU, lock_diag=logU_diag,
+                )
+                if logU_co_val is not None and np.isfinite(logU_co_val):
+                    logU_co_sample = float(logU_co_val)
+            logU_co_icf = logU_co_sample if marginalize_logU else logU_co_pt
+
             Te_high_post.append(Te_h)
             Te_low_post.append(Te_l)
             logU_post.append(logU_sample if logU_sample is not None else np.nan)
@@ -2260,6 +2305,7 @@ def _run_direct_mcmc(
                 ionic_i, logU=logU_icf, Z_Zsun=z_zsun_i, ne=ne_high,
                 icf_method=icf_method,
                 co_icf_method=co_icf_method,
+                co_logU=logU_co_icf, co_ne=ne_mid,
                 _lock_NO_icf=NO_icf_name,
             )
 
