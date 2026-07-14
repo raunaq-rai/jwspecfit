@@ -283,6 +283,13 @@ The code automatically uses the ions present in the fit, so UV-only spectra
 (C III], C IV, N III], N IV]) and rest-optical spectra ([N II], [O II], [O III])
 are both supported.
 
+Ionisation-correction factors follow **Martinez et al. (2025)** for N/O — with
+the ionisation parameter taken from their density-dependent O32 or N43
+calibrations — and **Martinez et al. (in prep.)** for the C²⁺/O²⁺ C/O ICF.
+Legacy options use the **Izotov et al. (2006)** and **Garnett et al. (1997)**
+ICFs, and a direct-sum mode (no ICF) follows **Topping et al. (2024)**,
+**Yanagisawa et al. (2025)**, and **Cameron et al. (2023)**.
+
 ## Documentation
 
 Usage guides, API reference, and methodology:
@@ -340,6 +347,54 @@ reads [`CITATION.cff`](CITATION.cff) and produces APA/BibTeX on the fly.
 The concept DOI above always points to the latest release. If a paper
 needs to cite the *exact* code version used for reproducibility, pick
 the per-version DOI from the "Versions" list on the Zenodo page.
+
+### Underlying methods and software
+
+`jwspecfit` implements published methods and builds on external libraries.
+**Please also cite the works underlying whichever outputs you use** — the
+relevant references are grouped below.
+
+**Sampling and inference**
+- NUTS / NumPyro — Phan, Pradhan & Jankowiak (2019); Bingham et al. (2019)
+- emcee (ensemble sampler) — Foreman-Mackey et al. (2013)
+- nautilus (nested sampler) — Lange (2023)
+- Convergence ($\hat{R}$) — Gelman & Rubin (1992)
+
+**Atomic physics and recombination**
+- PyNEB — Luridiana, Morisset & Shaw (2015)
+- H I recombination — Storey & Hummer (1995); Aller (1984)
+- [O III] transition data — Storey & Zeippen (2000); Aggarwal & Keenan (2004)
+- C III] atomic data — Keenan et al. (1992)
+- Reference text — Osterbrock & Ferland (2006)
+
+**Dust attenuation**
+- Cardelli, Clayton & Mathis (1989); Calzetti et al. (2000);
+  Salim, Boquien & Lee (2018); Noll et al. (2009)
+
+**Direct T_e metallicity and ICFs**
+- Direct-method procedure and multi-zone densities — Berg et al. (2025)
+- N/O ICFs and O32 / N43 ionisation-parameter calibrations — Martinez et al. (2025)
+- C²⁺/O²⁺ C/O ICF — Martinez et al. (in prep.)
+- Legacy ICFs — Izotov et al. (2006); Garnett et al. (1997)
+- Direct-sum N/O — Topping et al. (2024); Yanagisawa et al. (2025); Cameron et al. (2023)
+- Solar reference abundances — Asplund et al. (2009)
+- Photoionisation grids (ICF calibration) — Cloudy, Ferland et al. (2017)
+
+**Strong-line metallicity and forward model**
+- Strong-line calibrations — Sanders et al. (2025)
+- Bayesian forward model — Cullen et al. (2025)
+
+**Lyα, DLA and IGM**
+- Lyα / DLA damping-wing model — Pollock et al. (2026); de Graaff et al. (2025)
+- DLA / damping wing — Totani et al. (2006)
+- Lyα damping-wing (D_Lyα) statistic — Heintz et al. (2025)
+- Lyα asymmetric-profile parameterisation — Bolan et al. (2025)
+- IGM attenuation — Inoue et al. (2014); Bosman et al. (2022)
+- JWST/NIRSpec — Jakobsen et al. (2022)
+
+> These are short-form references compiled from the in-code citations; a
+> machine-readable `.bib` is not shipped, so please verify the exact
+> bibliographic details against the original papers before use.
 
 ## Licence
 
