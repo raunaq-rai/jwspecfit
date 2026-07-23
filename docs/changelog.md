@@ -4,6 +4,38 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## 1.1.7 — 2026-07-23
+
+### `jwspecabund` — Martinez C/O ionisation-correction factor
+
+- **New C²⁺/O²⁺ → C/O ICF from Martinez et al. (2026, in prep.)**, selectable
+  via the new `co_icf_method` argument to `compute_abundances`. The ICF is
+  interpolated in electron density and evaluated at the intermediate (C²⁺)
+  zone density, consistent with the ion's ionisation zone. The legacy
+  Garnett (1997) C/O ICF remains available as the alternative option.
+
+### Line database additions
+
+- **[S III] λ6312, λ9069, λ9531** added to `REST_LINES_A` and included as
+  default plot markers.
+
+### Behaviour changes
+
+- **Invalid `icf_tier` now raises `ValueError`** instead of silently falling
+  back to the Izotov tier, and **all string-choice inputs of
+  `compute_abundances` are validated up front** so mistyped options fail
+  immediately with a clear message rather than mid-computation.
+- **Asymmetric uncertainties are printed as `(+hi/−lo)`** in
+  `AbundanceResult.summary`.
+
+### Documentation
+
+- Consolidated **underlying-methods and references** section in the README,
+  with explicit credit to **Zorayda Martinez et al. (2025, 2026 in prep.)**
+  for the N/O and C/O ICFs and the O32 / N43 log(U) calibrations.
+- Added a convergence (R̂ / ESS) check to the brief MCMC tutorial and a NUTS
+  multi-component line-fit animation.
+
 ## 1.1.6 — 2026-06-23
 
 ### Bug fixes — Izotov+2006 ionisation correction factors

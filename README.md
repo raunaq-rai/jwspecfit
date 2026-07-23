@@ -31,7 +31,7 @@ Three packages, one pipeline — from 1-D NIRSpec spectra to element abundances.
 - **Lyα + DLA**: skewed Gaussian + IGM transmission + dynesty N_HI retrieval.
 - **Dust correction**: multi-Balmer A_V anchored on Hβ **or** Hα, Salim+18 or Cardelli+89 curves.
 - **Abundances**: direct T_e ([O III] 4363 or UV 1666), Cullen+25 forward model, Sanders+25 strong-line.
-- **ICFs**: Martinez+25 (N/O) · Izotov+06 (S, Ne, Ar) · Garnett+97 (C/O).
+- **ICFs**: Martinez+25 (N/O) · Martinez, in prep. (C/O) · Izotov+06 (S, Ne, Ar) · Garnett+97 (legacy C/O).
 - **Lyα escape fraction** with Monte Carlo propagation of A_V uncertainty.
 
 ## Install
@@ -283,11 +283,14 @@ The code automatically uses the ions present in the fit, so UV-only spectra
 (C III], C IV, N III], N IV]) and rest-optical spectra ([N II], [O II], [O III])
 are both supported.
 
-Ionisation-correction factors follow **Martinez et al. (2025)** for N/O — with
-the ionisation parameter taken from their density-dependent O32 or N43
-calibrations — and **Martinez et al. (in prep.)** for the C²⁺/O²⁺ C/O ICF.
-Legacy options use the **Izotov et al. (2006)** and **Garnett et al. (1997)**
-ICFs, and a direct-sum mode (no ICF) follows **Topping et al. (2024)**,
+The default N/O and C/O ionisation-correction factors are due to the work of
+**Zorayda Martinez** and collaborators. The N/O ICFs, and the density-dependent
+O32 / N43 ionisation-parameter calibrations that set the ionisation parameter,
+are taken from **Martinez et al. (2025)** ("Under Pressure", arXiv:2510.21960);
+the C²⁺/O²⁺ → C/O ICF is taken from **Martinez et al. (2026, in prep.)**.
+Please cite these works when using the N/O or C/O outputs. Legacy options use
+the **Izotov et al. (2006)** and **Garnett et al. (1997)** ICFs, and a
+direct-sum mode (no ICF) follows **Topping et al. (2024)**,
 **Yanagisawa et al. (2025)**, and **Cameron et al. (2023)**.
 
 ## Documentation
@@ -373,8 +376,8 @@ relevant references are grouped below.
 
 **Direct T_e metallicity and ICFs**
 - Direct-method procedure and multi-zone densities — Berg et al. (2025)
-- N/O ICFs and O32 / N43 ionisation-parameter calibrations — Martinez et al. (2025)
-- C²⁺/O²⁺ C/O ICF — Martinez et al. (in prep.)
+- N/O ICFs and O32 / N43 ionisation-parameter calibrations — Zorayda Martinez et al. (2025, "Under Pressure", arXiv:2510.21960)
+- C²⁺/O²⁺ C/O ICF — Zorayda Martinez et al. (2026, in prep.)
 - Legacy ICFs — Izotov et al. (2006); Garnett et al. (1997)
 - Direct-sum N/O — Topping et al. (2024); Yanagisawa et al. (2025); Cameron et al. (2023)
 - Solar reference abundances — Asplund et al. (2009)
