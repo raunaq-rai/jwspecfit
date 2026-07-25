@@ -366,8 +366,8 @@ references are grouped below by the part of the pipeline they support.
 
 ## Citation
 
-A paper describing `jwspecfit` is **in preparation** (Rai et al., in prep.) and
-is expected to be submitted shortly. **This section will be updated with the full
+A paper describing `jwspecfit` is **in preparation** (Rai & Roberts-Borsani,
+in prep.) and is expected to be submitted shortly. **This section will be updated with the full
 reference and a bibliographic DOI on submission** — please check back, or watch
 the repository, for the citable paper.
 
@@ -389,7 +389,7 @@ archive** via its Zenodo DOI.
 ```bibtex
 % Companion paper (in preparation) — this entry will be updated on submission.
 @article{rai_jwspecfit_paper,
-  author = {Rai, Raunaq and others},
+  author = {Rai, Raunaq Singh and Roberts-Borsani, Guido},
   title  = {{jwspecfit}: Emission-line fitting, MCMC sampling, and chemical
             abundances for JWST NIRSpec spectra},
   year   = {2026},
