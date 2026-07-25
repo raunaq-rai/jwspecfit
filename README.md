@@ -23,17 +23,6 @@ Three packages, one pipeline — from 1-D NIRSpec spectra to element abundances.
 
 > **Recommended fitter:** for science-quality results the authors recommend the Bayesian MCMC fitter `jwspecmcmc` (full posteriors and faithful uncertainties). Use the least-squares `jwspecfit` engine for quick looks, initial guesses, and BIC model selection.
 
-## Key features
-
-- **Resolution-aware line profiles**: bin-averaged Gaussians via erf — correct for prism, gratings, and stacks.
-- **Broad-Balmer detection**: BIC-based selection across four nested models.
-- **UV doublets**: flux-ratio and kinematic tying for C IV, N V, N III], O III], C III], N IV].
-- **Lyα + DLA**: skewed Gaussian + IGM transmission + dynesty N_HI retrieval.
-- **Dust correction**: multi-Balmer A_V anchored on Hβ **or** Hα, Salim+18 or Cardelli+89 curves.
-- **Abundances**: direct T_e ([O III] 4363 or UV 1666), Cullen+25 forward model, Sanders+25 strong-line.
-- **ICFs**: Martinez+25 (N/O) · Martinez, in prep. (C/O) · Izotov+06 (S, Ne, Ar) · Garnett+97 (legacy C/O).
-- **Lyα escape fraction** with Monte Carlo propagation of A_V uncertainty.
-
 ## Install
 
 ```bash
@@ -55,6 +44,40 @@ pip install -e ".[dev,nuts,mcmc,abund]"
 ```
 
 Requires Python ≥ 3.10. See the [installation guide](https://jwspecfit.readthedocs.io/en/latest/installation.html) for individual extras.
+
+## Key features
+
+### Line fitting
+
+- **Resolution-aware line profiles**: bin-averaged Gaussians via erf — correct for prism, gratings, and stacks.
+- **Bayesian MCMC**: full posteriors via NUTS (recommended), with emcee and nautilus backends for cross-checks.
+- **Broad-Balmer detection**: BIC-based selection across four nested models.
+- **UV doublets**: flux-ratio and kinematic tying for C IV, N V, N III], O III], C III], N IV].
+
+### Lyα + DLA
+
+- **Lyα + DLA**: skewed Gaussian + IGM transmission + dynesty N_HI retrieval.
+- **Lyα escape fraction** with Monte Carlo propagation of A_V uncertainty.
+
+### Abundances
+
+- **Dust correction**: multi-Balmer A_V anchored on Hβ **or** Hα, Salim+18 or Cardelli+89 curves.
+- **Direct T_e metallicity**: from [O III] λ4363 or the UV O III] λ1666 auroral line.
+- **Strong-line metallicity**: Sanders+25 calibrations.
+- **Bayesian forward model**: Cullen+25.
+- **ICFs**: Martinez+25 (N/O) · Martinez, in prep. (C/O) · Izotov+06 (S, Ne, Ar) · Garnett+97 (legacy C/O).
+
+## In action
+
+The animation below shows NUTS in action on a single emission line decomposed
+into narrow, medium-broad, and very-broad kinematic components. The left panel
+shows the data with the running best-fit model (black) and its component
+decomposition; the right-hand grid tracks the per-component flux, width
+($\sigma_v$), and centroid velocity offset as the six chains evolve; and the
+lower-left panel follows the Gelman–Rubin $\hat{R}$ collapsing below the
+$\hat{R} = 1.01$ convergence threshold as warmup gives way to sampling.
+
+![NUTS multi-component line fit with live Gelman–Rubin convergence](docs/anim/multicomponent_line.gif)
 
 ## Example
 
@@ -212,16 +235,6 @@ Two other backends are available for cross-checks (`sampler="emcee"`, an
 affine-invariant ensemble sampler, and `sampler="nautilus"`, an importance-nested
 sampler), but NUTS is the default and recommended choice.
 
-The animation below shows NUTS in action on a single emission line decomposed
-into narrow, medium-broad, and very-broad kinematic components. The left panel
-shows the data with the running best-fit model (black) and its component
-decomposition; the right-hand grid tracks the per-component flux, width
-($\sigma_v$), and centroid velocity offset as the six chains evolve; and the
-lower-left panel follows the Gelman–Rubin $\hat{R}$ collapsing below the
-$\hat{R} = 1.01$ convergence threshold as warmup gives way to sampling.
-
-![NUTS multi-component line fit with live Gelman–Rubin convergence](docs/anim/multicomponent_line.gif)
-
 ## Abundances
 
 `jwspecabund` turns a set of fitted line fluxes into gas-phase chemical
@@ -306,10 +319,60 @@ Worked examples: [`docs/notebooks/`](docs/notebooks/).
 pytest tests/
 ```
 
+## Underlying methods and software
+
+`jwspecfit` implements published methods and builds on external libraries.
+**Please cite the works underlying whichever outputs you use** — the relevant
+references are grouped below by the part of the pipeline they support.
+
+### Line fitting
+
+- NUTS / NumPyro — Phan, Pradhan & Jankowiak (2019); Bingham et al. (2019)
+- JAX (JIT compilation + automatic differentiation) — Bradbury et al. (2018)
+- emcee (ensemble sampler) — Foreman-Mackey et al. (2013)
+- nautilus (nested sampler) — Lange (2023)
+- Convergence ($\hat{R}$) — Gelman & Rubin (1992)
+- JWST / NIRSpec instrument — Jakobsen et al. (2022)
+
+### Abundances
+
+- PyNEB (atomic physics) — Luridiana, Morisset & Shaw (2015)
+- H I recombination — Storey & Hummer (1995); Aller (1984)
+- [O III] transition data — Storey & Zeippen (2000); Aggarwal & Keenan (2004)
+- C III] atomic data — Keenan et al. (1992)
+- Reference text — Osterbrock & Ferland (2006)
+- Dust attenuation — Cardelli, Clayton & Mathis (1989); Calzetti et al. (2000); Salim, Boquien & Lee (2018); Noll et al. (2009)
+- Direct-method procedure and multi-zone densities — Berg et al. (2025)
+- N/O ICFs and O32 / N43 ionisation-parameter calibrations — Zorayda Martinez et al. (2025, "Under Pressure", arXiv:2510.21960)
+- C²⁺/O²⁺ C/O ICF — Zorayda Martinez et al. (2026, in prep.)
+- Legacy ICFs — Izotov et al. (2006); Garnett et al. (1997)
+- Direct-sum N/O — Topping et al. (2024); Yanagisawa et al. (2025); Cameron et al. (2023)
+- Solar reference abundances — Asplund et al. (2009)
+- Photoionisation grids (ICF calibration) — Cloudy, Ferland et al. (2017)
+- Strong-line calibrations — Sanders et al. (2025)
+- Bayesian forward model — Cullen et al. (2025)
+
+### Lyα, DLA and IGM
+
+- Lyα / DLA damping-wing model — Pollock et al. (2026); de Graaff et al. (2025)
+- DLA / damping wing — Totani et al. (2006)
+- Lyα damping-wing (D_Lyα) statistic — Heintz et al. (2025)
+- Lyα asymmetric-profile parameterisation — Bolan et al. (2025)
+- IGM attenuation — Inoue et al. (2014); Bosman et al. (2022)
+
+> These are short-form references compiled from the in-code citations; a
+> machine-readable `.bib` is not shipped, so please verify the exact
+> bibliographic details against the original papers before use.
+
 ## Citation
 
-If you use `jwspecfit` in your research, **please cite it**. Choose
-whichever format your reference manager or journal prefers.
+A paper describing `jwspecfit` is **in preparation** (Rai et al., in prep.) and
+is expected to be submitted shortly. **This section will be updated with the full
+reference and a bibliographic DOI on submission** — please check back, or watch
+the repository, for the citable paper.
+
+Until then, if you use `jwspecfit` in your research **please cite the software
+archive** via its Zenodo DOI.
 
 > ### 📖 DOI: [10.5281/zenodo.19679793](https://doi.org/10.5281/zenodo.19679793)
 >
@@ -318,18 +381,28 @@ whichever format your reference manager or journal prefers.
 ### Plain text
 
 > Rai, R. (2026). *jwspecfit: Resolution-aware emission-line fitting,
-> MCMC sampling, and chemical abundances for JWST NIRSpec* (v1.0.1).
+> MCMC sampling, and chemical abundances for JWST NIRSpec* (v1.1.7).
 > Zenodo. <https://doi.org/10.5281/zenodo.19679793>
 
 ### BibTeX
 
 ```bibtex
+% Companion paper (in preparation) — this entry will be updated on submission.
+@article{rai_jwspecfit_paper,
+  author = {Rai, Raunaq and others},
+  title  = {{jwspecfit}: Emission-line fitting, MCMC sampling, and chemical
+            abundances for JWST NIRSpec spectra},
+  year   = {2026},
+  note   = {in preparation},
+}
+
+% Software archive.
 @software{rai_jwspecfit,
   author       = {Rai, Raunaq},
   title        = {{jwspecfit}: Resolution-aware emission-line fitting,
                   MCMC sampling, and chemical abundances for JWST NIRSpec},
   year         = {2026},
-  version      = {1.0.1},
+  version      = {1.1.7},
   publisher    = {Zenodo},
   doi          = {10.5281/zenodo.19679793},
   url          = {https://doi.org/10.5281/zenodo.19679793},
@@ -350,54 +423,6 @@ reads [`CITATION.cff`](CITATION.cff) and produces APA/BibTeX on the fly.
 The concept DOI above always points to the latest release. If a paper
 needs to cite the *exact* code version used for reproducibility, pick
 the per-version DOI from the "Versions" list on the Zenodo page.
-
-### Underlying methods and software
-
-`jwspecfit` implements published methods and builds on external libraries.
-**Please also cite the works underlying whichever outputs you use** — the
-relevant references are grouped below.
-
-**Sampling and inference**
-- NUTS / NumPyro — Phan, Pradhan & Jankowiak (2019); Bingham et al. (2019)
-- emcee (ensemble sampler) — Foreman-Mackey et al. (2013)
-- nautilus (nested sampler) — Lange (2023)
-- Convergence ($\hat{R}$) — Gelman & Rubin (1992)
-
-**Atomic physics and recombination**
-- PyNEB — Luridiana, Morisset & Shaw (2015)
-- H I recombination — Storey & Hummer (1995); Aller (1984)
-- [O III] transition data — Storey & Zeippen (2000); Aggarwal & Keenan (2004)
-- C III] atomic data — Keenan et al. (1992)
-- Reference text — Osterbrock & Ferland (2006)
-
-**Dust attenuation**
-- Cardelli, Clayton & Mathis (1989); Calzetti et al. (2000);
-  Salim, Boquien & Lee (2018); Noll et al. (2009)
-
-**Direct T_e metallicity and ICFs**
-- Direct-method procedure and multi-zone densities — Berg et al. (2025)
-- N/O ICFs and O32 / N43 ionisation-parameter calibrations — Zorayda Martinez et al. (2025, "Under Pressure", arXiv:2510.21960)
-- C²⁺/O²⁺ C/O ICF — Zorayda Martinez et al. (2026, in prep.)
-- Legacy ICFs — Izotov et al. (2006); Garnett et al. (1997)
-- Direct-sum N/O — Topping et al. (2024); Yanagisawa et al. (2025); Cameron et al. (2023)
-- Solar reference abundances — Asplund et al. (2009)
-- Photoionisation grids (ICF calibration) — Cloudy, Ferland et al. (2017)
-
-**Strong-line metallicity and forward model**
-- Strong-line calibrations — Sanders et al. (2025)
-- Bayesian forward model — Cullen et al. (2025)
-
-**Lyα, DLA and IGM**
-- Lyα / DLA damping-wing model — Pollock et al. (2026); de Graaff et al. (2025)
-- DLA / damping wing — Totani et al. (2006)
-- Lyα damping-wing (D_Lyα) statistic — Heintz et al. (2025)
-- Lyα asymmetric-profile parameterisation — Bolan et al. (2025)
-- IGM attenuation — Inoue et al. (2014); Bosman et al. (2022)
-- JWST/NIRSpec — Jakobsen et al. (2022)
-
-> These are short-form references compiled from the in-code citations; a
-> machine-readable `.bib` is not shipped, so please verify the exact
-> bibliographic details against the original papers before use.
 
 ## Licence
 
