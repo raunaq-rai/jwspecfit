@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [
-    {name = "Raunaq Rai", email = "raunaq.rai.22@ucl.ac.uk"},
+    {name = "Raunaq Rai", email = "raunaq.rai.25@ucl.ac.uk"},
 ]
 keywords = [
     "astronomy", "astrophysics", "JWST", "NIRSpec", "spectroscopy",
