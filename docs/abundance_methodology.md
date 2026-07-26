@@ -246,7 +246,9 @@ Each ionisation zone is assigned a representative density:
 - **Fallback:** a redshift-evolution fit `ne_zone_fallback(zone, z) = A·(1+z)^p`
   per zone when no diagnostic is available — **mid** `1110·(1+z)^1.93` and
   **high** `5400·(1+z)^1.62` from **Martinez+2025 (arXiv:2510.21960), Eqs 4 & 5**;
-  **low** `54·(1+z)^1.2` from Abdurro'uf+2024 (arXiv:2404.16201)
+  **low** `54·(1+z)^1.2` from Abdurro'uf+2024 (arXiv:2404.16201). Martinez+2025
+  fit only the intermediate and high zones and themselves adopt Abdurro'uf+2024
+  for the low-ionisation zone, so no low-zone Martinez relation exists.
 
 ### 4.3 Iterative T_e–n_e refinement
 
