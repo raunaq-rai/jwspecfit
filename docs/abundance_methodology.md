@@ -264,6 +264,47 @@ a two-pass procedure:
 This converges in a single iteration because density diagnostics are
 only weakly sensitive to T_e.
 
+### 4.4 Ion-to-zone temperature and density assignments
+
+Each ionic abundance is evaluated at the temperature **and** density of the
+ionisation zone the ion traces (`compute_ionic_abundances`), following the
+zone assignment of Martinez+2025 (arXiv:2510.21960).  Within the
+high-ionisation side there are **two** densities: O2+ and Ne2+ use the
+dedicated **O2+-zone density `n_e(O2+)`** ([Ar IV]-preferred), whereas the more
+highly ionised N3+/N4+/C3+ use the **high-zone density `n_e,high`** (N IV] /
+[Ar IV]).
+
+| Ion (X^i+/H+) | Line(s) | Zone | T_e | n_e |
+|---------------|---------|------|-----|-----|
+| O+  | [O II] 3726+3729 | low | T_low | n_e,low |
+| N+  | [N II] 6585 | low | T_low | n_e,low |
+| S+  | [S II] 6718+6732 | low | T_low | n_e,low |
+| C+  | C II] 2324+2326 | low | T_low | n_e,low |
+| N2+ | N III] 1749+1752 | intermediate | T_int | n_e,int |
+| C2+ | C III] 1907+1909 | intermediate | T_int | n_e,int |
+| S2+ | [S III] 9069 | intermediate | T_int | n_e,int |
+| Ar2+ | [Ar III] 7136 | intermediate | T_int | n_e,int |
+| O2+ | [O III] 5007 | high (O2+) | T_high | n_e(O2+) |
+| Ne2+ | [Ne III] 3869 | high (O2+) | T_high | n_e(O2+) |
+| N3+ | N IV] 1483+1486 | high | T_high | n_e,high |
+| N4+ | N V 1239+1243 | high | T_high | n_e,high |
+| C3+ | C IV 1548+1551 | high | T_high | n_e,high |
+
+where `n_e(O2+)` is the O2+/Ne2+-zone density ([Ar IV] 4711/4740 preferred →
+C III] → z-fallback), and `n_e,int` / `n_e,high` are the intermediate / high
+zone densities of §4.2.  Because these collisionally excited lines are
+density-insensitive below ~10^4–10^5 cm^-3, the density choice affects the
+ionic abundances only weakly; it matters most for the density-interpolated
+Martinez ICFs.
+
+**ICF interpolation densities.**  The Martinez N/O ICFs — e.g. ICF 5,
+`NppNppp_Opp` = (N2+ + N3+) / O2+ — are interpolated at the **high-zone**
+`log(U)` and `n_e,high`; the Martinez C/O ICF is interpolated at the
+**intermediate-zone** `log(U_int)` and `n_e,int` (§8.2–8.3).  So for ICF 5 the
+three ions enter the ratio at their own zones — N2+ at `(T_int, n_e,int)`, N3+
+at `(T_high, n_e,high)`, O2+ at `(T_high, n_e(O2+))` — and the correction
+factor itself is taken at the high-zone `log(U)` and `n_e,high`.
+
 
 ---
 
