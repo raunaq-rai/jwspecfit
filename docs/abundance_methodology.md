@@ -243,9 +243,10 @@ Each ionisation zone is assigned a representative density:
 - **n_e,int:** from C III]
 - **n_e,high:** from N IV] (preferred) or [Ar IV]
 - **n_e(O2+):** [Ar IV] 4711/4740 preferred for the O2+/Ne2+ zone, else n_e,int
-- **Fallback:** a redshift-dependent `ne_zone_fallback(zone, z)` per zone (low
-  `54·(1+z)^1.2`, mid `1110·(1+z)^1.93`, high `5400·(1+z)^1.62`) when no
-  diagnostic is available
+- **Fallback:** a redshift-evolution fit `ne_zone_fallback(zone, z) = A·(1+z)^p`
+  per zone when no diagnostic is available — **mid** `1110·(1+z)^1.93` and
+  **high** `5400·(1+z)^1.62` from **Martinez+2025 (arXiv:2510.21960), Eqs 4 & 5**;
+  **low** `54·(1+z)^1.2` from Abdurro'uf+2024 (arXiv:2404.16201)
 
 ### 4.3 Iterative T_e–n_e refinement
 
@@ -861,6 +862,7 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 
 | Reference | Context |
 |-----------|---------|
+| Abdurro'uf et al., 2024, ApJ, 973, 47 (arXiv:2404.16201) | Low-ionisation n_e redshift-evolution fallback: 54·(1+z)^1.2 |
 | Aggarwal, K. M. & Keenan, F. P., 2004, A&A, 427, 763 | N V effective collision strengths (CHIANTI v10) |
 | Aller, L. H., 1984, Physics of Thermal Gaseous Nebulae (Reidel) | Hbeta Case B recombination formula for T_e > 30,000 K |
 | Asplund, M. et al., 2009, ARA&A, 47, 481 | Solar oxygen abundance: 12 + log(O/H)_sun = 8.69 |
@@ -874,7 +876,7 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 | Garnett, D. R. et al., 1997, ApJ, 489, 63 | C/O ionisation correction factor: ICF_C = (O+ + O++)/O++ |
 | Izotov, Y. I. et al., 2006, A&A, 448, 955 | ICF equations 18–23 for N, Ne, S, Ar |
 | Jones, T. et al., 2023 | C/O from direct ionic sum: (C2+ + C3+) / O2+ |
-| Martinez, Z. et al., 2025, "Under Pressure", arXiv:2510.21960 | Default N/O ICFs, O32/N43 log(U) diagnostics, and 3-tier T_e zones |
+| Martinez, Z. et al., 2025, "Under Pressure", arXiv:2510.21960 | Default N/O ICFs, O32/N43 log(U) diagnostics, 3-tier T_e zones, and mid/high n_e redshift evolution (Eqs 4 & 5) |
 | Martinez, Z. et al., 2026, in prep. | Default C²⁺/O²⁺ → C/O ICF (density-interpolated) |
 | Noll, S. et al., 2009, A&A, 499, 69 | UV bump + slope modification to Calzetti curve |
 | Osterbrock, D. E. & Ferland, G. J., 2006, Astrophysics of Gaseous Nebulae and Active Galactic Nuclei (University Science Books) | Case B recombination ratios |
