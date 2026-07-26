@@ -15,9 +15,10 @@ dependencies, and literature references used across the `jwspecfit`,
 | Astropy | >= 5.0 | Units, FITS I/O | Astropy Collaboration (2022) |
 | matplotlib | >= 3.6 | Static plotting | Hunter (2007) |
 | plotly | >= 5.0 | Interactive plotting | Plotly Technologies Inc. |
-| lmfit | >= 1.2 | Parameter management | Newville et al. (2014) |
 | tqdm | >= 4.60 | Progress bars | da Costa-Luis (2019) |
 | joblib | >= 1.2 | Parallel bootstrap | Joblib Development Team |
+| JAX | >= 0.4 | JIT + autodiff for the NUTS likelihood | Bradbury et al. (2018) |
+| NumPyro | >= 0.13 | NUTS sampler (default) | Phan et al. (2019); Bingham et al. (2019) |
 | emcee | >= 3.1 | Affine-invariant MCMC | Foreman-Mackey et al. (2013) |
 | nautilus | >= 1.0 | Importance nested sampling | Lange (2023) |
 | dynesty | >= 2.0 | Dynamic nested sampling | Speagle (2020); Koposov et al. (2022) |
@@ -174,6 +175,13 @@ Default priors are uniform within the same bounds used by
 | `LogUniformPrior(lo, hi)` | π(θ) ∝ 1/θ for θ ∈ [lo, hi] | Scale-invariant parameters |
 
 ### 2.3 Samplers
+
+**NUTS / NumPyro** (Phan et al. 2019; Bingham et al. 2019) — the **default**
+sampler.  The No-U-Turn Sampler, a self-tuning variant of Hamiltonian Monte
+Carlo; the Gaussian likelihood is JIT-compiled and automatically differentiated
+in JAX (Bradbury et al. 2018), and the chain is initialised from a validated
+least-squares pre-fit.  See {doc}`user_guide/jwspecmcmc` for settings
+(`target_accept_prob`, `max_tree_depth`, warmup/sample counts).
 
 **emcee** (Foreman-Mackey et al. 2013): affine-invariant ensemble
 sampler with stretch moves.  Walkers are initialised from a
@@ -926,8 +934,10 @@ sample-by-sample to preserve correlations.
 - Amayo, A. et al. 2021, MNRAS, 505, 2361 — N/O = N<sup>+</sup>/O<sup>+</sup> justification
 - Asplund, M. et al. 2009, ARA&A, 47, 481 — Solar abundances
 - Berg, D. A. et al. 2021, ApJ, 922, 170 — O<sup>3+</sup> contribution negligible
-- Garnett, D. R. et al. 1997, ApJ, 489, 63 — C/O ionisation correction factor
+- Garnett, D. R. et al. 1997, ApJ, 489, 63 — legacy C/O ionisation correction factor
 - Izotov, Y. I. et al. 2006, A&A, 448, 955 — ICFs (N, Ne, S, Ar)
+- Martinez, Z. et al. 2025, "Under Pressure", arXiv:2510.21960 — default N/O ICFs, O32 / N43 log(U) calibrations, and 3-tier T<sub>e</sub> zones
+- Martinez, Z. et al. 2026, in prep. — C<sup>2+</sup>/O<sup>2+</sup> → C/O ICF
 - Nava, A. et al. 2006, ApJ, 645, 1076 — N/O = N<sup>+</sup>/O<sup>+</sup> justification
 
 ### Strong-line calibrations
@@ -941,7 +951,10 @@ sample-by-sample to preserve correlations.
 
 ### MCMC and sampling
 
+- Bingham, E. et al. 2019, JMLR, 20, 28 — Pyro (NumPyro backend)
+- Bradbury, J. et al. 2018 — JAX (JIT compilation + autodiff)
 - Foreman-Mackey, D. et al. 2013, PASP, 125, 306 — emcee
+- Phan, D., Pradhan, N. & Jankowiak, M. 2019, arXiv:1912.11554 — NumPyro / NUTS
 - Foreman-Mackey, D. 2016, JOSS, 1, 24 — corner.py
 - Gelman, A. & Rubin, D. B. 1992, Statistical Science, 7, 457 — R̂
 - Koposov, S. et al. 2022, doi:10.5281/zenodo.7388523 — dynesty

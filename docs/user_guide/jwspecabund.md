@@ -88,9 +88,9 @@ Three-zone density from whatever ratios are available:
 
 | Zone              | Diagnostic       | Fallback                             |
 | ----------------- | ---------------- | ------------------------------------ |
-| Low-ionisation    | [S II] 6718/6732 | [O II] 3726/3729, else 300 cm⁻³      |
+| Low-ionisation    | [S II] 6718/6732 | [O II] 3726/3729, [Si III] 1883/1892 (UV), else a redshift-dependent `ne_zone_fallback` |
 | Mid-ionisation    | C III] 1907/1909 | —                                    |
-| High-ionisation   | N IV] 1483/1486  | mid-zone, else low-zone              |
+| High / O²⁺ zone   | N IV] 1483/1486; [Ar IV] 4711/4740 preferred for the O²⁺ zone | [Ar IV], else a redshift-dependent `ne_zone_fallback` |
 
 Each zone can be forced manually:
 
@@ -118,17 +118,23 @@ For the direct method, PyNEB computes O⁺/H⁺, O²⁺/H⁺, N⁺/H⁺, C⁺/H�
 C²⁺/H⁺, Ne²⁺/H⁺, S⁺/H⁺, S²⁺/H⁺, Ar²⁺/H⁺, Ar³⁺/H⁺. ICFs convert ionic to
 total:
 
-- **N/O** — Martinez+25 (multiple tiers auto-selected, override via `icf_tier=`)
-- **C/O** — Garnett+97
+- **N/O** — Martinez+25 by default (tiers auto-selected, override via
+  `icf_tier=`; needs logU + Z), Izotov+06 fallback
+- **C/O** — Martinez (2026, in prep.) C²⁺/O²⁺ ICF by default
+  (`co_icf_method="auto"`, when logU + Z + C²⁺ + O²⁺ are available), Garnett+97
+  (or direct-sum) fallback
 - **S/O, Ne/O, Ar/O** — Izotov+06
 
 ### 5 — T_e-T_e relation
 
-When only the high-ionisation T_e is measured, the low-ionisation T_e
-comes from:
+`jwspecabund` resolves three ionisation zones (high O²⁺, intermediate C²⁺/N²⁺,
+low O⁺/N⁺). When only the high-ionisation T_e is measured, the intermediate and
+low-ionisation temperatures come from a `Te_relation`:
 
-- `"desi"` (default) — DESI DR2 calibration
-- `"classical"` — Garnett 1992
+- `"3_tier"` (default) — Garnett (1992) throughout, as adopted by Martinez+2025
+  (arXiv:2510.21960): `Te_int = 0.83·Te_high + 1700`, `Te_low = 0.70·Te_high + 3000`
+- `"classical"` / `"garnett"` — Garnett (1992) low-zone relation
+- `"desi"` — DESI DR2 calibration
 
 ## Result fields
 

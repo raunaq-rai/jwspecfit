@@ -25,7 +25,7 @@ src/jwspecabund/
 
 ## 1. Entry Point: `compute_abundances()`
 
-**File:** `_core.py`, line ~1044
+**File:** `_core.py` (`compute_abundances`)
 
 ```python
 compute_abundances(result, z, *, dust_correct=True, method="auto", ...)
@@ -98,6 +98,7 @@ _SNR_PROTECTED = {
     "NV_1", "NV_2",
     "CIV_1", "CIV_2",
     "CIII]_1907", "CIII]",
+    "CII]_2324", "CII]_2326",
 }
 ```
 
@@ -133,12 +134,18 @@ fluxes (`n_mc`), while `_run_direct_mcmc()` draws from MCMC posterior chains
 ```
 ne_low:  [SII] 6718/6732  -->  compute_ne(..., doublet="SII")
          fallback: [OII] 3726/3729  -->  compute_ne(..., doublet="OII")
-         fallback: NE_DEFAULT = 300 cm^-3
+         fallback: [Si III] 1883/1892 (UV)  -->  compute_ne_SiIII()
+         fallback: redshift-dependent ne_zone_fallback("low", z)
+
+ne_mid:  CIII] 1907/1909  -->  compute_ne_CIII()
 
 ne_high: NIV] 1483/1486  -->  compute_ne_NIV()
-         fallback: CIII] 1907/1909  -->  compute_ne_CIII()
-         fallback: ne_low
-         clamp: if ne_high > ne_high_max (default 1e5), use ne_low
+         fallback: [Ar IV] 4711/4740  -->  compute_ne_ArIV()
+         fallback: redshift-dependent ne_zone_fallback("high", z)
+         clamp: if ne_high > ne_high_max (default 5e5), use ne_mid (else ne_low)
+
+ne_Opp:  O2+/Ne2+ zone density -- [Ar IV] 4711/4740 (preferred),
+         else ne_mid, else ne_zone_fallback("mid", z)
 ```
 
 **SNR gate:** Each doublet requires both members to have `flux/error >= snr_ne`
@@ -166,8 +173,10 @@ Te_low  = Te_low_from_high(Te_high, relation=Te_relation)
   convergence at Te > 25,000 K.
 - `compute_Te_OIII_1666()` uses the UV 1666/(5007+4959) ratio with solver
   range extended to 250,000 K (`end_x=5.4`).
-- `Te_low_from_high()`: DESI relation `0.648 * Te_high + 3270` or classical
-  `0.7 * Te_high + 3000`.
+- `Te_int_from_high()` / `Te_low_from_high()`: default `"3_tier"` — Garnett
+  (1992) throughout, as adopted by Martinez+2025 — `Te_int = 0.83 * Te_high +
+  1700`, `Te_low = 0.70 * Te_high + 3000`; also `"classical"`/`"garnett"` (same
+  low relation) and `"desi"` (`0.648 * Te_high + 3270`).
 
 ### Step 3 — Ionic abundances
 
@@ -274,8 +283,10 @@ Simple: `N/O = ICF_N(Izotov+06) * N+/O+`. Requires N+ and O+ only.
 - **S/O:** `ICF_S(Izotov+06) * (S+ + S2+) / O/H`
 - **Ne/O:** `ICF_Ne(Izotov+06) * Ne2+/O2+`
 - **Ar/O:** `ICF_Ar(Izotov+06) * Ar2+/O2+`
-- **C/O:** `ICF_C(Garnett+97) × (C2+ + C3+) / O2+` when CII] 2326 absent;
-  `(C+ + C2+ + C3+) / (O+ + O2+)` when CII] 2326 detected
+- **C/O:** by default (`co_icf_method="auto"`) the **Martinez (2026, in prep.)
+  C²⁺/O²⁺ ICF** — `ICF_C(Martinez) × C2+/O2+` — whenever logU, Z, C²⁺ and O²⁺
+  are available; otherwise the legacy path — `(C+ + C2+ + C3+) / (O+ + O2+)`
+  when CII] 2326 detected, else `ICF_C(Garnett+97) × (C2+ + C3+) / O2+`
 - **N/O_UV_raw:** `(N2+ + N3+ + N4+) / O2+` (for comparison, no ICF)
 
 **ICF tier locking:** When `icf_tier` is set (e.g. `"NppNppp_Opp"`), the

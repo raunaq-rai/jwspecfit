@@ -34,7 +34,7 @@ asymmetric errors, flux-ratio posteriors, R̂ and ESS diagnostics.
 
 Chemical abundances: direct T_e (PyNEB), Bayesian forward model
 (Cullen+25), strong-line calibrations (Sanders+25); multi-Balmer dust
-correction anchored on Hα or Hβ; Martinez+25 N/O ICFs; Lyα escape
+correction anchored on Hα or Hβ; Martinez N/O and C/O ICFs; Lyα escape
 fraction.
 :::
 ::::

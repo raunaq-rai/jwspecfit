@@ -109,7 +109,7 @@ print(abund.NO)               # log(N/O)
 2. Corrects every line flux at its own wavelength.
 3. Measures electron density across three ionisation zones.
 4. Selects direct-T_e, strong-line, or forward-model based on line availability.
-5. Applies ICFs (Martinez+25 for N/O, Izotov+06 for S, Ne, Ar).
+5. Applies ICFs (Martinez+25 for N/O, Martinez/Garnett+97 for C/O, Izotov+06 for S, Ne, Ar).
 
 ## 5. DLA fitting (optional)
 

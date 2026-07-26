@@ -192,30 +192,27 @@ using PyNEB's `Atom("N", 2).getTemDen()`.
 
 ### 3.4 T_e–T_e relations for zone temperatures
 
-A single auroral line measures T_e in one ionisation zone.  Empirical
-relations map T_e(O2+) (the high zone) to the intermediate and low
-zones:
+A single auroral line measures T_e in one ionisation zone.  The
+`Te_relation` argument maps T_e(O2+) (the high zone) to the intermediate
+and low zones.  Ions are assigned to zones by ionisation potential:
 
-**Intermediate zone** (O+, C2+, Si2+) — Garnett (1992):
+- **High zone** (O2+, Ne2+, N3+, C3+) — T_high = T_e([OIII])
+- **Intermediate zone** (N2+, C2+, S2+, Ar2+) — T_int
+- **Low zone** (O+, N+, S+) — T_low
+
+**Default `"3_tier"`** — Garnett (1992) relations throughout, following
+Martinez+2025 ("Under Pressure", arXiv:2510.21960):
 
 ```
-T_int = [0.243 + t × (1.031 − 0.184 × t)] × 10^4 K
+T_int = 0.83 × T_high + 1700 K
+T_low = 0.70 × T_high + 3000 K
 ```
 
-where t = T_high / 10^4.
+**Other `Te_relation` options:**
 
-**Low zone** (N+, S+) — two options:
-
-1. **DESI DR2** (arXiv:2601.02463, recommended):
-   ```
-   T_low = 0.648 × T_high + 3270 K
-   ```
-
-2. **Classical** (Campbell, Terlevich & Melnick 1986; used in
-   Garnett 1992):
-   ```
-   T_low = 0.7 × T_high + 3000 K
-   ```
+- **`"classical"` / `"garnett"`** — Garnett (1992) low-zone relation
+  (`T_low = 0.7 × T_high + 3000`; Campbell, Terlevich & Melnick 1986).
+- **`"desi"`** — DESI DR2 (arXiv:2601.02463): `T_low = 0.648 × T_high + 3270`.
 
 
 ---
@@ -242,10 +239,13 @@ measured via PyNEB's `getTemDen()` at the appropriate zone temperature:
 
 Each ionisation zone is assigned a representative density:
 
-- **n_e,low:** from [S II] (preferred) or [O II]
-- **n_e,int:** from C III] (preferred) or Si III]
+- **n_e,low:** from [S II] (preferred), [O II], or [Si III] (UV fallback)
+- **n_e,int:** from C III]
 - **n_e,high:** from N IV] (preferred) or [Ar IV]
-- **Fallback:** n_e = 100 cm^-3 if no diagnostic is available
+- **n_e(O2+):** [Ar IV] 4711/4740 preferred for the O2+/Ne2+ zone, else n_e,int
+- **Fallback:** a redshift-dependent `ne_zone_fallback(zone, z)` per zone (low
+  `54·(1+z)^1.2`, mid `1110·(1+z)^1.93`, high `5400·(1+z)^1.62`) when no
+  diagnostic is available
 
 ### 4.3 Iterative T_e–n_e refinement
 
@@ -451,31 +451,33 @@ is included in the carbon budget.
 
 ### 7.4 Total C/O
 
-Two paths are available depending on whether C+ is detected:
+C/O uses the intermediate (C2+/O2+) ionisation zone.  The method is set by
+`co_icf_method` (default `"auto"`).
 
-**With CII] 2326 (Garnett+1997 ICF):**
+**Default — Martinez (2026, in prep.) C2+/O2+ ICF (Section 8.3):**
 
-When C+ is detected, the total C/O is computed using the Garnett (1997)
-ionisation correction factor:
-
-```
-C/O = ICF_C × (C2+/H+ + C3+/H+) / O2+/H+
-ICF_C = (O+ + O2+) / O2+
-```
-
-This corrects for any remaining unobserved carbon ions by assuming the
-carbon and oxygen ionisation structures are similar.
-
-**Without CII] 2326 (Jones et al. 2023):**
-
-When C+ is not detected, C/O is computed as a direct ionic sum:
+Whenever log(U), Z, and both C2+ and O2+ are available, C/O is computed with
+the Martinez (in prep.) density-interpolated C2+/O2+ ICF, evaluated at the
+intermediate-zone log(U) and density:
 
 ```
-C/O = (C2+/H+ + C3+/H+) / (O2+/H+)
+C/O = ICF_C(Martinez; logU, Z, n_e) × (C2+/H+) / (O2+/H+)
 ```
 
-This assumes that C2+ and C3+ account for essentially all carbon in the
-O2+ zone, following Jones et al. (2023).
+**Fallback — Garnett+1997 ICF / direct sum:**
+
+When the Martinez ICF cannot be computed (no log(U), or C2+/O2+ missing), the
+legacy tiered path is used:
+
+- **C+ detected** — direct ionic sum:
+  ```
+  C/O = (C+ + C2+ + C3+) / (O+ + O2+)
+  ```
+- **C+ not detected** — Garnett (1997) ICF (Jones et al. 2023 when O+ is also
+  missing, ICF = 1):
+  ```
+  C/O = ICF_C × (C2+ + C3+) / O2+,    ICF_C = (O+ + O2+) / O2+
+  ```
 
 
 ---
@@ -578,11 +580,25 @@ resulting `log(U)` — is **rejected, not clipped**: the surface returns
 `NaN` rather than a boundary value or an extrapolated number.  This
 keeps unphysical, uncalibrated values out of the reported N/O entirely.
 
-Because only the N/O ICF depends on `log(U)` and `Z/Z_sun`, this
-rejection affects **N/O alone**.  O/H (direct `T_e`), `T_e`, and the
-other X/O ratios (C/O, S/O, Ne/O, Ar/O) do not use the Martinez ICF and
-are unaffected — see Section 11.3 for how this is handled in the Monte
-Carlo / posterior loops.
+This rejection affects the ratios that depend on `log(U)` and `Z/Z_sun` —
+**N/O** and, by default, **C/O** (Section 8.3).  O/H (direct `T_e`), `T_e`,
+and the S/O, Ne/O and Ar/O ratios do not use a Martinez ICF and are
+unaffected — see Section 11.3 for how this is handled in the Monte Carlo /
+posterior loops.
+
+### 8.3 Martinez et al. (2026, in prep.) — C²⁺/O²⁺ C/O ICF
+
+**Source:** `jwspecabund.martinez25_icf` (`icf_CppOpp`)
+
+The default C/O ICF (`co_icf_method="auto"`) is the Martinez (in prep.)
+correction from the C2+/O2+ ionic ratio to total C/O.  Like the N/O ICFs it is
+a density-interpolated function of log(U) and Z/Z_sun, evaluated at the
+intermediate (C2+) ionisation zone: the log(U) is recomputed at the
+intermediate-zone density (from the O32 diagnostic; N43 is density-insensitive)
+and the ICF is interpolated in n_e.  It requires C2+, O2+, log(U) and Z; when
+any of these is missing it falls back to the Garnett (1997) ICF or a direct
+ionic sum (Section 7.4).  Inputs outside the calibration domain are rejected
+(NaN), as for the N/O ICFs.
 
 
 ---
@@ -693,9 +709,11 @@ handled per draw so the reported sample counts stay meaningful:
    draw contributes nothing to N/O.
 
 2. **O/H and the other ratios are kept.**  O/H (direct `T_e`), `T_e`, and
-   the X/O ratios that do not use the Martinez ICF (C/O, S/O, Ne/O, Ar/O)
-   are computed and recorded for **every** drawn sample, in-bounds or
-   not.  They are never discarded on account of an out-of-bounds N/O.
+   the X/O ratios (C/O, S/O, Ne/O, Ar/O) are computed and recorded for
+   **every** drawn sample, in-bounds or not — an out-of-bounds draw only nulls
+   N/O; the default Martinez C/O ICF simply falls back to Garnett+97 for that
+   draw (Section 8.3).  They are never discarded on account of an
+   out-of-bounds N/O.
 
 3. **Resampling to the requested count.**  The loop keeps drawing until
    `n_mc` (Gaussian MC) or `n_posterior` (MCMC pool) *in-bounds* N/O
@@ -856,7 +874,8 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 | Garnett, D. R. et al., 1997, ApJ, 489, 63 | C/O ionisation correction factor: ICF_C = (O+ + O++)/O++ |
 | Izotov, Y. I. et al., 2006, A&A, 448, 955 | ICF equations 18–23 for N, Ne, S, Ar |
 | Jones, T. et al., 2023 | C/O from direct ionic sum: (C2+ + C3+) / O2+ |
-| Martinez, M. A., Berg, D. A. et al., 2025, arXiv:2510.21960 | Density-dependent ICFs and log(U) diagnostics |
+| Martinez, Z. et al., 2025, "Under Pressure", arXiv:2510.21960 | Default N/O ICFs, O32/N43 log(U) diagnostics, and 3-tier T_e zones |
+| Martinez, Z. et al., 2026, in prep. | Default C²⁺/O²⁺ → C/O ICF (density-interpolated) |
 | Noll, S. et al., 2009, A&A, 499, 69 | UV bump + slope modification to Calzetti curve |
 | Osterbrock, D. E. & Ferland, G. J., 2006, Astrophysics of Gaseous Nebulae and Active Galactic Nuclei (University Science Books) | Case B recombination ratios |
 | Salim, S. et al., 2018, ApJ, 859, 11 | UV slope and bump calibration for dust attenuation |
