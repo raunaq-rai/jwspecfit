@@ -905,10 +905,19 @@ def compute_ionic_abundances(
     # match than the S²⁺-calibrated Garnett extrapolation Te_mid.  Using
     # Te_mid here instead biases log(C/O) high by ~0.13–0.17 dex when O²⁺
     # is normalised on the optical [O III] λ5007 (E_exc = 2.51 eV).
-    # Note Martinez+2025 §5.5 assign N²⁺ to Te_int; Berg+2025 Table 3
-    # supersedes this with Te_high, which is what we follow.  Martinez do
-    # not derive carbon abundances at all — C III] enters that work only as
-    # the intermediate-zone density diagnostic ne_int(C²⁺).
+    # N²⁺ has the stronger case still: at 29.6–47.5 eV it is narrower than
+    # C²⁺ and starts 5.2 eV higher, so 69% of its range lies inside the O²⁺
+    # zone versus 54% for C²⁺, and N III] λλ1747–1754 (E_exc = 7.09–7.11 eV)
+    # sits closer to O III] λ1666 (7.48 eV) than C III] does.  Martinez+2025
+    # §5.5 nonetheless assign N²⁺ to Te_int; Berg+2025 Table 3 supersedes
+    # this with Te_high, which is what we follow.  Martinez do not derive
+    # carbon abundances at all — C III] enters that work only as the
+    # intermediate-zone density diagnostic ne_int(C²⁺).
+    # O⁺ stays on Te_low (Martinez+2025 §5.4, explicit): it is one of the
+    # three ions that *define* the low zone.  The "T_e,int" against O⁺/H⁺ in
+    # Berg+2025 Table 3 is a typo — that row's own IP range (13.6–35.1 eV)
+    # and density (n_e(Si²⁺)) are the low-zone values, and their N⁺/O⁺ row
+    # labels the same [O II]-derived O⁺ as T_e,low.
     # The high-ionisation ions C³⁺, N³⁺, N⁴⁺ use Te_high and ne_hi.
     # For doublets: if both members are present, sum fluxes and use total
     # emissivity.  If only one member is present, use that member's flux
