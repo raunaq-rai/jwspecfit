@@ -1866,37 +1866,12 @@ def _run_direct(
                 "OH": OH_alt_12,
                 "ionic": ionic_alt,
             }
-            # MC propagation for 1666-based Te
-            OH_alt_mc = []
-            for _ in range(min(n_mc, 500)):
-                mc_f = {}
-                for name in fluxes:
-                    mc_f[name] = rng.normal(fluxes[name], errors.get(name, 0.0))
-                    mc_f[name] = max(mc_f[name], 1e-50)
-                try:
-                    Te_a = compute_Te_OIII_1666(
-                        mc_f.get("OIII_1666", 0), mc_f.get("OIII_5007", 0),
-                        mc_f.get("OIII_4959", 0), ne_OIII,
-                    )
-                    Te_a_low = Te_low_from_high(Te_a, relation=Te_relation)
-                    Te_a_int = Te_int_from_high(Te_a, relation=Te_relation)
-                    ion_a = compute_ionic_abundances(
-                        mc_f, Te_a, Te_a_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
-                        Te_int=Te_a_int, ne_Opp=ne_Opp,
-                    )
-                    oh_a = ion_a.get("O+/H+", 0.0) + ion_a.get("O++/H+", 0.0)
-                    if oh_a > 0:
-                        OH_alt_mc.append(12.0 + np.log10(oh_a))
-                except (ValueError, RuntimeError):
-                    pass
-            if OH_alt_mc:
-                OH_alt_mc = np.array(OH_alt_mc)
-                _alt_1666["OH"] = float(np.nanmedian(OH_alt_mc))
-                _alt_1666["OH_err"] = float(np.nanstd(OH_alt_mc))
+            # Point estimate only — no MC.  This is a cross-check on the
+            # adopted lambda4363 temperature; propagating it would add a
+            # second MC pass as costly as the main loop.
             diagnostics["Te(high) from 1666"] = (
                 f"O III] 1666/(5007+4959) → T_e = {Te_alt:.0f} K → "
-                f"12+log(O/H) = {_alt_1666['OH']:.3f}"
-                + (f" ± {_alt_1666.get('OH_err', 0):.3f}" if 'OH_err' in _alt_1666 else "")
+                f"12+log(O/H) = {OH_alt_12:.3f} (point estimate, not adopted)"
             )
         except (ValueError, RuntimeError) as e:
             logger.info("Could not compute alternative Te from 1666: %s", e)
@@ -2444,41 +2419,13 @@ def _run_direct_mcmc(
             )
             OH_alt = ionic_alt.get("O+/H+", 0.0) + ionic_alt.get("O++/H+", 0.0)
             OH_alt_12 = 12.0 + np.log10(OH_alt) if OH_alt > 0 else np.nan
-            # Quick MC for error
-            OH_alt_mc = []
-            rng_alt = np.random.default_rng(42)
-            for j in range(min(n_samples, 500)):
-                samp = {name: max(float(posteriors[name][j % len(posteriors[name])]), 1e-50)
-                        for name in posteriors}
-                try:
-                    Ta = compute_Te_OIII_1666(
-                        samp.get("OIII_1666", 0), samp.get("OIII_5007", 0),
-                        samp.get("OIII_4959", 0), ne_OIII,
-                    )
-                    Tl = Te_low_from_high(Ta, relation=Te_relation)
-                    Ti = Te_int_from_high(Ta, relation=Te_relation)
-                    ion_a = compute_ionic_abundances(
-                        samp, Ta, Tl, ne_low, ne_mid=ne_mid, ne_high=ne_high,
-                        Te_int=Ti, ne_Opp=ne_Opp,
-                    )
-                    oh_a = ion_a.get("O+/H+", 0.0) + ion_a.get("O++/H+", 0.0)
-                    if oh_a > 0:
-                        OH_alt_mc.append(12.0 + np.log10(oh_a))
-                except (ValueError, RuntimeError):
-                    pass
-            if OH_alt_mc:
-                arr_alt = np.array(OH_alt_mc)
-                oh_alt_med = float(np.nanmedian(arr_alt))
-                oh_alt_err = float(np.nanstd(arr_alt))
-                _diag_extra["Te(high) from 1666"] = (
-                    f"O III] 1666/(5007+4959) → T_e = {Te_alt:.0f} K → "
-                    f"12+log(O/H) = {oh_alt_med:.3f} ± {oh_alt_err:.3f}"
-                )
-            else:
-                _diag_extra["Te(high) from 1666"] = (
-                    f"O III] 1666/(5007+4959) → T_e = {Te_alt:.0f} K → "
-                    f"12+log(O/H) = {OH_alt_12:.3f}"
-                )
+            # Point estimate only — no MC.  This is a cross-check on the
+            # adopted lambda4363 temperature; propagating it through the
+            # posterior would add a second pass as costly as the main loop.
+            _diag_extra["Te(high) from 1666"] = (
+                f"O III] 1666/(5007+4959) → T_e = {Te_alt:.0f} K → "
+                f"12+log(O/H) = {OH_alt_12:.3f} (point estimate, not adopted)"
+            )
         except (ValueError, RuntimeError) as e:
             logger.info("Could not compute alternative Te from 1666: %s", e)
 
@@ -3273,96 +3220,50 @@ def compute_abundances(
             # If primary used 4363, also compute Te from 1666 as an alternative.
             f_1666_alt = fluxes.get("OIII_1666", 0.0)
             f_5007_alt = fluxes.get("OIII_5007", 0.0)
-            _has_1666_posterior = is_mcmc and posteriors and "OIII_1666" in posteriors
             _has_1666_flux = f_1666_alt > 0 and f_5007_alt > 0
             if _has_1666_flux and fluxes.get("OIII_4363", 0.0) > 0:
-                from .direct import compute_Te_OIII_1666, Te_low_from_high, compute_ionic_abundances
+                # Point estimate only.  This is a cross-check on the adopted
+                # lambda4363 temperature, so it does not warrant a second
+                # full MC/posterior pass over the direct method — that would
+                # roughly double the runtime of compute_abundances.  Solve
+                # T_e once from the dust-corrected fluxes and propagate it
+                # deterministically through the ionic abundances; no error
+                # bar is reported, by design.
+                from .direct import (
+                    NE_DEFAULT,
+                    Te_int_from_high,
+                    Te_low_from_high,
+                    compute_ionic_abundances,
+                    compute_Te_OIII_1666,
+                )
                 try:
-                    # Run full direct method using 1666 instead of 4363.
-                    # Remove 4363 so _run_direct/mcmc picks 1666.
-                    fluxes_1666 = dict(fluxes)
-                    fluxes_1666.pop("OIII_4363", None)
-                    errors_1666 = dict(errors)
-                    errors_1666.pop("OIII_4363", None)
-                    if _has_1666_posterior:
-                        post_1666 = {k: v for k, v in posteriors.items() if k != "OIII_4363"}
-                        d1666_out = _run_direct_mcmc(
-                            post_1666, Te_relation, n_posterior=n_posterior,
-                            progress=progress, ne_high_max=ne_high_max,
-                            snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                            icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
-                            niv_rejected=_niv_rejected,
-                            ne_low_override=ne_low_override,
-                            ne_mid_override=ne_mid_override,
-                            ne_high_override=ne_high_override,
-                            z=_z_ne,
-                            Av=Av_derived, Av_err=Av_err,
-                            Av_prior=Av_prior, dust_law=dust_law,
-                            dust_kwargs=dust_kwargs,
-                        )
-                    else:
-                        # No 1666 posterior — use MC on point-estimate fluxes.
-                        d1666_out = _run_direct(
-                            fluxes_1666, errors_1666, Te_relation, n_mc,
-                            progress=progress, ne_high_max=ne_high_max,
-                            snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                            icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
-                            niv_rejected=_niv_rejected,
-                            ne_low_override=ne_low_override,
-                            ne_mid_override=ne_mid_override,
-                            ne_high_override=ne_high_override,
-                            z=_z_ne,
-                        )
-                    # Check if the result is valid (not all NaN).
-                    oh_1666 = d1666_out.get("OH")
-                    if oh_1666 is not None and np.isfinite(oh_1666):
-                        alt["direct_1666"] = AbundanceResult(
-                            method="direct (O III] 1666)",
-                            OH=d1666_out["OH"],
-                            OH_err=d1666_out["OH_err"],
-                            NO=d1666_out.get("NO"),
-                            NO_err=d1666_out.get("NO_err"),
-                            CO=d1666_out.get("CO"),
-                            CO_err=d1666_out.get("CO_err"),
-                            Te_high=d1666_out.get("Te_high"),
-                            Te_high_err=d1666_out.get("Te_high_err"),
-                            Te_low=d1666_out.get("Te_low"),
-                            Av=Av_derived,
-                            Av_err=Av_err_derived,
-                            ionic=d1666_out.get("ionic"),
-                            failures=d1666_out.get("failures"),
-                        )
-                    else:
-                        # MC/posterior path failed — compute point estimate.
-                        try:
-                            Te_1666_pt = compute_Te_OIII_1666(
-                                f_1666_alt, f_5007_alt,
-                                fluxes.get("OIII_4959", 0.0),
-                                primary_result.ne_mid or primary_result.ne_low or 300,
-                            )
-                            Te_1666_low = Te_low_from_high(Te_1666_pt, relation=Te_relation)
-                            ionic_1666 = compute_ionic_abundances(
-                                fluxes, Te_1666_pt, Te_1666_low,
-                                primary_result.ne_low or 300,
-                                ne_mid=primary_result.ne_mid,
-                                ne_high=primary_result.ne_high,
-                            )
-                            OH_1666 = ionic_1666.get("O+/H+", 0.0) + ionic_1666.get("O++/H+", 0.0)
-                            OH_1666_12 = 12.0 + np.log10(OH_1666) if OH_1666 > 0 else np.nan
-                            alt["direct_1666"] = AbundanceResult(
-                                method="direct (O III] 1666)",
-                                OH=OH_1666_12,
-                                OH_err=np.nan,
-                                Te_high=Te_1666_pt,
-                                Te_low=Te_1666_low,
-                                Av=Av_derived,
-                                Av_err=Av_err_derived,
-                                ionic=ionic_1666,
-                            )
-                        except Exception as e:
-                            logger.info("Point-estimate fallback for 1666 also failed: %s", e)
-                except Exception as e:
-                    logger.info("Alternative direct (1666) method failed: %s", e)
+                    _ne_lo = primary_result.ne_low or NE_DEFAULT
+                    Te_1666_pt = compute_Te_OIII_1666(
+                        f_1666_alt, f_5007_alt,
+                        fluxes.get("OIII_4959", 0.0),
+                        primary_result.ne_mid or _ne_lo,
+                    )
+                    Te_1666_low = Te_low_from_high(Te_1666_pt, relation=Te_relation)
+                    Te_1666_int = Te_int_from_high(Te_1666_pt, relation=Te_relation)
+                    ionic_1666 = compute_ionic_abundances(
+                        fluxes, Te_1666_pt, Te_1666_low, _ne_lo,
+                        ne_mid=primary_result.ne_mid,
+                        ne_high=primary_result.ne_high,
+                        Te_int=Te_1666_int,
+                    )
+                    OH_1666 = ionic_1666.get("O+/H+", 0.0) + ionic_1666.get("O++/H+", 0.0)
+                    alt["direct_1666"] = AbundanceResult(
+                        method="direct (O III] 1666, point estimate)",
+                        OH=12.0 + np.log10(OH_1666) if OH_1666 > 0 else np.nan,
+                        Te_high=Te_1666_pt,
+                        Te_low=Te_1666_low,
+                        Te_mid=Te_1666_int,
+                        Av=Av_derived,
+                        Av_err=Av_err_derived,
+                        ionic=ionic_1666,
+                    )
+                except (ValueError, RuntimeError) as e:
+                    logger.info("Point-estimate T_e from 1666 failed: %s", e)
         elif primary_result.method == "strong_line":
             # Also try direct if 4363 is present (even if SNR was below threshold).
             has_auroral_alt = (
