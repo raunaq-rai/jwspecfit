@@ -314,6 +314,50 @@ class TestStrongLine:
         # log10(2.0 / 1.0) ~ 0.301
         np.testing.assert_allclose(ratios["O2"]["val"], np.log10(2.0), atol=0.01)
 
+    def test_R23_uses_OIII_doublet_measured_4959(self):
+        """R23 sums [OIII] 4959+5007; O3 and O32 use 5007 alone.
+
+        Sanders+25 define R23 with lambdalambda4960,5008 (Eq. 3) but O3 and
+        O32 with lambda5008 only (Eqs. 1 and 4).
+        """
+        from jwspecabund.strong_line import compute_line_ratios
+
+        fluxes = {
+            "OIII_5007": 6.0, "OIII_4959": 2.0, "HBETA": 1.0,
+            "OII_3726": 0.5, "OII_3729": 0.5,
+        }
+        errors = {
+            "OIII_5007": 0.06, "OIII_4959": 0.02, "HBETA": 0.01,
+            "OII_3726": 0.01, "OII_3729": 0.01,
+        }
+        r = compute_line_ratios(fluxes, errors)
+        # R23 = (6 + 2 + 1) / 1
+        np.testing.assert_allclose(r["R23"]["val"], np.log10(9.0), atol=1e-6)
+        # O3 and O32 must NOT include 4959.
+        np.testing.assert_allclose(r["O3"]["val"], np.log10(6.0), atol=1e-6)
+        np.testing.assert_allclose(r["O32"]["val"], np.log10(6.0), atol=1e-6)
+
+    def test_R23_infers_4959_when_absent(self):
+        """Without a measured 4959, R23 scales 5007 by the fixed ratio."""
+        from jwspecabund.strong_line import (
+            OIII_4959_5007_RATIO,
+            compute_line_ratios,
+        )
+
+        fluxes = {"OIII_5007": 6.0, "HBETA": 1.0, "OII_3726": 0.5, "OII_3729": 0.5}
+        errors = {"OIII_5007": 0.06, "HBETA": 0.01, "OII_3726": 0.01, "OII_3729": 0.01}
+        r = compute_line_ratios(fluxes, errors)
+        expected = np.log10(6.0 * (1.0 + OIII_4959_5007_RATIO) + 1.0)
+        np.testing.assert_allclose(r["R23"]["val"], expected, atol=1e-6)
+        # A measured 4959 consistent with the theoretical ratio must agree.
+        r2 = compute_line_ratios(
+            {**fluxes, "OIII_4959": 6.0 * OIII_4959_5007_RATIO},
+            {**errors, "OIII_4959": 0.02},
+        )
+        np.testing.assert_allclose(
+            r2["R23"]["val"], r["R23"]["val"], atol=1e-6,
+        )
+
 
 # -----------------------------------------------------------------------
 # ICF tests

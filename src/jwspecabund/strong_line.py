@@ -52,7 +52,7 @@ CALIBRATIONS: dict[str, dict] = {
         "sigma_R_int": 0.07,
         "sigma_OH_int": 0.13,
         "sigma_cal": float(np.sqrt(0.03**2 + 0.07**2)),
-        "lines": ["OIII_5007", "OII_doublet", "HBETA"],
+        "lines": ["OIII_5007", "OIII_4959", "OII_doublet", "HBETA"],
     },
     "O32": {
         "coeffs": [0.697, -1.245, -0.869],
@@ -66,6 +66,12 @@ CALIBRATIONS: dict[str, dict] = {
 
 # Minimum SNR for a ratio to be used.
 SNR_THRESH = 1.5
+
+# Theoretical [O III] lambda4960 / lambda5008 flux ratio, set by the transition
+# probabilities alone.  Constant to <0.01% over Te = 1-2.5e4 K and
+# ne = 1e2-1e5 cm^-3, so it is safe to use as a fixed scaling when lambda4960
+# is not separately measured.
+OIII_4959_5007_RATIO = 0.33512
 
 
 def _poly_eval(z: float, coeffs: list[float]) -> float:
@@ -181,6 +187,16 @@ def compute_line_ratios(
     -------
     dict
         ``{ratio_name: {"val": log10_ratio, "err": error}}``.
+
+    Notes
+    -----
+    Ratio definitions follow \\citet{sanders25} exactly:
+    ``O3 = [OIII]5008/Hbeta``, ``O2 = [OII]3727,3730/Hbeta``,
+    ``R23 = ([OIII]4960,5008 + [OII])/Hbeta`` and
+    ``O32 = [OIII]5008/[OII]``.  Note that **R23 alone uses the [O III]
+    doublet sum**; O3 and O32 use lambda5008 by itself.  When ``OIII_4959``
+    is absent or below *snr_thresh*, the lambda4960 contribution is inferred
+    from lambda5008 via :data:`OIII_4959_5007_RATIO`.
     """
 
     def _snr(name: str) -> float:
@@ -200,6 +216,19 @@ def compute_line_ratios(
     e_Hb = _e("HBETA")
     F_O3 = _f("OIII_5007")
     e_O3 = _e("OIII_5007")
+
+    # [O III] doublet sum, used by R23 only.  Sanders+25 define R23 with
+    # lambdalambda4960,5008 (their Eq. 3) whereas O3 and O32 use lambda5008
+    # alone (Eqs. 1 and 4), so the two must not share a numerator.  Prefer the
+    # measured lambda4960 (the narrow-line amplitudes are fitted freely, so it
+    # is an independent constraint); fall back to the fixed transition-
+    # probability ratio when lambda4960 is missing or below the SNR cut.
+    if _snr("OIII_4959") > snr_thresh:
+        F_O3sum = F_O3 + _f("OIII_4959")
+        e_O3sum = np.sqrt(e_O3**2 + _e("OIII_4959") ** 2)
+    else:
+        F_O3sum = F_O3 * (1.0 + OIII_4959_5007_RATIO)
+        e_O3sum = e_O3 * (1.0 + OIII_4959_5007_RATIO)
 
     # Also accept resolved or unresolved [OII]
     if "OII_doublet" in line_fluxes:
@@ -229,9 +258,9 @@ def compute_line_ratios(
         if np.isfinite(val):
             ratios["O2"] = {"val": val, "err": err}
 
-    # R23 = log10(([OIII]5007 + [OII]) / Hbeta)
+    # R23 = log10(([OIII]4959,5007 + [OII]) / Hbeta)
     if snr_Hb > snr_thresh and snr_O3 > snr_thresh and has_o2:
-        val, err = _log_ratio_err(F_O3, e_O3, F_Hb, e_Hb, num2=F_O2, num2_err=e_O2)
+        val, err = _log_ratio_err(F_O3sum, e_O3sum, F_Hb, e_Hb, num2=F_O2, num2_err=e_O2)
         if np.isfinite(val):
             ratios["R23"] = {"val": val, "err": err}
 
