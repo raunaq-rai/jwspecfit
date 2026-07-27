@@ -128,7 +128,9 @@ total:
 ### 5 — T_e-T_e relation
 
 `jwspecabund` resolves three ionisation zones (high O²⁺, intermediate C²⁺/N²⁺,
-low O⁺/N⁺). When only the high-ionisation T_e is measured, the intermediate and
+low O⁺/N⁺). The zones set the *density* assignment; for the *temperature*,
+C²⁺ and N²⁺ take the high-ionisation T_e rather than T_int (Berg+2025
+Table 3). When only the high-ionisation T_e is measured, the intermediate and
 low-ionisation temperatures come from a `Te_relation`:
 
 - `"3_tier"` (default) — Garnett (1992) throughout, as adopted by Martinez+2025

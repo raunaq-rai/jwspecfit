@@ -162,9 +162,9 @@ class TestIonicWiring:
         assert a["O++/H+"] > 0 and b["O++/H+"] > 0
         assert a["O++/H+"] != pytest.approx(b["O++/H+"], rel=1e-6)
 
-    def test_Te_int_used_for_nIII_cIII(self):
-        # N²⁺ (NIII]) and C²⁺ (CIII]) are intermediate-zone ions and must
-        # respond to Te_int, not Te_high (Martinez+2025 §5.4).
+    def test_Te_int_not_used_for_nIII_cIII(self):
+        # N²⁺ (NIII]) and C²⁺ (CIII]) take Te_high, not Te_int
+        # (Berg+2025 Table 3), so varying Te_int alone must NOT move them.
         fluxes = {
             "HBETA": 100.0,
             "NIII_1749": 5.0, "NIII_1752": 4.0,
@@ -176,19 +176,36 @@ class TestIonicWiring:
         hi = compute_ionic_abundances(
             fluxes, 2.0e4, 1.2e4, 1e2, ne_mid=1e2, Te_int=1.7e4,
         )
-        assert lo["N++/H+"] != pytest.approx(hi["N++/H+"], rel=1e-6)
-        assert lo["C++/H+"] != pytest.approx(hi["C++/H+"], rel=1e-6)
+        assert lo["N++/H+"] == pytest.approx(hi["N++/H+"], rel=1e-9)
+        assert lo["C++/H+"] == pytest.approx(hi["C++/H+"], rel=1e-9)
 
-    def test_nIII_uses_intermediate_not_high(self):
-        # Explicitly: changing only Te_high (not Te_int) must NOT move N²⁺.
-        fluxes = {"HBETA": 100.0, "NIII_1749": 5.0, "NIII_1752": 4.0}
+    def test_nIII_cIII_use_high_not_intermediate(self):
+        # Explicitly: changing only Te_high (not Te_int) MUST move N²⁺/C²⁺.
+        fluxes = {
+            "HBETA": 100.0,
+            "NIII_1749": 5.0, "NIII_1752": 4.0,
+            "CIII]_1907": 8.0, "CIII]": 6.0,
+        }
         a = compute_ionic_abundances(
             fluxes, 1.8e4, 1.2e4, 1e2, ne_mid=1e2, Te_int=1.4e4,
         )
         b = compute_ionic_abundances(
             fluxes, 2.6e4, 1.2e4, 1e2, ne_mid=1e2, Te_int=1.4e4,
         )
-        assert a["N++/H+"] == pytest.approx(b["N++/H+"], rel=1e-9)
+        assert a["N++/H+"] != pytest.approx(b["N++/H+"], rel=1e-6)
+        assert a["C++/H+"] != pytest.approx(b["C++/H+"], rel=1e-6)
+
+    def test_cIII_still_uses_intermediate_density(self):
+        # The Te switch must not disturb the density assignment: C²⁺ keeps
+        # the CIII]-derived ne_mid (Berg+2025: "T_e,high ; n_e(C+2)").
+        fluxes = {"HBETA": 100.0, "CIII]_1907": 8.0, "CIII]": 6.0}
+        a = compute_ionic_abundances(
+            fluxes, 1.8e4, 1.2e4, 1e2, ne_mid=1e2, ne_Opp=1e5, Te_int=1.4e4,
+        )
+        b = compute_ionic_abundances(
+            fluxes, 1.8e4, 1.2e4, 1e2, ne_mid=1e5, ne_Opp=1e5, Te_int=1.4e4,
+        )
+        assert a["C++/H+"] != pytest.approx(b["C++/H+"], rel=1e-6)
 
     def test_Te_int_used_for_sIII(self):
         # S++/H+ must respond to Te_int (intermediate-zone temperature).

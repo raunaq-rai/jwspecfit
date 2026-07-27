@@ -819,7 +819,9 @@ def compute_ionic_abundances(
     Te_int : float, optional
         Intermediate-zone (S²⁺) electron temperature in K, used for S²⁺
         and Ar²⁺.  If ``None`` (default), the legacy ``0.5*(Te_high +
-        Te_low)`` midpoint is used.
+        Te_low)`` midpoint is used.  Note that C²⁺ and N²⁺ do **not** use
+        this temperature: following Berg+2025 (Table 3) they take
+        *Te_high* with the intermediate-zone density *ne_mid*.
     ne_Opp : float, optional
         Electron density for the O²⁺/Ne²⁺ zone (cm^-3), preferentially
         from [Ar IV] 4711/4740 (Martinez+2025 Table 2).  If ``None``
@@ -891,10 +893,23 @@ def compute_ionic_abundances(
         ionic["Ar++/H+"] = _ionic_abundance("Ar", 3, fluxes["ArIII_7136"], Hb, Te_mid, ne_md, 7136)
 
     # --- UV ionic abundances ---
-    # Zone assignment follows Martinez+2025 (arXiv:2510.21960, §5.4/6.1):
-    # the intermediate-ionisation ions C²⁺ and N²⁺ use the intermediate
-    # temperature (Te_mid) and density (ne_md); the high-ionisation ions
-    # C³⁺, N³⁺, N⁴⁺ use Te_high and ne_hi.
+    # Zone assignment follows Berg+2025 (arXiv:2511.13591, Table 3), which
+    # applies the Martinez+2025 ICFs: C²⁺ and N²⁺ take the *high*-ionisation
+    # temperature Te_high with the C III]-derived density ne_md.  Te and ne
+    # are sourced independently — ne from the ion's own doublet where it
+    # exists, Te from the ion whose emitting gas overlaps most closely.
+    # C²⁺ (24.4–47.9 eV) straddles the S²⁺-defined intermediate zone and
+    # the O²⁺-defined high zone, and C III] λλ1907,09 (E_exc = 6.50 eV) is
+    # weighted toward hot gas far more strongly than the true intermediate
+    # -zone lines [S III] λ9069 / [Ar III] λ7136, so Te_high is the closer
+    # match than the S²⁺-calibrated Garnett extrapolation Te_mid.  Using
+    # Te_mid here instead biases log(C/O) high by ~0.13–0.17 dex when O²⁺
+    # is normalised on the optical [O III] λ5007 (E_exc = 2.51 eV).
+    # Note Martinez+2025 §5.5 assign N²⁺ to Te_int; Berg+2025 Table 3
+    # supersedes this with Te_high, which is what we follow.  Martinez do
+    # not derive carbon abundances at all — C III] enters that work only as
+    # the intermediate-zone density diagnostic ne_int(C²⁺).
+    # The high-ionisation ions C³⁺, N³⁺, N⁴⁺ use Te_high and ne_hi.
     # For doublets: if both members are present, sum fluxes and use total
     # emissivity.  If only one member is present, use that member's flux
     # with its single-line emissivity to avoid underestimating the
@@ -915,15 +930,17 @@ def compute_ionic_abundances(
             "C", 2, cii_flux, Hb, Te_low, ne_lo, _CII_MULTIPLET_WAVES,
         )
 
-    # C2+/H+ from CIII] 1907 + 1909 — intermediate zone (Te_mid, ne_md)
+    # C2+/H+ from CIII] 1907 + 1909 — Te_high with the CIII] density ne_md
+    # (Berg+2025 Table 3: "C+2/O+2 ... T_e,high ; n_e(C+2)").
     _c1907 = fluxes.get("CIII]_1907", 0.0)
     _c1909 = fluxes.get("CIII]", 0.0)
     if _c1907 > 0 and _c1909 > 0:
-        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1907 + _c1909, Hb, Te_mid, ne_md, [1907, 1909])
+        ionic["C++/H+"] = _ionic_abundance(
+            "C", 3, _c1907 + _c1909, Hb, Te_high, ne_md, [1907, 1909])
     elif _c1907 > 0:
-        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1907, Hb, Te_mid, ne_md, 1907)
+        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1907, Hb, Te_high, ne_md, 1907)
     elif _c1909 > 0:
-        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1909, Hb, Te_mid, ne_md, 1909)
+        ionic["C++/H+"] = _ionic_abundance("C", 3, _c1909, Hb, Te_high, ne_md, 1909)
 
     # C3+/H+ from CIV 1548 + 1551 — T_high zone
     _civ1 = fluxes.get("CIV_1", 0.0)
@@ -935,16 +952,17 @@ def compute_ionic_abundances(
     elif _civ2 > 0:
         ionic["C+++/H+"] = _ionic_abundance("C", 4, _civ2, Hb, Te_high, ne_hi, 1551)
 
-    # N2+/H+ from NIII] 1749 + 1752 — intermediate zone (Te_mid, ne_md)
-    # Martinez+2025 §5.4: N²⁺ uses Te_int and ne_int.
+    # N2+/H+ from NIII] 1749 + 1752 — Te_high with the CIII] density ne_md
+    # (Berg+2025 Table 3: "N+2/O+2 ... T_e,high ; n_e(C+2)").
     _n1749 = fluxes.get("NIII_1749", 0.0)
     _n1752 = fluxes.get("NIII_1752", 0.0)
     if _n1749 > 0 and _n1752 > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749 + _n1752, Hb, Te_mid, ne_md, [1749, 1752])
+        ionic["N++/H+"] = _ionic_abundance(
+            "N", 3, _n1749 + _n1752, Hb, Te_high, ne_md, [1749, 1752])
     elif _n1749 > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749, Hb, Te_mid, ne_md, 1749)
+        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749, Hb, Te_high, ne_md, 1749)
     elif _n1752 > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1752, Hb, Te_mid, ne_md, 1752)
+        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1752, Hb, Te_high, ne_md, 1752)
 
     # N3+/H+ from NIV] 1483 + 1486 — T_high zone
     _n1483 = fluxes.get("NIV_1483", 0.0)

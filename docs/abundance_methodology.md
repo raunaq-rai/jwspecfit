@@ -196,9 +196,18 @@ A single auroral line measures T_e in one ionisation zone.  The
 `Te_relation` argument maps T_e(O2+) (the high zone) to the intermediate
 and low zones.  Ions are assigned to zones by ionisation potential:
 
-- **High zone** (O2+, Ne2+, N3+, C3+) — T_high = T_e([OIII])
-- **Intermediate zone** (N2+, C2+, S2+, Ar2+) — T_int
+- **High zone** (O2+, Ne2+, N3+, C3+, **N2+, C2+**) — T_high = T_e([OIII])
+- **Intermediate zone** (S2+, Ar2+) — T_int
 - **Low zone** (O+, N+, S+) — T_low
+
+Note that N2+ and C2+ take T_high while keeping the *intermediate*-zone
+density n_e,int.  T_e and n_e are sourced independently: n_e from the ion's
+own doublet where one exists, T_e from the ion whose emitting gas overlaps
+most closely.  C2+ (24.4–47.9 eV) straddles the S2+-defined intermediate
+zone and the O2+-defined high zone, and C III] λλ1907,09 (E_exc = 6.50 eV)
+is weighted toward hot gas far more strongly than [S III] λ9069 or
+[Ar III] λ7136.  See Berg et al. (2025, arXiv:2511.13591) Table 3, which
+lists both C+2/O+2 and N+2/O+2 as "T_e,high ; n_e(C+2)".
 
 **Default `"3_tier"`** — Garnett (1992) relations throughout, following
 Martinez+2025 ("Under Pressure", arXiv:2510.21960):
@@ -230,7 +239,7 @@ measured via PyNEB's `getTemDen()` at the appropriate zone temperature:
 |---------|-----|------|----------|-------------------|
 | [S II] 6718/6732 | S+ | Low | T_low | 6718, 6732 |
 | [O II] 3726/3729 | O+ | Low | T_low | 3726, 3729 |
-| C III] 1907/1909 | C2+ | Intermediate | T_int | 1907, 1909 |
+| C III] 1907/1909 | C2+ | Intermediate | T_high | 1907, 1909 |
 | Si III] 1883/1892 | Si2+ | Intermediate | T_int | 1883, 1892 |
 | N IV] 1483/1486 | N3+ | High | T_high | 1483, 1487 |
 | [Ar IV] 4711/4740 | Ar3+ | High | T_high | 4711, 4740 |
@@ -280,8 +289,8 @@ highly ionised N3+/N4+/C3+ use the **high-zone density `n_e,high`** (N IV] /
 | N+  | [N II] 6585 | low | T_low | n_e,low |
 | S+  | [S II] 6718+6732 | low | T_low | n_e,low |
 | C+  | C II] 2324+2326 | low | T_low | n_e,low |
-| N2+ | N III] 1749+1752 | intermediate | T_int | n_e,int |
-| C2+ | C III] 1907+1909 | intermediate | T_int | n_e,int |
+| N2+ | N III] 1749+1752 | intermediate | T_high | n_e,int |
+| C2+ | C III] 1907+1909 | intermediate | T_high | n_e,int |
 | S2+ | [S III] 9069 | intermediate | T_int | n_e,int |
 | Ar2+ | [Ar III] 7136 | intermediate | T_int | n_e,int |
 | O2+ | [O III] 5007 | high (O2+) | T_high | n_e(O2+) |
