@@ -185,11 +185,9 @@ Te_low  = Te_low_from_high(Te_high, relation=Te_relation)
 For each ion, computes `X^i+/H+ = (F_line/F_Hb) * (eps_Hb/eps_line)` using PyNEB.
 
 Zone assignments:
-- **Te_high, ne_high:** C3+, N3+, N4+
-- **Te_high, ne(O2+):** O2+, Ne2+
-- **Te_high, ne_mid (C III]):** C2+, N2+ — Berg+2025 Table 3, "T_e,high ; n_e(C+2)"
+- **Te_high, ne_high:** O2+, Ne2+, C2+, C3+, N2+, N3+, N4+
 - **Te_low, ne_low:** O+, N+, S+
-- **Te_mid, ne_mid:** S2+, Ar2+
+- **Te_mid = (Te_high+Te_low)/2, ne_low:** S2+, Ar2+
 
 UV doublet handling: if both members present, sums fluxes and uses total emissivity.
 If only one member present, uses single-member flux with single-line emissivity.

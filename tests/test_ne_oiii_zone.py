@@ -71,22 +71,22 @@ def test_Nppp_still_uses_high_zone_density():
     assert np.isclose(ionic["N+++/H+"], expected_high, rtol=1e-6)
 
 
-def test_Npp_uses_intermediate_density_but_high_temperature():
-    """N²⁺/H+ (N III]) pairs the intermediate density with Te_high.
+def test_Npp_uses_intermediate_zone_density():
+    """N²⁺/H+ (N III]) must use the intermediate density and temperature.
 
-    Berg+2025 (arXiv:2511.13591) Table 3 lists N⁺²/O⁺² as
-    "T_e,high ; n_e(C+2)": the density comes from the C III] doublet
-    (ne_mid) while the temperature is the measured high-ionisation
-    Te(O⁺²), not the S²⁺-calibrated Garnett extrapolation.
+    Since commit f97b7d3, N²⁺ sits in the intermediate zone for *both* the
+    density (ne_mid) and the temperature (Te_int, defaulting to the
+    midpoint 0.5*(Te_high+Te_low) when Te_int is not supplied).
     """
     ionic = compute_ionic_abundances(
         _FLUXES, _TE_HIGH, _TE_LOW, _NE_LOW, ne_mid=_NE_MID, ne_high=_NE_HIGH,
     )
-    expected = _ionic_abundance(
+    te_mid = 0.5 * (_TE_HIGH + _TE_LOW)
+    expected_mid = _ionic_abundance(
         "N", 3, _FLUXES["NIII_1749"] + _FLUXES["NIII_1752"], _FLUXES["HBETA"],
-        _TE_HIGH, _NE_MID, [1749, 1752],
+        te_mid, _NE_MID, [1749, 1752],
     )
-    assert np.isclose(ionic["N++/H+"], expected, rtol=1e-6)
+    assert np.isclose(ionic["N++/H+"], expected_mid, rtol=1e-6)
 
 
 def test_Opp_falls_back_to_low_when_no_mid():

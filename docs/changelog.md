@@ -4,27 +4,6 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
-## Unreleased
-
-### `jwspecabund` — C²⁺ and N²⁺ move to the high-ionisation temperature
-
-- **C²⁺ (C III] λλ1907,09) and N²⁺ (N III] λλ1749,52) now use `Te_high`**
-  instead of the intermediate-zone `Te_int`, while keeping the C III]-derived
-  intermediate density `ne_mid`. This follows Berg et al. (2025,
-  arXiv:2511.13591) Table 3, which lists both C⁺²/O⁺² and N⁺²/O⁺² as
-  "T_e,high ; n_e(C+2)" when applying the Martinez et al. (2025) ICFs.
-  T_e and n_e are sourced independently — n_e from the ion's own doublet,
-  T_e from the ion whose emitting gas overlaps most closely.
-- Rationale: C²⁺ (24.4–47.9 eV) straddles the S²⁺-defined intermediate zone
-  and the O²⁺-defined high zone, and C III] (E_exc = 6.50 eV) is weighted
-  toward hot gas far more strongly than the true intermediate-zone lines
-  [S III] λ9069 / [Ar III] λ7136. Martinez et al. (2025) derive no carbon
-  abundances; C III] enters that work only as the density diagnostic
-  n_e,int(C²⁺).
-- **Impact:** with O²⁺ normalised on optical [O III] λ5007, the previous
-  `Te_int` assignment biased log(C/O) high by ~0.13–0.17 dex over
-  T_e(O²⁺) = 14,000–22,000 K. Existing C/O and N/O results will shift.
-
 ## 1.1.7 — 2026-07-23
 
 ### `jwspecabund` — Martinez C/O ionisation-correction factor
