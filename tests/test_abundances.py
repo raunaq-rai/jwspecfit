@@ -671,6 +671,39 @@ class TestComputeAbundances:
             )
         return MockFitResult(lines=lines)
 
+    def test_auto_mode_reports_1666_point_estimate(self):
+        """Auto mode must build alt_results['direct_1666'] without error.
+
+        Regression: the point-estimate branch omitted the required OH_err
+        field and raised TypeError. Nothing else in the suite exercises
+        this path, because it needs BOTH 4363 and 1666 present so that
+        4363 wins and 1666 becomes the cross-check.
+        """
+        from jwspecabund import compute_abundances
+
+        result = self._make_mock_fit_result({
+            "HBETA": (100.0, 3.0),
+            "OIII_5007": (600.0, 18.0),
+            "OIII_4959": (201.0, 6.0),
+            "OIII_4363": (12.0, 0.4),
+            "OII_3726": (15.0, 0.5),
+            "OII_3729": (20.0, 0.6),
+            "OIII_1666": (25.0, 0.8),
+        })
+        abund = compute_abundances(
+            result, z=2.0, method="auto", n_mc=5, dust_correct=False,
+            progress=False,
+        )
+        assert abund.method == "direct"
+        assert abund.alt_results is not None
+        assert "direct_1666" in abund.alt_results
+        alt = abund.alt_results["direct_1666"]
+        assert alt.Te_high is not None and alt.Te_high > 0
+        # It is a cross-check, so it carries no error bar.
+        assert alt.OH_err is None or np.isnan(alt.OH_err)
+        # And it must be reported in the summary without raising.
+        assert "1666" in abund.summary()
+
     def test_strong_line_method(self):
         """Strong-line method on a mock FitResult."""
         from jwspecabund import compute_abundances

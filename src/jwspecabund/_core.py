@@ -3255,6 +3255,9 @@ def compute_abundances(
                     alt["direct_1666"] = AbundanceResult(
                         method="direct (O III] 1666, point estimate)",
                         OH=12.0 + np.log10(OH_1666) if OH_1666 > 0 else np.nan,
+                        # No error bar by design: this is a deterministic
+                        # cross-check, not a sampled measurement.
+                        OH_err=np.nan,
                         Te_high=Te_1666_pt,
                         Te_low=Te_1666_low,
                         Te_mid=Te_1666_int,
