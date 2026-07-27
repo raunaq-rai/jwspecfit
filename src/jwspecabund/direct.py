@@ -36,6 +36,62 @@ def _get_pyneb():
     return pn
 
 
+#: Collision-strength dataset used *only* for the O III] 1666 temperature.
+#: PyNEB's default (``o_iii_coll_SSB14.dat``) tabulates just 5 levels, so the
+#: 5-S-2 upper level of lambda1661,1666 is out of range and lambda1666 cannot
+#: be evaluated at all.  Tayal & Zatsarinny (2017) covers level 6 and shifts
+#: the lambda4363-based T_e by only +137 K (0.8%) and log(O++/H+) by
+#: +0.002 dex relative to SSB14, so adopting it here leaves the default
+#: lambda4363 path untouched at negligible cost in consistency.
+OIII_1666_COLL_FILE = "o_iii_coll_TZ17.dat"
+
+_OIII_1666_ATOM = None
+
+
+def _get_oiii_atom_1666():
+    """Return a 6-level O III atom capable of evaluating O III] 1666.
+
+    Builds the atom against :data:`OIII_1666_COLL_FILE`, then restores
+    PyNEB's global collision-file selection so that every other calculation
+    in the package (notably :func:`compute_Te_OIII`, which uses lambda4363)
+    keeps the SSB14 default.  PyNEB resolves data files at construction
+    time, so the returned instance retains TZ17 after the restore.  The
+    atom is cached because the switch is global state and must happen once.
+
+    Returns
+    -------
+    pyneb.Atom
+        O III atom with at least 6 levels.
+
+    Raises
+    ------
+    RuntimeError
+        If the resulting atom still has fewer than 6 levels, which would
+        silently mis-identify the lambda1666 transition.
+    """
+    global _OIII_1666_ATOM
+    if _OIII_1666_ATOM is not None:
+        return _OIII_1666_ATOM
+
+    pn = _get_pyneb()
+    prev = pn.atomicData.getDataFile("O3", "coll")
+    try:
+        pn.atomicData.setDataFile(OIII_1666_COLL_FILE)
+        atom = pn.Atom("O", 3)
+    finally:
+        if prev is not None:
+            pn.atomicData.setDataFile(prev)
+
+    if atom.NLevels < 6:
+        raise RuntimeError(
+            f"O III collision data {OIII_1666_COLL_FILE!r} yielded "
+            f"{atom.NLevels} levels; O III] 1666 (the 6->3 transition) "
+            f"needs at least 6."
+        )
+    _OIII_1666_ATOM = atom
+    return atom
+
+
 # ---------------------------------------------------------------------------
 # Electron density
 # ---------------------------------------------------------------------------
@@ -485,11 +541,27 @@ def compute_Te_OIII_1666(
 ) -> float:
     """Compute T_e(O++) from the [OIII] UV/optical ratio 1666/(5007+4959).
 
-    Uses the O III] 1666 Å intercombination line (5→2 transition) as a
-    UV auroral diagnostic when [OIII] 4363 is unavailable or low-SNR.
-    The emissivity ratio 1666/(5007+4959) is monotonically increasing
-    with T_e and more temperature-sensitive than 4363/(5007+4959) due
-    to the larger energy gap (7.5 eV vs 2.8 eV).
+    Uses the O III] 1666 Å intercombination line as a UV auroral
+    diagnostic when [OIII] 4363 is unavailable or low-SNR.  The line is
+    the 6→3 transition (⁵S₂ → ¹D₂), so it requires a 6-level O III atom;
+    see :func:`_get_oiii_atom_1666`.  The emissivity ratio
+    1666/(5007+4959) increases monotonically with T_e and is more
+    temperature-sensitive than 4363/(5007+4959): λ1666 is excited from a
+    level 7.48 eV above ground versus 5.35 eV for λ4363, against the
+    2.51 eV λ5007 denominator.
+
+    Notes
+    -----
+    This diagnostic uses the Tayal & Zatsarinny (2017) collision strengths
+    (:data:`OIII_1666_COLL_FILE`) rather than PyNEB's SSB14 default, which
+    stops at 5 levels and cannot represent λ1666 at all.  The λ4363 path
+    (:func:`compute_Te_OIII`) is unaffected and keeps SSB14.  Because the
+    two diagnostics are mutually exclusive per object, no single
+    measurement mixes datasets; the residual inconsistency is that a
+    λ1666-derived T_e is fed to SSB14 emissivities downstream, worth
+    ~0.01 dex in log(O⁺⁺/H⁺).  Expect a ~400 K (~2.4%) atomic-data
+    systematic on any λ1666 temperature, from the spread between
+    published 6-level collision datasets.
 
     Parameters
     ----------
@@ -509,8 +581,6 @@ def compute_Te_OIII_1666(
     """
     from scipy.optimize import brentq
 
-    pn = _get_pyneb()
-
     nebular = flux_5007 + flux_4959
     if nebular <= 0:
         raise ValueError("[OIII] nebular flux (5007+4959) is non-positive.")
@@ -519,11 +589,11 @@ def compute_Te_OIII_1666(
 
     observed_ratio = flux_1666 / nebular
 
-    atom = pn.Atom("O", 3)
+    atom = _get_oiii_atom_1666()
 
     def _ratio_minus_obs(log_Te: float) -> float:
         Te = 10.0 ** log_Te
-        e_1666 = atom.getEmissivity(Te, ne, lev_i=5, lev_j=2)
+        e_1666 = atom.getEmissivity(Te, ne, lev_i=6, lev_j=3)
         e_5007 = atom.getEmissivity(Te, ne, wave=5007)
         e_4959 = atom.getEmissivity(Te, ne, wave=4959)
         if e_5007 + e_4959 <= 0:

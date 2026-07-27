@@ -462,6 +462,49 @@ class TestDirect:
         )
         assert 5000 < Te < 30000
 
+    def test_oiii_1666_atom_resolves_correct_transition(self):
+        """The 1666 atom must have >=6 levels and 6->3 must BE 1666.15 A.
+
+        PyNEB's default 5-level O III data silently maps lev 5->2 onto
+        lambda2321, so pin the wavelength rather than just the level count.
+        """
+        from jwspecabund.direct import _get_oiii_atom_1666
+
+        atom = _get_oiii_atom_1666()
+        assert atom.NLevels >= 6
+        np.testing.assert_allclose(atom.wave_Ang[5][2], 1666.15, atol=0.5)
+
+    def test_oiii_1666_does_not_perturb_4363_path(self):
+        """Building the 1666 atom must not change the global O III data.
+
+        The lambda4363 temperature must keep PyNEB's SSB14 default, so
+        existing direct-method results are untouched.
+        """
+        import pyneb as pn
+
+        from jwspecabund.direct import _get_oiii_atom_1666, compute_Te_OIII
+
+        before = compute_Te_OIII(0.01, 0.75, 0.25, 100.0)
+        _get_oiii_atom_1666()
+        after = compute_Te_OIII(0.01, 0.75, 0.25, 100.0)
+        np.testing.assert_allclose(before, after, rtol=1e-12)
+        assert pn.atomicData.getDataFile("O3", "coll") == "o_iii_coll_SSB14.dat"
+
+    def test_compute_Te_OIII_1666(self):
+        """T_e from the O III] 1666/(5007+4959) UV ratio."""
+        from jwspecabund.direct import compute_Te_OIII_1666
+
+        # eps(1666)/eps(5007+4959) ~ 0.036 corresponds to Te ~ 1.8e4 K.
+        Te = compute_Te_OIII_1666(
+            flux_1666=0.036, flux_5007=0.75, flux_4959=0.25, ne=100.0,
+        )
+        assert 1.0e4 < Te < 3.0e4
+        # Monotonic: a larger 1666 ratio must imply a hotter zone.
+        Te_hot = compute_Te_OIII_1666(
+            flux_1666=0.060, flux_5007=0.75, flux_4959=0.25, ne=100.0,
+        )
+        assert Te_hot > Te
+
     def test_ionic_abundances(self):
         """Ionic O++/H+ from [OIII] 5007 should be reasonable."""
         from jwspecabund.direct import compute_ionic_abundances
