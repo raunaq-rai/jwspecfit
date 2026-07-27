@@ -77,7 +77,13 @@ def _get_oiii_atom_1666():
     prev = pn.atomicData.getDataFile("O3", "coll")
     try:
         pn.atomicData.setDataFile(OIII_1666_COLL_FILE)
-        atom = pn.Atom("O", 3)
+        # NLevels=6 is a *performance* constraint, not a physical one: the
+        # atom file caps the model at 6 levels either way, but without this
+        # PyNEB re-interpolates TZ17's full 202-level collision array on
+        # every getEmissivity call — 203 ms vs 0.23 ms, an 880x penalty that
+        # makes each brentq T_e solve take seconds.  Emissivity ratios are
+        # bit-identical with and without it.
+        atom = pn.Atom("O", 3, NLevels=6)
     finally:
         if prev is not None:
             pn.atomicData.setDataFile(prev)

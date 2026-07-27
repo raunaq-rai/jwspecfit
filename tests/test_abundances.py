@@ -490,6 +490,24 @@ class TestDirect:
         np.testing.assert_allclose(before, after, rtol=1e-12)
         assert pn.atomicData.getDataFile("O3", "coll") == "o_iii_coll_SSB14.dat"
 
+    def test_oiii_1666_solver_is_not_pathologically_slow(self):
+        """Guard the NLevels=6 truncation.
+
+        Without it PyNEB re-interpolates TZ17's full 202-level collision
+        array on every call (203 ms vs 0.23 ms), which makes each brentq
+        solve take seconds and the auto-mode alternatives take minutes.
+        """
+        import time
+
+        from jwspecabund.direct import compute_Te_OIII_1666
+
+        compute_Te_OIII_1666(25.0, 600.0, 201.0, 100.0)  # warm the cache
+        t0 = time.perf_counter()
+        for _ in range(5):
+            compute_Te_OIII_1666(25.0, 600.0, 201.0, 100.0)
+        per_call = (time.perf_counter() - t0) / 5
+        assert per_call < 1.0, f"Te(1666) solve took {per_call:.2f} s/call"
+
     def test_compute_Te_OIII_1666(self):
         """T_e from the O III] 1666/(5007+4959) UV ratio."""
         from jwspecabund.direct import compute_Te_OIII_1666
