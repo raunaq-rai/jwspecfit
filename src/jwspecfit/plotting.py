@@ -90,6 +90,105 @@ def _build_exclude_mask(
     return keep
 
 
+def _validate_y_scale(y_scale: str) -> str:
+    """Normalise and validate a ``y_scale`` argument.
+
+    Parameters
+    ----------
+    y_scale : str
+        ``"linear"`` or ``"log"`` (case-insensitive).
+
+    Returns
+    -------
+    str
+        The lower-cased value.
+
+    Raises
+    ------
+    ValueError
+        If *y_scale* is neither ``"linear"`` nor ``"log"``.
+    """
+    ys = str(y_scale).lower()
+    if ys not in ("linear", "log"):
+        raise ValueError(
+            f"y_scale must be 'linear' or 'log', got {y_scale!r}."
+        )
+    return ys
+
+
+def _log_ylim(
+    values: np.ndarray,
+    y_upper: float,
+    *,
+    max_decades: float = 4.0,
+) -> tuple[float, float]:
+    """Return strictly positive ``(lo, hi)`` limits for a log y-axis.
+
+    A log axis cannot show zero or negative flux, so the linear lower
+    bound (which is normally clamped at or below zero) has to be
+    replaced.  The lower bound is taken from the 5th percentile of the
+    positive finite values and then floored at ``hi / 10**max_decades``
+    so that near-zero noise pixels don't stretch the axis over many
+    empty decades.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        Plotted y values (may contain NaNs, zeros, and negatives).
+    y_upper : float
+        Upper limit computed for the linear axis.  Used as ``hi`` when
+        positive, otherwise ``hi`` falls back to the data maximum.
+    max_decades : float
+        Maximum number of decades to span (default 4).
+
+    Returns
+    -------
+    (float, float)
+        ``(lo, hi)`` with ``0 < lo < hi``.
+    """
+    arr = np.asarray(values, dtype=float).ravel()
+    pos = arr[np.isfinite(arr) & (arr > 0)]
+
+    if np.isfinite(y_upper) and y_upper > 0:
+        hi = float(y_upper)
+    elif pos.size:
+        hi = float(np.nanmax(pos))
+    else:
+        hi = 1.0
+
+    floor = hi / 10.0 ** max_decades
+    lo = float(np.nanpercentile(pos, 5)) if pos.size else floor
+    lo = max(lo, floor)
+    if not (lo > 0) or lo >= hi:
+        lo = floor
+    return lo, hi
+
+
+def _yaxis_log_kw(y_scale: str) -> dict:
+    """Plotly y-axis keywords implementing *y_scale*.
+
+    Returns ``{"type": "log", "exponentformat": "power"}`` for
+    ``"log"`` (so ticks render as 10⁻², 10⁻¹, 10⁰ …) and an empty dict
+    for ``"linear"``.
+    """
+    if y_scale == "log":
+        return {"type": "log", "exponentformat": "power"}
+    return {}
+
+
+def _top_label_y(ax, frac: float = 0.95) -> float:
+    """Y position *frac* of the way to the top of *ax*, scale-aware.
+
+    On a linear axis this reproduces the historic ``ylim[1] * frac``;
+    on a log axis the fraction is applied in log space so the label
+    stays just inside the top of the panel.
+    """
+    lo, hi = ax.get_ylim()
+    if ax.get_yscale() == "log" and lo > 0 and hi > 0:
+        return 10.0 ** (np.log10(lo) + frac * (np.log10(hi) - np.log10(lo)))
+    return hi * frac
+
+
 def plot_fit(
     result: "FitResult",
     *,
@@ -100,6 +199,7 @@ def plot_fit(
     show_components: bool = True,
     label_lines: bool = True,
     y_pad: float = 1.3,
+    y_scale: str = "linear",
     exclude_wave_A: list[tuple[float, float]] | None = None,
     rest_frame: bool = False,
     save_path: str | None = None,
@@ -129,6 +229,12 @@ def plot_fit(
         Annotate line identifications (default True).
     y_pad : float
         Multiplicative padding above the tallest line peak (default 1.3).
+    y_scale : {"linear", "log"}
+        Scaling of the flux axis on the main panel (default
+        ``"linear"``).  ``"log"`` draws decade ticks (10⁻², 10⁻¹, 10⁰ …)
+        and replaces the lower limit with a positive one, since a log
+        axis cannot show zero or negative flux.  The residual panel is
+        always linear (residuals are signed).
     exclude_wave_A : list of (float, float), optional
         Wavelength ranges in Angstroms to hide from the plot.  Each tuple
         is ``(lo, hi)``.  Useful for masking noisy detector regions.
@@ -147,6 +253,8 @@ def plot_fit(
     import matplotlib.pyplot as plt
     from .models import build_model
     from .io import _flam_to_ujy, _ujy_to_flam
+
+    y_scale = _validate_y_scale(y_scale)
 
     # Auto-convert MCMCResult / MCMCBroadFitResult to FitResult.
     if hasattr(result, "to_fit_result") and not hasattr(result, "residuals"):
@@ -387,11 +495,21 @@ def plot_fit(
     cont_median = np.nanmedian(cont[show]) if np.any(show) else 0.0
     # Upper limit: tallest line peak × y_pad
     y_upper = cont_median + (model_peak - cont_median) * y_pad
-    # Lower limit: accommodate absorption troughs or minimum continuum
-    y_lower_cont = np.nanmin(cont[show]) * 1.1 if np.any(show) else -0.1
-    y_lower = min(0.0, y_lower_cont, model_trough - abs(model_trough) * 0.15)
-    if y_upper > y_lower:
-        ax_main.set_ylim(y_lower, y_upper)
+    if y_scale == "log":
+        # A log axis cannot show the zero/negative lower bound used
+        # below, so derive a positive floor from the plotted values.
+        ax_main.set_yscale("log")
+        vals = (
+            np.concatenate([flux[show], model_total[show]])
+            if np.any(show) else np.array([])
+        )
+        ax_main.set_ylim(*_log_ylim(vals, y_upper))
+    else:
+        # Lower limit: accommodate absorption troughs or minimum continuum
+        y_lower_cont = np.nanmin(cont[show]) * 1.1 if np.any(show) else -0.1
+        y_lower = min(0.0, y_lower_cont, model_trough - abs(model_trough) * 0.15)
+        if y_upper > y_lower:
+            ax_main.set_ylim(y_lower, y_upper)
 
     # Residual panel — x-range limited to the extent of the fitted lines.
     if show_residuals and ax_res is not None:
@@ -618,6 +736,7 @@ def plot_spectrum_interactive(
     z: float | None = None,
     wave_unit: str = "A",
     flux_unit: str = "fnu",
+    y_scale: str = "linear",
     rest_frame: bool = False,
     exclude_wave_A: list[tuple[float, float]] | None = None,
     title: str | None = None,
@@ -655,6 +774,11 @@ def plot_spectrum_interactive(
         ``"A"`` for Angstroms (default) or ``"um"`` for microns.
     flux_unit : str
         ``"fnu"`` for µJy (default) or ``"flam"`` for erg/s/cm²/Å.
+    y_scale : {"linear", "log"}
+        Scaling of the flux axis (default ``"linear"``).  ``"log"``
+        draws decade ticks (10⁻², 10⁻¹, 10⁰ …), replaces the lower
+        limit with a positive one, and suppresses the ``show_zero``
+        reference line — a log axis cannot show zero or negative flux.
     rest_frame : bool
         If ``True`` and a spectrum has a redshift, divide wavelengths
         by ``(1 + z)``.  Default ``False`` (observed frame).  Applied
@@ -725,6 +849,8 @@ def plot_spectrum_interactive(
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
     from .io import Spectrum, read_fits, read_npz, _ujy_to_flam
+
+    y_scale = _validate_y_scale(y_scale)
 
     # Normalise sources / labels to parallel lists.
     if isinstance(source, (list, tuple)):
@@ -922,6 +1048,17 @@ def plot_spectrum_interactive(
     else:
         y_lower, y_upper = -1.0, 1.0
 
+    # On a log axis the plotly `range` is given in log10 units, and the
+    # lower bound has to be strictly positive.
+    if y_scale == "log":
+        f_all = (
+            np.concatenate(all_flux_show) if all_flux_show else np.array([])
+        )
+        y_lower, y_upper = _log_ylim(f_all, y_upper)
+        y_range = [float(np.log10(y_lower)), float(np.log10(y_upper))]
+    else:
+        y_range = [y_lower, y_upper]
+
     # --- 2-D rectified-spectrum panel (row=1 when enabled) ---
     if _show_2d:
         spec0 = specs[0]
@@ -980,7 +1117,8 @@ def plot_spectrum_interactive(
         # Bottom (1-D) panel labels + range.
         fig.update_xaxes(title_text=xlabel, row=2, col=1)
         fig.update_yaxes(
-            title_text=ylabel, range=[y_lower, y_upper], row=2, col=1,
+            title_text=ylabel, range=y_range, row=2, col=1,
+            **_yaxis_log_kw(y_scale),
         )
         # Top (2-D) panel: hide tick labels, label spatial axis.
         fig.update_yaxes(
@@ -993,7 +1131,7 @@ def plot_spectrum_interactive(
             title=title,
             xaxis_title=xlabel,
             yaxis_title=ylabel,
-            yaxis_range=[y_lower, y_upper],
+            yaxis_range=y_range,
             xaxis=dict(exponentformat="none"),
             template="plotly_white",
             hovermode="x unified",
@@ -1002,12 +1140,16 @@ def plot_spectrum_interactive(
             width=1000,
             height=500,
         )
+        for _k, _v in _yaxis_log_kw(y_scale).items():
+            layout_kwargs[f"yaxis_{_k}"] = _v
         if bottom_margin is not None:
             layout_kwargs["margin"] = dict(b=bottom_margin)
         fig.update_layout(**layout_kwargs)
 
     # --- Zero-flux reference (light grey dashed) ---
-    if show_zero:
+    # Meaningless (and mis-placed, since shape coordinates are in log10
+    # units) on a log axis, so it is only drawn for a linear axis.
+    if show_zero and y_scale != "log":
         if _show_2d:
             fig.add_hline(
                 y=0,
@@ -1061,6 +1203,7 @@ def plot_fit_interactive(
     show_components: bool = True,
     show_residuals: bool = True,
     y_pad: float = 1.3,
+    y_scale: str = "linear",
     exclude_wave_A: list[tuple[float, float]] | None = None,
     rest_frame: bool = False,
     z: float | None = None,
@@ -1097,6 +1240,12 @@ def plot_fit_interactive(
         Show residual panel below the main plot (default True).
     y_pad : float
         Multiplicative padding above tallest line (default 1.3).
+    y_scale : {"linear", "log"}
+        Scaling of the flux axis on the main panel (default
+        ``"linear"``).  ``"log"`` draws decade ticks (10⁻², 10⁻¹, 10⁰ …)
+        and replaces the lower limit with a positive one, since a log
+        axis cannot show zero or negative flux.  The residual panel is
+        always linear (residuals are signed).
     exclude_wave_A : list of (float, float), optional
         Wavelength ranges in Angstroms to hide from the plot.
     rest_frame : bool
@@ -1143,6 +1292,8 @@ def plot_fit_interactive(
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
     from .io import _flam_to_ujy, _ujy_to_flam
+
+    y_scale = _validate_y_scale(y_scale)
 
     # Auto-convert MCMCResult / MCMCBroadFitResult to FitResult.
     if hasattr(result, "to_fit_result") and not hasattr(result, "residuals"):
@@ -1591,6 +1742,18 @@ def plot_fit_interactive(
     y_lower_cont = np.nanmin(cont[show]) * 1.1 if np.any(show) else -0.1
     y_lower = min(0.0, y_lower_cont, model_trough - abs(model_trough) * 0.15)
 
+    # On a log axis the plotly `range` is given in log10 units, and the
+    # lower bound has to be strictly positive.
+    if y_scale == "log":
+        vals = (
+            np.concatenate([flux[show], model_total[show]])
+            if np.any(show) else np.array([])
+        )
+        y_lower, y_upper = _log_ylim(vals, y_upper)
+        y_range = [float(np.log10(y_lower)), float(np.log10(y_upper))]
+    else:
+        y_range = [y_lower, y_upper]
+
     title_bits = []
     if z_used is not None:
         title_bits.append(f"z = {float(z_used):.4f}")
@@ -1634,8 +1797,9 @@ def plot_fit_interactive(
         # visible without scrolling; bottom-most panel also gets it.
         fig.update_xaxes(title_text=xlabel, row=_main_row, col=1)
         fig.update_yaxes(
-            title_text=ylabel, range=[y_lower, y_upper],
+            title_text=ylabel, range=y_range,
             row=_main_row, col=1,
+            **_yaxis_log_kw(y_scale),
         )
         if _show_2d:
             fig.update_yaxes(
@@ -1653,11 +1817,11 @@ def plot_fit_interactive(
             )
             fig.update_xaxes(title_text=xlabel, row=_resid_row, col=1)
     else:
-        fig.update_layout(
+        _single_layout = dict(
             title=title,
             xaxis_title=xlabel,
             yaxis_title=ylabel,
-            yaxis_range=[y_lower, y_upper],
+            yaxis_range=y_range,
             xaxis=dict(exponentformat="none"),
             template="plotly_white",
             hovermode=False,
@@ -1667,6 +1831,9 @@ def plot_fit_interactive(
             height=500,
             margin=dict(b=110),
         )
+        for _k, _v in _yaxis_log_kw(y_scale).items():
+            _single_layout[f"yaxis_{_k}"] = _v
+        fig.update_layout(**_single_layout)
 
     # --- Curated emission-line markers (rest-frame aware) ---
     if rest_frame:
@@ -1716,6 +1883,7 @@ def plot_2d_1d(
     y_crop: tuple[float, float] = (0.25, 0.75),
     xlim: tuple[float, float] | None = None,
     ylim: tuple[float, float] | None = None,
+    y_scale: str = "linear",
     line_colour: str = "steelblue",
     line_width: float = 0.5,
     err_colour: str = "grey",
@@ -1760,6 +1928,12 @@ def plot_2d_1d(
         extent (default keeps the middle 50 % rows).
     xlim, ylim
         Optional axis limits.  ``xlim`` applies to both panels.
+    y_scale
+        Scaling of the 1-D flux axis: ``"linear"`` (default) or
+        ``"log"``, which draws decade ticks (10⁻², 10⁻¹, 10⁰ …).  When
+        ``"log"`` and no explicit ``ylim`` is given, the lower limit is
+        replaced with a positive one and the ``y = 0`` reference line is
+        omitted — a log axis cannot show zero or negative flux.
     line_colour, line_width
         Colour and line width of the 1D flux trace.
     err_colour, err_alpha
@@ -1787,6 +1961,8 @@ def plot_2d_1d(
 
     from .io import read_fits
     from .lines import REST_LINES_A
+
+    y_scale = _validate_y_scale(y_scale)
 
     path = Path(path)
 
@@ -1856,7 +2032,10 @@ def plot_2d_1d(
             (flux + err) * flux_scale,
             color=err_colour, alpha=err_alpha, lw=0,
         )
-    ax1d.axhline(0, color="k", lw=0.8, ls="--", alpha=0.6)
+    if y_scale == "log":
+        ax1d.set_yscale("log")
+    else:
+        ax1d.axhline(0, color="k", lw=0.8, ls="--", alpha=0.6)
     ax1d.tick_params(direction="in", top=True, right=True, labelsize=8)
     ax1d.set_xlabel(xlabel, fontsize=10)
     ax1d.set_ylabel(flux_label, fontsize=10)
@@ -1880,7 +2059,9 @@ def plot_2d_1d(
             pad = 0.05 * (hi - lo if hi > lo else max(abs(hi), 1.0))
             y_lower = min(0.0, lo - pad)
             y_upper = hi + pad
-            if y_upper > y_lower:
+            if y_scale == "log":
+                ax1d.set_ylim(*_log_ylim(f_scaled[in_view], y_upper))
+            elif y_upper > y_lower:
                 ax1d.set_ylim(y_lower, y_upper)
 
     # --- Emission-line markers ------------------------------------
@@ -1915,12 +2096,12 @@ def plot_2d_1d(
                 if x_lo < obs_um < x_hi:
                     markers.append((obs_um, str(label)))
 
-        y_top = ax1d.get_ylim()[1]
+        y_top = _top_label_y(ax1d, 0.95)
         for x_obs, label in markers:
             for ax in (ax2d, ax1d):
                 ax.axvline(x_obs, color="gray", ls="--", lw=0.7, alpha=0.6)
             ax1d.text(
-                x_obs, y_top * 0.95, label,
+                x_obs, y_top, label,
                 color="gray", rotation=90,
                 ha="center", va="top", fontsize=7,
             )

@@ -88,6 +88,10 @@ Key parameters:
 `y_pad`
 : Multiplicative headroom above the tallest line peak (default `1.3`).
 
+`y_scale`
+: `"linear"` (default) or `"log"` — see
+  [Logarithmic y-axes](#logarithmic-y-axes).
+
 `exclude_wave_A`
 : List of `(lo, hi)` ranges in Ångström to hide — useful for masking
   detector gaps or contaminated regions.
@@ -229,6 +233,47 @@ jwspecfit.show_lines()
 Markers are redshifted by `(1 + z)` (the effective `z` comes from the `z`
 argument, else the spectrum's own `spec.z`); in rest-frame mode they sit at
 the rest wavelengths.
+
+---
+
+(logarithmic-y-axes)=
+## Logarithmic y-axes
+
+Every plotting function takes a `y_scale` argument: `"linear"` (the
+default, unchanged behaviour) or `"log"`, which switches the y-axis to
+decade ticks — 10⁻², 10⁻¹, 10⁰ and so on. A log flux axis is the quickest
+way to see faint lines such as [O III] λ4363 alongside a bright [O III]
+λ5007 without cropping the panel.
+
+```python
+fig = jwspecfit.plot_fit(result, y_scale="log", save_path="fit_log.pdf")
+fig = jwspecfit.plot_fit_interactive(result, y_scale="log")
+fig = jwspecfit.plot_spectrum_interactive("spectrum.fits", z=6.0, y_scale="log")
+fig, axes = jwspecfit.plot_2d_1d("target.spec.fits", z=6.0, y_scale="log")
+
+zres.plot(y_scale="log")                 # spectrum panel of the z scan
+dla_result.plot(y_scale="log")           # DLA fit panel
+
+jwspecmcmc.plot_corner(mcmc, y_scale="log")          # diagonal marginals
+jwspecmcmc.plot_traces(mcmc, y_scale="log")
+jwspecmcmc.plot_flux_posterior(mcmc, "OIII_5007", y_scale="log")
+```
+
+A log axis cannot represent zero or negative values, so on the spectral
+plots `y_scale="log"` also:
+
+- replaces the lower y-limit with a positive one, taken from the 5th
+  percentile of the positive plotted values and floored at four decades
+  below the top of the panel, so near-zero noise pixels don't stretch the
+  axis over empty decades. The upper limit is unchanged;
+- omits the `y = 0` reference line (`show_zero` in
+  `plot_spectrum_interactive`, the dashed zero line in `plot_2d_1d`);
+- leaves **residual panels linear** — residuals are signed, so a log
+  residual axis would hide half the information.
+
+Anything outside those limits is simply clipped from view; no data is
+modified. Passing anything other than `"linear"` or `"log"` raises
+`ValueError`.
 
 ---
 

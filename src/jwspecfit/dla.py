@@ -552,6 +552,7 @@ class DLAResult:
         ax: Any = None,
         show_residuals: bool = True,
         flux_unit: str = "fnu",
+        y_scale: str = "linear",
         **kwargs: Any,
     ) -> Any:
         """Plot the DLA fit over the data.
@@ -567,6 +568,12 @@ class DLAResult:
         flux_unit : str
             ``"fnu"`` for F_nu (default, same units as input) or
             ``"flam"`` for F_lambda (converted via F_lam = F_nu * c / lam^2).
+        y_scale : {"linear", "log"}
+            Scaling of the flux axis on the main panel (default
+            ``"linear"``).  ``"log"`` draws decade ticks (10⁻², 10⁻¹,
+            10⁰ …) and replaces the lower limit with a positive one,
+            since a log axis cannot show zero or negative flux.  The
+            residual panel is always linear (residuals are signed).
         **kwargs
             Passed to the data plot (e.g. ``color``, ``alpha``).
 
@@ -576,6 +583,10 @@ class DLAResult:
             The figure object.
         """
         import matplotlib.pyplot as plt
+
+        from .plotting import _log_ylim, _top_label_y, _validate_y_scale
+
+        y_scale = _validate_y_scale(y_scale)
 
         if show_residuals:
             # constrained layout keeps tidy margins while respecting the
@@ -679,18 +690,29 @@ class DLAResult:
         # Lya marker.
         lya_rest = _LAMBDA_LYA_A
         ax_main.axvline(lya_rest, color="orange", ls=":", alpha=0.5, lw=1)
-        ax_main.text(
-            lya_rest + 5, ax_main.get_ylim()[1] * 0.9,
-            r"Ly$\alpha$", color="orange", fontsize=9,
-        )
 
         # Set y-axis from data, not the error envelope.
         finite = np.isfinite(flux_plot)
-        if finite.any():
+        if y_scale == "log":
+            # A log axis cannot show the (often negative) percentile
+            # lower bound used below, so derive a positive floor.
+            ax_main.set_yscale("log")
+            if finite.any():
+                yhi = float(np.nanpercentile(flux_plot[finite], 98))
+                margin = 0.15 * abs(yhi)
+                ax_main.set_ylim(*_log_ylim(flux_plot[finite], yhi + margin))
+        elif finite.any():
             ylo = float(np.nanpercentile(flux_plot[finite], 2))
             yhi = float(np.nanpercentile(flux_plot[finite], 98))
             margin = 0.15 * max(yhi - ylo, abs(yhi) * 0.1)
             ax_main.set_ylim(ylo - margin, yhi + margin)
+
+        # Label placed after the limits are fixed so it stays in view on
+        # either scale.
+        ax_main.text(
+            lya_rest + 5, _top_label_y(ax_main, 0.9),
+            r"Ly$\alpha$", color="orange", fontsize=9,
+        )
 
         ax_main.set_ylabel(ylabel)
         ax_main.legend(fontsize=9, frameon=False)

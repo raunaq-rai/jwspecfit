@@ -94,10 +94,23 @@ class RedshiftResult:
             f"n_peaks={len(self.peaks)})"
         )
 
-    def plot(self):  # pragma: no cover - thin plotly wrapper
-        """Two-panel diagnostic: Delta chi^2(z) and the spectrum at z_best."""
+    def plot(self, y_scale: str = "linear"):  # pragma: no cover - thin plotly wrapper
+        """Two-panel diagnostic: Delta chi^2(z) and the spectrum at z_best.
+
+        Parameters
+        ----------
+        y_scale : {"linear", "log"}
+            Scaling of the flux axis on the spectrum panel (default
+            ``"linear"``).  ``"log"`` draws decade ticks (10⁻², 10⁻¹,
+            10⁰ …).  The Δχ² panel is always linear — its minimum is
+            zero by construction.
+        """
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
+
+        from .plotting import _validate_y_scale, _yaxis_log_kw
+
+        y_scale = _validate_y_scale(y_scale)
 
         fig = make_subplots(
             rows=2, cols=1, shared_xaxes=False,
@@ -141,7 +154,9 @@ class RedshiftResult:
         fig.update_xaxes(title_text="z", row=1, col=1)
         fig.update_yaxes(title_text="Δχ²", row=1, col=1)
         fig.update_xaxes(title_text="Wavelength [Å]", row=2, col=1)
-        fig.update_yaxes(title_text="Flux [µJy]", row=2, col=1)
+        fig.update_yaxes(
+            title_text="Flux [µJy]", row=2, col=1, **_yaxis_log_kw(y_scale),
+        )
         fig.update_layout(
             template="plotly_white", height=700, width=1000,
             margin=dict(b=80),

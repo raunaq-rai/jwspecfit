@@ -6,6 +6,7 @@ Corner plots, trace plots, and flux posterior histograms.
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import TYPE_CHECKING
 
 import matplotlib.pyplot as plt
@@ -25,6 +26,7 @@ def plot_corner(
     params: list[str] | None = None,
     truths: np.ndarray | None = None,
     quantiles: list[float] | None = None,
+    y_scale: str = "linear",
     **corner_kwargs,
 ) -> Figure:
     """Corner plot of posterior samples.
@@ -40,6 +42,11 @@ def plot_corner(
         True values to mark on the plot.
     quantiles : list of float, optional
         Quantiles for corner (default ``[0.16, 0.5, 0.84]``).
+    y_scale : {"linear", "log"}
+        Scaling of the counts axis on the diagonal 1-D marginal
+        histograms (default ``"linear"``), applied via corner's
+        ``hist_kwargs``.  The off-diagonal panels are 2-D parameter-vs-
+        parameter densities, so their axes are unaffected.
     **corner_kwargs
         Additional keyword arguments passed to :func:`corner.corner`.
 
@@ -48,6 +55,15 @@ def plot_corner(
     matplotlib.figure.Figure
     """
     import corner
+
+    from jwspecfit.plotting import _validate_y_scale
+
+    y_scale = _validate_y_scale(y_scale)
+
+    if y_scale == "log":
+        hist_kwargs = dict(corner_kwargs.pop("hist_kwargs", None) or {})
+        hist_kwargs.setdefault("log", True)
+        corner_kwargs["hist_kwargs"] = hist_kwargs
 
     if quantiles is None:
         quantiles = [0.16, 0.5, 0.84]
@@ -83,15 +99,25 @@ def plot_corner(
         n_free = data.shape[1]
         labels = [f"p{i}" for i in range(n_free)]
 
-    fig = corner.corner(
-        data,
-        labels=labels,
-        truths=truths,
-        quantiles=quantiles,
-        show_titles=True,
-        title_kwargs={"fontsize": 10},
-        **corner_kwargs,
-    )
+    with warnings.catch_warnings():
+        if y_scale == "log":
+            # corner sets the diagonal ylim bottom to 0, which matplotlib
+            # ignores (and warns about) on a log axis — the autoscaled
+            # positive limits it falls back to are what we want anyway.
+            warnings.filterwarnings(
+                "ignore",
+                message=".*non-positive ylim on a log-scaled axis.*",
+                category=UserWarning,
+            )
+        fig = corner.corner(
+            data,
+            labels=labels,
+            truths=truths,
+            quantiles=quantiles,
+            show_titles=True,
+            title_kwargs={"fontsize": 10},
+            **corner_kwargs,
+        )
     return fig
 
 
@@ -100,6 +126,7 @@ def plot_traces(
     *,
     params: list[str] | None = None,
     figsize: tuple[float, float] | None = None,
+    y_scale: str = "linear",
 ) -> Figure:
     """Trace plots of MCMC chains.
 
@@ -111,6 +138,11 @@ def plot_traces(
         Parameter names to plot.  If ``None``, plots all free parameters.
     figsize : tuple, optional
         Figure size.
+    y_scale : {"linear", "log"}
+        Scaling of the parameter axis on every trace panel (default
+        ``"linear"``).  ``"log"`` draws decade ticks (10⁻², 10⁻¹,
+        10⁰ …); non-positive samples (e.g. absorption amplitudes) are
+        not representable and are clipped from view.
 
     Returns
     -------
@@ -121,6 +153,10 @@ def plot_traces(
     ValueError
         If per-chain samples are not available (e.g. nautilus result).
     """
+    from jwspecfit.plotting import _validate_y_scale
+
+    y_scale = _validate_y_scale(y_scale)
+
     if result.chains is None:
         raise ValueError(
             "Trace plots require per-chain samples; the nautilus sampler "
@@ -176,6 +212,8 @@ def plot_traces(
             ax.plot(chains[w, :, ci], alpha=0.2, lw=0.5, color="C0")
         if n_burn > 0:
             ax.axvline(0, color="red", ls="--", lw=0.8, label=f"burn-in={n_burn}")
+        if y_scale == "log":
+            ax.set_yscale("log")
         ax.set_ylabel(label, fontsize=9)
 
     axes[-1].set_xlabel("Step (post burn-in)")
@@ -189,6 +227,7 @@ def plot_flux_posterior(
     *,
     bins: int = 50,
     ax: plt.Axes | None = None,
+    y_scale: str = "linear",
 ) -> plt.Axes:
     """Histogram of the flux posterior for a single line.
 
@@ -202,11 +241,19 @@ def plot_flux_posterior(
         Number of histogram bins.
     ax : matplotlib.axes.Axes, optional
         Axes to plot on.  If ``None``, creates a new figure.
+    y_scale : {"linear", "log"}
+        Scaling of the probability-density axis (default ``"linear"``).
+        ``"log"`` draws decade ticks (10⁻², 10⁻¹, 10⁰ …), which makes
+        the tails of the posterior visible; empty bins are dropped.
 
     Returns
     -------
     matplotlib.axes.Axes
     """
+    from jwspecfit.plotting import _validate_y_scale
+
+    y_scale = _validate_y_scale(y_scale)
+
     if line_name not in result.lines:
         raise KeyError(f"Line '{line_name}' not found in result.")
 
@@ -220,6 +267,9 @@ def plot_flux_posterior(
     ax.axvline(mlr.flux, color="C1", ls="-", lw=1.5, label="Median")
     ax.axvline(mlr.flux - mlr.flux_err[0], color="C1", ls="--", lw=1.0, label="16th pctl")
     ax.axvline(mlr.flux + mlr.flux_err[1], color="C1", ls="--", lw=1.0, label="84th pctl")
+
+    if y_scale == "log":
+        ax.set_yscale("log")
 
     ax.set_xlabel(f"Flux [{line_name}] (erg/s/cm$^2$)")
     ax.set_ylabel("Probability density")
