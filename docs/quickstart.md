@@ -149,7 +149,6 @@ fig.show()
 
 ## Next steps
 
-- Worked notebooks: see `docs/notebooks/`.
 - Full API reference: see each package's **API reference** page
   ({doc}`jwspecfit <api_reference/jwspecfit>`,
   {doc}`jwspecmcmc <api_reference/jwspecmcmc>`,

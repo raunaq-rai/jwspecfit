@@ -28,10 +28,14 @@ Thumbs.db
 docs/_build/
 docs/api_reference/generated/
 
+# Example notebooks (kept locally, pending a rewrite before republishing)
+docs/notebooks/
+
 # Keep FITS data in repo (small test files)
 # !data/*.fits
 # !data/*.npz
 # !data/*.txt
+data/CO_ICF.tar.gz
 
 # Local task tracking / plans / lessons (not version-controlled)
 tasks/

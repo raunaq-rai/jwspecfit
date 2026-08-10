@@ -311,7 +311,8 @@ direct-sum mode (no ICF) follows **Topping et al. (2024)**,
 Usage guides, API reference, and methodology:
 **https://jwspecfit.readthedocs.io/**
 
-Worked examples: [`docs/notebooks/`](docs/notebooks/).
+See the [Quickstart](https://jwspecfit.readthedocs.io/en/latest/quickstart.html)
+for worked examples.
 
 ## Tests
 
