@@ -12,6 +12,7 @@
 [![Tests](https://img.shields.io/badge/tests-pytest-lightgrey.svg)](tests/)
 [![Docs](https://readthedocs.org/projects/jwspecfit/badge/?version=latest)](https://jwspecfit.readthedocs.io/en/latest/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19679793.svg)](https://doi.org/10.5281/zenodo.19679793)
+[![arXiv](https://img.shields.io/badge/arXiv-2608.10063-b31b1b.svg)](https://arxiv.org/abs/2608.10063)
 
 Three packages, one pipeline — from 1-D NIRSpec spectra to element abundances.
 
@@ -367,13 +368,15 @@ references are grouped below by the part of the pipeline they support.
 
 ## Citation
 
-A paper describing `jwspecfit` is **in preparation** (Rai & Roberts-Borsani,
-in prep.) and is expected to be submitted shortly. **This section will be updated with the full
-reference and a bibliographic DOI on submission** — please check back, or watch
-the repository, for the citable paper.
+If you use `jwspecfit` in your research, **please cite the paper**:
 
-Until then, if you use `jwspecfit` in your research **please cite the software
-archive** via its Zenodo DOI.
+> ### 📄 Singh Rai & Roberts-Borsani (2026), [arXiv:2608.10063](https://arxiv.org/abs/2608.10063)
+>
+> *Unveiling and Characterising Ubiquitous Nitrogen Enhancement in
+> 6 ≤ z ≤ 10 Galaxies with JWST Spectroscopy*
+
+You may additionally cite the archived software version used, via its
+Zenodo DOI.
 
 > ### 📖 DOI: [10.5281/zenodo.19679793](https://doi.org/10.5281/zenodo.19679793)
 >
@@ -381,20 +384,28 @@ archive** via its Zenodo DOI.
 
 ### Plain text
 
-> Rai, R. (2026). *jwspecfit: Resolution-aware emission-line fitting,
-> MCMC sampling, and chemical abundances for JWST NIRSpec* (v1.1.7).
-> Zenodo. <https://doi.org/10.5281/zenodo.19679793>
+> Singh Rai, R. & Roberts-Borsani, G. (2026). *Unveiling and Characterising
+> Ubiquitous Nitrogen Enhancement in 6 ≤ z ≤ 10 Galaxies with JWST
+> Spectroscopy*. arXiv e-prints, arXiv:2608.10063.
+> <https://arxiv.org/abs/2608.10063>
 
 ### BibTeX
 
 ```bibtex
-% Companion paper (in preparation) — this entry will be updated on submission.
-@article{rai_jwspecfit_paper,
-  author = {Rai, Raunaq Singh and Roberts-Borsani, Guido},
-  title  = {{jwspecfit}: Emission-line fitting, MCMC sampling, and chemical
-            abundances for JWST NIRSpec spectra},
-  year   = {2026},
-  note   = {in preparation},
+@ARTICLE{rai2026,
+       author = {{Singh Rai}, Raunaq and {Roberts-Borsani}, Guido},
+        title = "{Unveiling and Characterising Ubiquitous Nitrogen Enhancement in $6 \leq z \leq 10$ Galaxies with JWST Spectroscopy}",
+      journal = {arXiv e-prints},
+     keywords = {Astrophysics of Galaxies},
+         year = 2026,
+        month = aug,
+          eid = {arXiv:2608.10063},
+        pages = {arXiv:2608.10063},
+archivePrefix = {arXiv},
+       eprint = {2608.10063},
+ primaryClass = {astro-ph.GA},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2026arXiv260810063S},
+      adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
 
 % Software archive.

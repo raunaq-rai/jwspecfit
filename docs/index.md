@@ -49,6 +49,12 @@ least-squares engine for quick looks, initial guesses, and BIC model
 selection; use `jwspecmcmc` for published results.
 ```
 
+```{note}
+**Citing these packages.** Please cite Singh Rai & Roberts-Borsani (2026),
+[arXiv:2608.10063](https://arxiv.org/abs/2608.10063) — see {doc}`citation`
+for the BibTeX entry.
+```
+
 ---
 
 ## Getting started

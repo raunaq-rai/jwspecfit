@@ -4,6 +4,9 @@ Comprehensive documentation of all equations, algorithms, software
 dependencies, and literature references used across the `jwspecfit`,
 `jwspecmcmc`, and `jwspecabund` packages.
 
+> **Citing these packages:** please cite Singh Rai & Roberts-Borsani (2026),
+> arXiv:2608.10063 — see {doc}`citation` for the BibTeX entry.
+
 ---
 
 ## Software dependencies
@@ -891,6 +894,10 @@ sample-by-sample to preserve correlations.
 ---
 
 ## 4. Full bibliography
+
+### These packages
+
+- Singh Rai, R. & Roberts-Borsani, G. 2026, arXiv:2608.10063 — *Unveiling and Characterising Ubiquitous Nitrogen Enhancement in 6 ≤ z ≤ 10 Galaxies with JWST Spectroscopy*
 
 ### Atomic physics and emissivities
 

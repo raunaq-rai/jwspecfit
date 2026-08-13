@@ -4,6 +4,16 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+- **Citation updated to the published paper.** The companion paper is now on
+  arXiv — Singh Rai & Roberts-Borsani (2026), arXiv:2608.10063, *"Unveiling
+  and Characterising Ubiquitous Nitrogen Enhancement in 6 ≤ z ≤ 10 Galaxies
+  with JWST Spectroscopy"*. It replaces the "in preparation" placeholder in
+  the README, the docs, and `CITATION.cff` (as `preferred-citation`, so
+  GitHub's "Cite this repository" button now returns the paper). The Zenodo
+  software DOI remains available as an additional, version-specific citation.
+
 ## 1.1.7 — 2026-07-23
 
 ### `jwspecabund` — Martinez C/O ionisation-correction factor
