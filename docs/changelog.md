@@ -4,15 +4,66 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
-## Unreleased
+## 1.1.8 — 2026-08-14
+
+### Citation
 
 - **Citation updated to the published paper.** The companion paper is now on
-  arXiv — Singh Rai & Roberts-Borsani (2026), arXiv:2608.10063, *"Unveiling
-  and Characterising Ubiquitous Nitrogen Enhancement in 6 ≤ z ≤ 10 Galaxies
-  with JWST Spectroscopy"*. It replaces the "in preparation" placeholder in
-  the README, the docs, and `CITATION.cff` (as `preferred-citation`, so
-  GitHub's "Cite this repository" button now returns the paper). The Zenodo
-  software DOI remains available as an additional, version-specific citation.
+  arXiv and indexed on ADS — Singh Rai & Roberts-Borsani (2026),
+  arXiv:2608.10063, *"Unveiling and Characterising Ubiquitous Nitrogen
+  Enhancement in 6 ≤ z ≤ 10 Galaxies with JWST Spectroscopy"*. It replaces
+  the "in preparation" placeholder in the README, the docs, and
+  `CITATION.cff` (as `preferred-citation`, so GitHub's "Cite this
+  repository" button now returns the paper).
+- **The separate software citation has been dropped.** The paper is the only
+  reference for `jwspecfit`: the `@software` BibTeX entry, the DOI badge and
+  the version-pinning guidance have been removed from the README,
+  `docs/citation.md` and `CITATION.cff`.
+
+### `jwspecabund` — strong-line ratios
+
+- **R23 now uses the [O III] λ4959 + λ5007 doublet sum**, as Sanders et al.
+  (2025) Eq. 3 defines it; `compute_line_ratios` previously built the
+  numerator from λ5007 alone. log R23 was underestimated by 0.09–0.12 dex,
+  and because R23 carries the smallest calibration scatter of the four
+  ratios the bias propagated efficiently into the strong-line metallicity —
+  0.1–0.4 dex too low on the rising branch. The measured λ4959 is used when
+  present and above the SNR cut, otherwise it is inferred from λ5007.
+
+### `jwspecabund` — O III] λ1666 temperature
+
+- **The λ1666 diagnostic now measures what it claims to.** It was inverting
+  the λ2321 emissivity curve, because PyNEB's default 5-level O III atom
+  does not reach level 6; the λ1666 atom is now built against the Tayal &
+  Zatsarinny (2017) collision data. The switch is scoped to that atom, so
+  the λ4363 temperature and every other calculation keep the SSB14 default
+  and existing results are bit-identical. Expect a ~400 K (~2.4%)
+  atomic-data systematic on any λ1666 temperature.
+- **880× faster λ1666 solve.** Passing `NLevels=6` explicitly stops PyNEB
+  re-interpolating the full 202-level collision array on every emissivity
+  call: 8.4 ms per solve instead of 15–25 s.
+- **The λ1666 cross-check is now a point estimate**, labelled "point
+  estimate, not adopted", rather than carrying its own uncertainty
+  propagation — it is a sanity check on the adopted λ4363 temperature, not
+  a second measurement. This removes a redundant second direct run in
+  `method="auto"` and restores the previous runtime.
+- **Fixed a `TypeError`** raised whenever both λ4363 and λ1666 were detected
+  in `method="auto"`.
+
+### Plotting
+
+- **New `y_scale` argument on every plotting entry point** — `"linear"`
+  (default, unchanged) or `"log"` for decade-tick y-axes. Log mode replaces
+  the lower limit with a positive one, omits the y = 0 reference lines, and
+  leaves signed residual panels linear. Covers `plot_fit`,
+  `plot_fit_interactive`, `plot_spectrum_interactive`, `plot_2d_1d`,
+  `DLAResult.plot`, `RedshiftResult.plot`, `plot_corner`, `plot_traces` and
+  `plot_flux_posterior`.
+
+### Repository
+
+- The example notebooks under `docs/notebooks/` have been untracked pending
+  a rewrite.
 
 ## 1.1.7 — 2026-07-23
 

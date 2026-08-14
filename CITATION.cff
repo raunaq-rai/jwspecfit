@@ -2,8 +2,8 @@ cff-version: 1.2.0
 message: >
   If you use this software in a publication, please cite the paper
   (Singh Rai & Roberts-Borsani 2026, arXiv:2608.10063) given under
-  "preferred-citation" below.  The software archive itself may be cited
-  additionally via its Zenodo DOI, using the metadata below.
+  "preferred-citation" below.  That paper is the only reference for this
+  software; there is no separate software citation.
 title: "jwspecfit: resolution-aware emission-line fitting, MCMC sampling, and chemical abundances for JWST NIRSpec"
 abstract: >
   jwspecfit is a coordinated suite of three Python packages for the
@@ -21,8 +21,8 @@ authors:
     given-names: "Raunaq"
     affiliation: "UCL Department of Physics & Astronomy"
     email: "raunaq.rai.25@ucl.ac.uk"
-version: "1.1.7"
-date-released: "2026-07-23"
+version: "1.1.8"
+date-released: "2026-08-14"
 license: MIT
 repository-code: "https://github.com/raunaq-rai/jwspecfit"
 url: "https://jwspecfit.readthedocs.io/"
@@ -36,7 +36,6 @@ keywords:
   - chemical abundances
   - high-redshift galaxies
   - Python
-doi: "10.5281/zenodo.19679793"
 preferred-citation:
   type: article
   authors:

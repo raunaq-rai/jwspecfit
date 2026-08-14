@@ -6,13 +6,11 @@ If you use `jwspecfit` in your research, **please cite the paper**:
 >
 > *Unveiling and Characterising Ubiquitous Nitrogen Enhancement in
 > 6 ≤ z ≤ 10 Galaxies with JWST Spectroscopy*
-
-You may additionally cite the archived software version used, via its Zenodo
-DOI, in whichever format your reference manager or journal prefers.
-
-> ## 📖 DOI: [10.5281/zenodo.19679793](https://doi.org/10.5281/zenodo.19679793)
 >
-> Concept DOI — always resolves to the latest Zenodo-archived release.
+> [ADS record](https://ui.adsabs.harvard.edu/abs/2026arXiv260810063S)
+
+This paper is the reference for the software — there is no separate
+software citation.
 
 ## Plain text
 
@@ -39,37 +37,17 @@ archivePrefix = {arXiv},
        adsurl = {https://ui.adsabs.harvard.edu/abs/2026arXiv260810063S},
       adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
-
-% Software archive.
-@software{rai_jwspecfit,
-  author       = {Rai, Raunaq},
-  title        = {{jwspecfit}: Resolution-aware emission-line fitting,
-                  MCMC sampling, and chemical abundances for JWST NIRSpec},
-  year         = {2026},
-  version      = {1.1.7},
-  publisher    = {Zenodo},
-  doi          = {10.5281/zenodo.19679793},
-  url          = {https://doi.org/10.5281/zenodo.19679793},
-}
 ```
 
 ## Other formats
 
-APA · Chicago · IEEE · Harvard · MLA · CSL-JSON · DataCite XML are all
-available from the
-[Zenodo record page](https://zenodo.org/records/19679793) — click the
-**Export** panel on the right-hand side.
+APA · Chicago · IEEE · Harvard · MLA · CSL-JSON · AASTeX are all available
+from the
+[ADS export panel](https://ui.adsabs.harvard.edu/abs/2026arXiv260810063S/exportcitation).
 
 GitHub's **"Cite this repository"** button on the repository page reads
 [`CITATION.cff`](https://github.com/raunaq-rai/jwspecfit/blob/main/CITATION.cff)
-and produces APA / BibTeX on the fly.
-
-## Pinning a specific version
-
-The concept DOI above always points to the latest release. If a paper
-needs to cite the *exact* code version used for reproducibility, pick
-the per-version DOI from the **Versions** list on the Zenodo record
-page.
+and returns the same paper.
 
 ## Citing the methods
 
