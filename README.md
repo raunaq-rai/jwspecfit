@@ -369,19 +369,19 @@ references are grouped below by the part of the pipeline they support.
 
 If you use `jwspecfit` in your research, **please cite the paper**:
 
-> ### 📄 Singh Rai & Roberts-Borsani (2026), [arXiv:2608.10063](https://arxiv.org/abs/2608.10063)
+> ### 📄 Rai & Roberts-Borsani (2026), [arXiv:2608.10063](https://arxiv.org/abs/2608.10063)
 >
 > *Unveiling and Characterising Ubiquitous Nitrogen Enhancement in
 > 6 ≤ z ≤ 10 Galaxies with JWST Spectroscopy*
 >
-> [ADS record](https://ui.adsabs.harvard.edu/abs/2026arXiv260810063S)
+> [ADS record](https://ui.adsabs.harvard.edu/abs/2026arXiv260810063R)
 
 This paper is the reference for the software — there is no separate
 software citation.
 
 ### Plain text
 
-> Singh Rai, R. & Roberts-Borsani, G. (2026). *Unveiling and Characterising
+> Rai, R. S. & Roberts-Borsani, G. (2026). *Unveiling and Characterising
 > Ubiquitous Nitrogen Enhancement in 6 ≤ z ≤ 10 Galaxies with JWST
 > Spectroscopy*. arXiv e-prints, arXiv:2608.10063.
 > <https://arxiv.org/abs/2608.10063>
@@ -390,7 +390,7 @@ software citation.
 
 ```bibtex
 @ARTICLE{rai2026,
-       author = {{Singh Rai}, Raunaq and {Roberts-Borsani}, Guido},
+       author = {{Rai}, Raunaq Singh and {Roberts-Borsani}, Guido},
         title = "{Unveiling and Characterising Ubiquitous Nitrogen Enhancement in $6 \leq z \leq 10$ Galaxies with JWST Spectroscopy}",
       journal = {arXiv e-prints},
      keywords = {Astrophysics of Galaxies},
@@ -398,10 +398,11 @@ software citation.
         month = aug,
           eid = {arXiv:2608.10063},
         pages = {arXiv:2608.10063},
+          doi = {10.48550/arXiv.2608.10063},
 archivePrefix = {arXiv},
        eprint = {2608.10063},
  primaryClass = {astro-ph.GA},
-       adsurl = {https://ui.adsabs.harvard.edu/abs/2026arXiv260810063S},
+       adsurl = {https://ui.adsabs.harvard.edu/abs/2026arXiv260810063R},
       adsnote = {Provided by the SAO/NASA Astrophysics Data System}
 }
 ```
@@ -410,7 +411,7 @@ archivePrefix = {arXiv},
 
 APA · Chicago · IEEE · Harvard · MLA · CSL-JSON · AASTeX are all available
 from the
-[ADS export panel](https://ui.adsabs.harvard.edu/abs/2026arXiv260810063S/exportcitation).
+[ADS export panel](https://ui.adsabs.harvard.edu/abs/2026arXiv260810063R/exportcitation).
 
 GitHub's **"Cite this repository"** button (top-right of the repo page)
 reads [`CITATION.cff`](CITATION.cff) and returns the same paper.

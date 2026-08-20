@@ -9,7 +9,7 @@ history on GitHub is the authoritative source.
 ### Citation
 
 - **Citation updated to the published paper.** The companion paper is now on
-  arXiv and indexed on ADS — Singh Rai & Roberts-Borsani (2026),
+  arXiv and indexed on ADS — Rai & Roberts-Borsani (2026),
   arXiv:2608.10063, *"Unveiling and Characterising Ubiquitous Nitrogen
   Enhancement in 6 ≤ z ≤ 10 Galaxies with JWST Spectroscopy"*. It replaces
   the "in preparation" placeholder in the README, the docs, and
