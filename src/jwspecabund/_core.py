@@ -850,12 +850,20 @@ def _compute_CO_uv(
     Te: float,
     ne: float,
     icf: float | None,
+    Te_C: float | None = None,
+    ne_C: float | None = None,
 ) -> tuple[float, str] | None:
     """log(C/O) from the UV lines alone, or ``None`` if unavailable.
 
     See :func:`~jwspecabund.direct.compute_CppOpp_uv`.  *icf* is the
     C2+/O2+ -> C/O correction; pass ``None`` when none is applicable, in
     which case the raw ionic ratio is returned and the note says so.
+
+    *Te_C* and *ne_C* place C2+ in the intermediate zone, exactly as
+    :func:`compute_ionic_abundances` does for the adopted C/O.  Without
+    them the comparison between the two C/O routes would be dominated by
+    the zone choice (0.126 dex on a real stack) rather than by the thing
+    being compared, the oxygen tracer (0.031 dex).
     """
     from .direct import compute_CppOpp_uv
 
@@ -864,6 +872,7 @@ def _compute_CO_uv(
             fluxes.get("CIII]_1907", 0.0), fluxes.get("CIII]", 0.0), Te, ne,
             flux_1661=fluxes.get("OIII_1661", 0.0),
             flux_1666=fluxes.get("OIII_1666", 0.0),
+            Te_C=Te_C, ne_C=ne_C,
         )
     except (ValueError, RuntimeError, KeyError):
         return None
@@ -2064,7 +2073,9 @@ def _run_direct(
                 mc_fluxes, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
                 Te_int=Te_i, ne_Opp=ne_Opp_i,
             )
-            _cu = _compute_CO_uv(mc_fluxes, Te_h, ne_Opp_i, _co_icf_pt)
+            _cu = _compute_CO_uv(mc_fluxes, Te_h, ne_Opp_i, _co_icf_pt,
+                                 Te_C=(Te_i if Te_i is not None else Te_h),
+                                 ne_C=(ne_mid if ne_mid is not None else ne_Opp_i))
             CO_uv_mc.append(_cu[0] if _cu is not None else np.nan)
 
             # Compute Z_Zsun for this MC iteration.
@@ -2254,7 +2265,9 @@ def _run_direct(
 
     # --- Pure-UV C/O, reported alongside the adopted C/O ---
     _co_icf = totals.get("CO_icf_value") if totals.get("CO_method") == "martinez25" else None
-    _co_uv = _compute_CO_uv(fluxes, Te_high, ne_Opp, _co_icf)
+    _co_uv = _compute_CO_uv(fluxes, Te_high, ne_Opp, _co_icf,
+                            Te_C=(Te_int if Te_int is not None else Te_high),
+                            ne_C=(ne_mid if ne_mid is not None else ne_Opp))
     _co_uv_err = None
     if _co_uv is not None:
         arr = np.array(CO_uv_mc, dtype=float)
@@ -2636,7 +2649,9 @@ def _run_direct_mcmc(
                 sample, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
                 Te_int=Te_i, ne_Opp=ne_Opp_i,
             )
-            _cu = _compute_CO_uv(sample, Te_h, ne_Opp_i, _co_icf_pt)
+            _cu = _compute_CO_uv(sample, Te_h, ne_Opp_i, _co_icf_pt,
+                                 Te_C=(Te_i if Te_i is not None else Te_h),
+                                 ne_C=(ne_mid if ne_mid is not None else ne_Opp_i))
             CO_uv_post.append(_cu[0] if _cu is not None else np.nan)
 
             # Z_Zsun for this sample.
@@ -2828,7 +2843,9 @@ def _run_direct_mcmc(
 
     # --- Pure-UV C/O, reported alongside the adopted C/O ---
     _co_uv = (
-        _compute_CO_uv(med_fluxes, Te_high_pt, ne_Opp, _co_icf_pt)
+        _compute_CO_uv(med_fluxes, Te_high_pt, ne_Opp, _co_icf_pt,
+                       Te_C=(Te_int_pt if Te_int_pt is not None else Te_high_pt),
+                       ne_C=(ne_mid if ne_mid is not None else ne_Opp))
         if np.isfinite(Te_high_pt) else None
     )
     _co_uv_err = None

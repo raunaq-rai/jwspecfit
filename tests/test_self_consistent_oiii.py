@@ -369,6 +369,60 @@ class TestUVCarbonOxygen:
         assert only_1661 == pytest.approx(both, rel=1e-6)
         assert "1666" in note
 
+    def test_carbon_zone_is_separable(self):
+        """C2+ must be evaluatable in its own zone, not forced onto T_e(O2+).
+
+        Regression: the adopted C/O puts C2+ at the intermediate-zone
+        temperature.  Evaluating the UV C/O at T_e(O2+) instead made the two
+        routes differ by the zone choice (0.126 dex on a real stack) rather
+        than by the oxygen tracer being compared (0.031 dex).
+        """
+        from jwspecabund import compute_CppOpp_uv
+        from jwspecabund.direct import Te_int_from_high
+
+        Te_hi, ne = 16300.0, 2.7e4
+        Te_int = Te_int_from_high(Te_hi)
+        f = self._uv_fluxes(Te_hi, ne, 0.2)
+        same, _ = compute_CppOpp_uv(
+            f["CIII]_1907"], f["CIII]"], Te_hi, ne,
+            flux_1661=f["OIII_1661"], flux_1666=f["OIII_1666"])
+        zoned, note = compute_CppOpp_uv(
+            f["CIII]_1907"], f["CIII]"], Te_hi, ne,
+            flux_1661=f["OIII_1661"], flux_1666=f["OIII_1666"],
+            Te_C=Te_int, ne_C=ne)
+        assert "C2+ at Te=" in note
+        # Cooler carbon zone -> larger inferred C2+ -> larger C/O.
+        assert zoned > same
+        assert 0.05 < np.log10(zoned / same) < 0.30
+
+    def test_pipeline_uses_the_carbon_zone(self):
+        """compute_abundances must hand the UV C/O the intermediate zone."""
+        from jwspecabund import compute_CppOpp_uv
+
+        result = _mock_result(15000, 1e5)
+        import pyneb as pn
+        o3, c3 = _get_oiii_atom(), pn.Atom("C", 3)
+        Te, ne = 15000.0, 1e5
+        scale = result.lines["OIII_5007"].flux / o3.getEmissivity(Te, ne, wave=5007)
+        for name, kw in (("OIII_1661", dict(lev_i=6, lev_j=2)),
+                         ("OIII_1666", dict(lev_i=6, lev_j=3))):
+            v = scale * o3.getEmissivity(Te, ne, **kw)
+            result.lines[name] = _Line(v, 0.05 * v)
+        for name, w in (("CIII]_1907", 1907), ("CIII]", 1909)):
+            v = 0.2 * scale * c3.getEmissivity(Te, ne, wave=w)
+            result.lines[name] = _Line(v, 0.05 * v)
+
+        res = TestComputeAbundancesIntegration._run(result)
+        uv = res.alt_results["CO_uv"]
+        # Reproduce it by hand at the zone the pipeline reports.
+        f = {n: lr.flux for n, lr in result.lines.items()}
+        expect, _ = compute_CppOpp_uv(
+            f["CIII]_1907"], f["CIII]"], res.Te_high, res.ne_Opp,
+            flux_1661=f["OIII_1661"], flux_1666=f["OIII_1666"],
+            Te_C=res.Te_mid, ne_C=res.ne_mid or res.ne_Opp)
+        icf = (res.icf_values or {}).get("C/O", {}).get("icf", 1.0)
+        assert uv.CO == pytest.approx(np.log10(icf * expect), abs=0.08)
+
     def test_needs_both_ions(self):
         from jwspecabund import compute_CppOpp_uv
 

@@ -619,10 +619,16 @@ density of §3.3).  And λ1661/λ1666 are ~20× fainter than λ5007.
 Both ions are evaluated at a single T_e and n_e — the O²⁺-zone values —
 because the diagnostic's validity rests on them being co-spatial.
 
+C²⁺ is evaluated at the **intermediate-zone** temperature and density,
+exactly as `compute_ionic_abundances` does for the adopted C/O — not at
+T_e(O²⁺).  Otherwise the difference between the two routes is dominated by
+the zone choice rather than by the oxygen tracer: on a stacked spectrum
+that is worth 0.126 dex, against 0.031 dex for the tracer itself.
+
 **Reporting.** This is always computed alongside the adopted C/O when the
-lines are present, as `alt_results["CO_uv"]`, with its own posterior. It
-is not adopted automatically: the two routes can differ by ~0.2 dex, and
-which to trust depends on the λ1661/λ1666 check below.
+lines are present, as `alt_results["CO_uv"]`, with its own posterior.  It
+is not adopted automatically — where they disagree, which to trust depends
+on the λ1661/λ1666 check below.
 
 ### 7.5 O III] 1661/1666 — a free consistency check
 

@@ -19,9 +19,11 @@ history on GitHub is the authoritative source.
   −0.03 dex from n_e = 3×10⁴ → 10³, since C III] λ1907 has a low critical
   density).
 - **It is computed and reported automatically**, with its own posterior, as
-  `alt_results["CO_uv"]` whenever the four lines are present. It is *not*
-  adopted in place of the existing C/O: on a stacked spectrum the two routes
-  differ by ~0.19 dex, and which to trust depends on the check below.
+  `alt_results["CO_uv"]` whenever the four lines are present, and is *not*
+  adopted in place of the existing C/O. C²⁺ is evaluated in the
+  intermediate zone, matching the adopted C/O, so the comparison isolates
+  the oxygen tracer; on three stacked spectra the two routes agree to
+  0.06–0.14 dex (1–2σ).
 - **New `check_oiii_uv_doublet()`, run automatically.** O III] λ1661 and
   λ1666 decay from the same upper level, so their ratio is a pure branching
   ratio — 0.402, with no T_e, n_e or abundance dependence. A departure is

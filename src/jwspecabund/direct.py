@@ -1292,6 +1292,8 @@ def compute_CppOpp_uv(
     *,
     flux_1661: float = 0.0,
     flux_1666: float = 0.0,
+    Te_C: float | None = None,
+    ne_C: float | None = None,
     coll_file: str = OIII_1666_COLL_FILE,
 ) -> tuple[float, str]:
     """C2+/O2+ from the UV lines alone: C III] 1907,1909 / O III] 1661,1666.
@@ -1322,11 +1324,19 @@ def compute_CppOpp_uv(
         then scaled to the doublet sum using the modelled ratio at
         (*Te*, *ne*), which is density-sensitive.
     Te : float
-        Electron temperature in K for both ions.  This diagnostic treats
-        C2+ and O2+ as co-spatial, so a single temperature is used --
-        conventionally T_e(O2+).
+        Electron temperature in K for the O2+ zone.
     ne : float
-        Electron density in cm^-3 for both ions.
+        Electron density in cm^-3 for the O2+ zone.
+    Te_C, ne_C : float or None
+        Conditions for C2+.  ``None`` (the default) puts C2+ in the same
+        zone as O2+, which is the convention in the papers above.  Pass the
+        intermediate-zone values to match the zone assignment the rest of
+        this package uses (:func:`Te_int_from_high`), which is what
+        :func:`~jwspecabund.compute_abundances` does -- otherwise the
+        difference from the optical-oxygen C/O is dominated by the zone
+        choice rather than by the oxygen tracer.  On a real stacked
+        spectrum that distinction is worth 0.126 dex, against 0.031 dex for
+        the tracer itself.
     flux_1661, flux_1666 : float
         Dust-corrected O III] fluxes.  At least one must be positive; a
         missing component is filled in from the fixed branching ratio
@@ -1352,12 +1362,14 @@ def compute_CppOpp_uv(
 
     e1661 = o3.getEmissivity(Te, ne, lev_i=6, lev_j=2)
     e1666 = o3.getEmissivity(Te, ne, lev_i=6, lev_j=3)
-    e1907 = c3.getEmissivity(Te, ne, wave=1907)
-    e1909 = c3.getEmissivity(Te, ne, wave=1909)
+    TeC = Te if Te_C is None else Te_C
+    neC = ne if ne_C is None else ne_C
+    e1907 = c3.getEmissivity(TeC, neC, wave=1907)
+    e1909 = c3.getEmissivity(TeC, neC, wave=1909)
     if min(e1661, e1666, e1907, e1909) <= 0:
         raise ValueError(
-            f"Non-positive O III]/C III] emissivity at Te={Te:.0f} K, "
-            f"ne={ne:.3g} cm^-3."
+            f"Non-positive O III]/C III] emissivity at Te={Te:.0f}/{TeC:.0f} K, "
+            f"ne={ne:.3g}/{neC:.3g} cm^-3."
         )
 
     ratio = oiii_uv_branching_ratio(coll_file)
@@ -1374,6 +1386,8 @@ def compute_CppOpp_uv(
     else:
         raise ValueError("Neither O III] 1661 nor 1666 is available.")
 
+    if Te_C is not None or ne_C is not None:
+        notes.append(f"C2+ at Te={TeC:.0f} K, ne={neC:.3g} cm^-3")
     if flux_1907 > 0 and flux_1909 > 0:
         c_sum = flux_1907 + flux_1909
         notes.append("C III] 1907+1909 measured")
