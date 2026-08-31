@@ -13,6 +13,7 @@ References
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -45,18 +46,28 @@ def _get_pyneb():
 #: lambda4363 path untouched at negligible cost in consistency.
 OIII_1666_COLL_FILE = "o_iii_coll_TZ17.dat"
 
-_OIII_1666_ATOM = None
+_OIII_ATOMS: dict[str, Any] = {}
 
 
-def _get_oiii_atom_1666():
+def _get_oiii_atom(coll_file: str = OIII_1666_COLL_FILE):
     """Return a 6-level O III atom capable of evaluating O III] 1666.
 
-    Builds the atom against :data:`OIII_1666_COLL_FILE`, then restores
-    PyNEB's global collision-file selection so that every other calculation
-    in the package (notably :func:`compute_Te_OIII`, which uses lambda4363)
-    keeps the SSB14 default.  PyNEB resolves data files at construction
-    time, so the returned instance retains TZ17 after the restore.  The
-    atom is cached because the switch is global state and must happen once.
+    Builds the atom against *coll_file*, then restores PyNEB's global
+    collision-file selection so that every other calculation in the package
+    (notably :func:`compute_Te_OIII`, which uses lambda4363) keeps the SSB14
+    default.  PyNEB resolves data files at construction time, so the returned
+    instance retains *coll_file* after the restore.  Atoms are cached per
+    collision file because the switch is global state and must happen once.
+
+    Parameters
+    ----------
+    coll_file : str
+        PyNEB O III collision-strength file.  Must tabulate at least 6
+        levels; ``o_iii_coll_SSB14.dat`` (PyNEB's default) does not.
+        Valid 6-level choices are ``o_iii_coll_TZ17.dat`` (the package
+        default, :data:`OIII_1666_COLL_FILE`), ``o_iii_coll_AK99.dat``
+        (Aggarwal & Keenan 1999, used by Hsiao+2026) and
+        ``o_iii_coll_MBZ20.dat``.
 
     Returns
     -------
@@ -69,14 +80,14 @@ def _get_oiii_atom_1666():
         If the resulting atom still has fewer than 6 levels, which would
         silently mis-identify the lambda1666 transition.
     """
-    global _OIII_1666_ATOM
-    if _OIII_1666_ATOM is not None:
-        return _OIII_1666_ATOM
+    cached = _OIII_ATOMS.get(coll_file)
+    if cached is not None:
+        return cached
 
     pn = _get_pyneb()
     prev = pn.atomicData.getDataFile("O3", "coll")
     try:
-        pn.atomicData.setDataFile(OIII_1666_COLL_FILE)
+        pn.atomicData.setDataFile(coll_file)
         # NLevels=6 is a *performance* constraint, not a physical one: the
         # atom file caps the model at 6 levels either way, but without this
         # PyNEB re-interpolates TZ17's full 202-level collision array on
@@ -90,12 +101,20 @@ def _get_oiii_atom_1666():
 
     if atom.NLevels < 6:
         raise RuntimeError(
-            f"O III collision data {OIII_1666_COLL_FILE!r} yielded "
+            f"O III collision data {coll_file!r} yielded "
             f"{atom.NLevels} levels; O III] 1666 (the 6->3 transition) "
             f"needs at least 6."
         )
-    _OIII_1666_ATOM = atom
+    _OIII_ATOMS[coll_file] = atom
     return atom
+
+
+def _get_oiii_atom_1666():
+    """Return the package-default 6-level O III atom (:data:`OIII_1666_COLL_FILE`).
+
+    Thin wrapper kept for backwards compatibility; see :func:`_get_oiii_atom`.
+    """
+    return _get_oiii_atom(OIII_1666_COLL_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -630,6 +649,512 @@ def compute_Te_OIII_1666(
         )
 
     return float(Te)
+
+
+# ---------------------------------------------------------------------------
+# Self-consistent T_e and n_e in the O++ zone (Hsiao et al. 2026)
+# ---------------------------------------------------------------------------
+
+#: Temperature axis of the O III model grid, as ``(log10 T_min, log10 T_max,
+#: n_points)``.  The 50,000 K ceiling is what makes the curve inversion
+#: well-posed: every ratio below is strictly monotonic in T_e at *every*
+#: density on the grid, whereas lambda4363/(lambda5007+lambda4959) turns over
+#: above log T_e ~ 4.9 at n_e > 10^6 cm^-3 and would admit two roots.
+OIII_GRID_LOGTE: tuple[float, float, int] = (3.6, 4.7, 441)
+
+#: Density grid the curve intersection is searched on: Hsiao et al. (2026)
+#: section IV.3 specify log(n_e/cm^-3) = 0-7 with 1,000 steps.
+OIII_GRID_LOGNE: tuple[float, float, int] = (0.0, 7.0, 1000)
+
+#: Density nodes actually evaluated with PyNEB before interpolating up to
+#: :data:`OIII_GRID_LOGNE`.  Calling PyNEB at all 1,000 nodes costs ~12 s;
+#: 141 nodes (0.05 dex) costs ~1.7 s and cubic interpolation in
+#: log-emissivity reproduces the direct build to 3e-7 relative, which leaves
+#: the recovered (T_e, n_e) bit-identical.  Guarded by a test.
+OIII_GRID_LOGNE_NODES: int = 141
+
+_OIII_GRIDS: dict[tuple[str, int], dict[str, Any]] = {}
+
+
+def _oiii_te_ne_grid(
+    coll_file: str = OIII_1666_COLL_FILE,
+    *,
+    n_nodes: int = OIII_GRID_LOGNE_NODES,
+) -> dict[str, Any]:
+    """Return the cached O III emissivity/ratio grid used by the joint solve.
+
+    Tabulates the lambda1666, lambda4363, lambda5007 and lambda4959
+    emissivities of a *single* 6-level O III atom over
+    :data:`OIII_GRID_LOGTE` x :data:`OIII_GRID_LOGNE`.  Using one atom for
+    all four lines is what makes the solve self-consistent: mixing collision
+    datasets would intersect curves drawn from different atomic physics.
+
+    Parameters
+    ----------
+    coll_file : str
+        O III collision-strength file; see :func:`_get_oiii_atom`.
+    n_nodes : int
+        Number of density nodes evaluated with PyNEB before interpolating
+        onto the full :data:`OIII_GRID_LOGNE` grid.  Defaults to
+        :data:`OIII_GRID_LOGNE_NODES`; pass ``OIII_GRID_LOGNE[2]`` to build
+        the grid directly with no interpolation.
+
+    Returns
+    -------
+    dict
+        ``logTe`` (n_T,), ``logne`` (n_n,), ``log_emis`` (dict of (n_T, n_n)
+        arrays keyed by line name) and the three log10 line-ratio grids
+        ``log_R_4363``, ``log_R_1666_4363`` and ``log_R_5007_1666``.
+
+    Notes
+    -----
+    The grid is built lazily on first use and cached per
+    ``(coll_file, n_nodes)`` for the lifetime of the process.
+    """
+    key = (coll_file, int(n_nodes))
+    cached = _OIII_GRIDS.get(key)
+    if cached is not None:
+        return cached
+
+    from scipy.interpolate import interp1d
+
+    atom = _get_oiii_atom(coll_file)
+
+    logTe = np.linspace(*OIII_GRID_LOGTE)
+    logne = np.linspace(*OIII_GRID_LOGNE)
+    Te = 10.0 ** logTe
+
+    # PyNEB is called with a scalar density and the full temperature vector:
+    # passing both as arrays makes it build an outer product internally and
+    # blows up memory well before the grid is covered.
+    nodes = np.linspace(OIII_GRID_LOGNE[0], OIII_GRID_LOGNE[1], int(n_nodes))
+    _kwargs = {
+        "1666": {"lev_i": 6, "lev_j": 3},
+        "4363": {"wave": 4363},
+        "5007": {"wave": 5007},
+        "4959": {"wave": 4959},
+    }
+    logger.info(
+        "Building O III T_e-n_e grid (%s, %d density nodes); "
+        "this takes a few seconds and is cached.", coll_file, len(nodes),
+    )
+    raw = {k: np.empty((logTe.size, nodes.size)) for k in _kwargs}
+    for j, ln in enumerate(nodes):
+        ne = 10.0 ** ln
+        for name, kw in _kwargs.items():
+            raw[name][:, j] = atom.getEmissivity(Te, ne, **kw)
+
+    if nodes.size == logne.size and np.allclose(nodes, logne):
+        log_emis = {k: np.log10(v) for k, v in raw.items()}
+    else:
+        # Interpolate in log-emissivity: the emissivities span many decades
+        # but are near-linear in log-log, so cubic interpolation here is far
+        # more accurate than the same spline applied to the raw values.
+        log_emis = {
+            k: interp1d(nodes, np.log10(v), axis=1, kind="cubic")(logne)
+            for k, v in raw.items()
+        }
+
+    e1666 = 10.0 ** log_emis["1666"]
+    e4363 = 10.0 ** log_emis["4363"]
+    e_neb = 10.0 ** log_emis["5007"] + 10.0 ** log_emis["4959"]
+
+    grid = {
+        "coll_file": coll_file,
+        "logTe": logTe,
+        "logne": logne,
+        "log_emis": log_emis,
+        # lambda4363/(lambda5007+lambda4959) -- the classical auroral ratio.
+        # Hsiao et al. write it the other way up; the constraint is the same.
+        "log_R_4363": np.log10(e4363 / e_neb),
+        # O III] lambda1666/[O III] lambda4363 -- the UV/auroral ratio that
+        # breaks the T_e-n_e degeneracy.
+        "log_R_1666_4363": np.log10(e1666 / e4363),
+        # [O III] lambda5007/O III] lambda1666 -- shown by Hsiao et al. but
+        # not independent: it is the ratio of the other two.
+        "log_R_5007_1666": np.log10(e_neb / e1666),
+    }
+    _OIII_GRIDS[key] = grid
+    return grid
+
+
+def _te_curve(log_ratio: np.ndarray, log_obs: float, logTe: np.ndarray) -> np.ndarray:
+    """Invert a monotone-in-T_e ratio grid for log T_e at every density.
+
+    Parameters
+    ----------
+    log_ratio : ndarray, shape (n_T, n_n)
+        log10 model ratio, strictly increasing down the temperature axis.
+    log_obs : float
+        log10 of the observed ratio.
+    logTe : ndarray, shape (n_T,)
+        Temperature axis.
+
+    Returns
+    -------
+    ndarray, shape (n_n,)
+        log T_e reproducing *log_obs* at each density, or NaN where the
+        observed ratio lies outside the model range at that density.
+    """
+    n_T = log_ratio.shape[0]
+    idx = np.sum(log_ratio < log_obs, axis=0)
+    out = np.full(log_ratio.shape[1], np.nan)
+    j = np.flatnonzero((idx > 0) & (idx < n_T))
+    if j.size == 0:
+        return out
+    i1 = idx[j]
+    i0 = i1 - 1
+    y0 = log_ratio[i0, j]
+    y1 = log_ratio[i1, j]
+    w = (log_obs - y0) / (y1 - y0)
+    out[j] = logTe[i0] + w * (logTe[i1] - logTe[i0])
+    return out
+
+
+def _intersect_curves(
+    logne: np.ndarray, T1: np.ndarray, T2: np.ndarray,
+) -> tuple[float, float, bool] | None:
+    """Locate the crossing of two T_e(n_e) curves.
+
+    Follows Hsiao et al. (2026): the solution is the intersection of the
+    curves, and "when no converged result is found, we determine the best
+    n_e and T_e as the closest values".  The crossing is taken at the
+    *global* minimum of ``|T1 - T2|`` rather than the first sign change:
+    where the curves touch tangentially, or where sub-grid wiggles
+    manufacture a spurious crossing in the density-insensitive regime, the
+    first sign change picks the wrong root.
+
+    Returns
+    -------
+    tuple or None
+        ``(log n_e, log T_e, converged)``, or ``None`` if neither ratio is
+        reproducible anywhere on the grid.  *converged* is ``True`` only for
+        a genuine crossing; ``False`` marks the "closest values" fallback.
+    """
+    d = T1 - T2
+    ok = np.isfinite(d)
+    idx = np.flatnonzero(ok)
+    if idx.size == 0:
+        return None
+
+    k = int(idx[np.argmin(np.abs(d[idx]))])
+    if d[k] == 0.0:
+        return float(logne[k]), float(T1[k]), True
+
+    for a, b in ((k - 1, k), (k, k + 1)):
+        if a < 0 or b >= d.size or not (ok[a] and ok[b]):
+            continue
+        if d[a] * d[b] < 0:
+            w = d[a] / (d[a] - d[b])
+            return (
+                float(logne[a] + w * (logne[b] - logne[a])),
+                float(T1[a] + w * (T1[b] - T1[a])),
+                True,
+            )
+
+    return float(logne[k]), float(T1[k]), False
+
+
+def _ne_sensitivity_floor(
+    grid: dict[str, Any], log_Te: float, sigma_log_ratio: float,
+) -> float:
+    """Lowest log n_e the data can actually distinguish from zero density.
+
+    [O III] lambda4363/(lambda5007+lambda4959) is density-flat until
+    lambda5007 starts to be collisionally de-excited, so below some density
+    the observed ratio is consistent with *any* lower density and n_e is
+    bounded only from above.  That threshold is not a fixed number: it
+    depends on how precisely the ratio is measured.  This returns the
+    smallest grid density at which the model ratio has moved away from its
+    low-density limit by more than the measurement error.
+
+    Parameters
+    ----------
+    grid : dict
+        Model grid from :func:`_oiii_te_ne_grid`.
+    log_Te : float
+        log10 of the solution temperature.
+    sigma_log_ratio : float
+        1 sigma error on log10 of the observed auroral/nebular ratio.
+
+    Returns
+    -------
+    float
+        log10(n_e/cm^-3) below which the ratio carries no density
+        information; the top of the grid if it never does.
+    """
+    logTe = grid["logTe"]
+    i = int(np.argmin(np.abs(logTe - log_Te)))
+    row = grid["log_R_4363"][i, :]
+    moved = np.flatnonzero(np.abs(row - row[0]) > max(sigma_log_ratio, 0.0))
+    if moved.size == 0:
+        return float(grid["logne"][-1])
+    return float(grid["logne"][moved[0]])
+
+
+@dataclass
+class SelfConsistentOIII:
+    """Joint O++ temperature and density from UV + optical oxygen lines.
+
+    Output of :func:`compute_Te_ne_OIII`.
+
+    Attributes
+    ----------
+    Te : float
+        T_e(O++) in K at the curve intersection.
+    ne : float
+        n_e(O++) in cm^-3 at the curve intersection.
+    converged : bool
+        ``True`` if the T_e(n_e) curves genuinely cross; ``False`` if the
+        reported values are the "closest approach" fallback.
+    Te_intersection, ne_intersection : float or None
+        The raw curve-intersection solution for the unperturbed fluxes.
+        Equal to *Te* / *ne* when no posterior was run; otherwise the
+        posterior median is adopted instead (see :func:`compute_Te_ne_OIII`).
+    Te_err, ne_err : tuple of float or None
+        ``(lo, hi)`` 68 % CI half-widths from the flux posterior, or
+        ``None`` if no flux errors were supplied.
+    ne_is_upper_limit : bool
+        ``True`` when the posterior density runs into the bottom of the
+        grid, i.e. a low-density solution is allowed at 1 sigma and n_e is
+        only bounded from above.
+    ne_upper_limit : float or None
+        The 1 sigma (84th percentile) upper limit on n_e when
+        *ne_is_upper_limit* is set.
+    converged_fraction : float or None
+        Fraction of posterior draws that produced a genuine crossing.
+    at_grid_edge : bool
+        ``True`` if the solution sits on the boundary of the model grid, so
+        the true value may lie outside it.
+    coll_file : str
+        O III collision-strength file the solve used.
+    logne_grid, Te_curve_4363, Te_curve_1666_4363, Te_curve_5007_1666 : ndarray
+        The three T_e(n_e) curves of Hsiao et al. figure 3, for plotting.
+    Te_posterior, ne_posterior : ndarray or None
+        Per-draw solutions, when flux errors were supplied.
+    """
+
+    Te: float
+    ne: float
+    converged: bool
+    Te_intersection: float | None = None
+    ne_intersection: float | None = None
+    Te_err: tuple[float, float] | None = None
+    ne_err: tuple[float, float] | None = None
+    ne_is_upper_limit: bool = False
+    ne_upper_limit: float | None = None
+    converged_fraction: float | None = None
+    at_grid_edge: bool = False
+    coll_file: str = OIII_1666_COLL_FILE
+    logne_grid: np.ndarray | None = field(default=None, repr=False)
+    Te_curve_4363: np.ndarray | None = field(default=None, repr=False)
+    Te_curve_1666_4363: np.ndarray | None = field(default=None, repr=False)
+    Te_curve_5007_1666: np.ndarray | None = field(default=None, repr=False)
+    Te_posterior: np.ndarray | None = field(default=None, repr=False)
+    ne_posterior: np.ndarray | None = field(default=None, repr=False)
+
+
+def _solve_oiii_once(
+    grid: dict[str, Any],
+    f1666: float,
+    f4363: float,
+    f_neb: float,
+) -> tuple[float, float, bool, np.ndarray, np.ndarray, np.ndarray] | None:
+    """Solve one (T_e, n_e) intersection and return it with the three curves."""
+    if f1666 <= 0 or f4363 <= 0 or f_neb <= 0:
+        return None
+
+    logTe = grid["logTe"]
+    T_4363 = _te_curve(grid["log_R_4363"], np.log10(f4363 / f_neb), logTe)
+    T_1666_4363 = _te_curve(
+        grid["log_R_1666_4363"], np.log10(f1666 / f4363), logTe,
+    )
+    T_5007_1666 = _te_curve(
+        grid["log_R_5007_1666"], np.log10(f_neb / f1666), logTe,
+    )
+
+    hit = _intersect_curves(grid["logne"], T_4363, T_1666_4363)
+    if hit is None:
+        return None
+    log_ne, log_Te, converged = hit
+    return log_Te, log_ne, converged, T_4363, T_1666_4363, T_5007_1666
+
+
+def compute_Te_ne_OIII(
+    flux_1666: float,
+    flux_4363: float,
+    flux_5007: float,
+    flux_4959: float = 0.0,
+    *,
+    err_1666: float | None = None,
+    err_4363: float | None = None,
+    err_5007: float | None = None,
+    err_4959: float | None = None,
+    coll_file: str = OIII_1666_COLL_FILE,
+    n_draws: int = 500,
+    seed: int = 42,
+) -> SelfConsistentOIII:
+    """Solve T_e and n_e simultaneously in the O++ zone (Hsiao et al. 2026).
+
+    [O III] lambda5007 has a critical density of only ~7e5 cm^-3, so above
+    n_e ~ 1e5 cm^-3 it is collisionally de-excited and the classical
+    lambda4363/lambda5007 ratio depends on *both* T_e and n_e.  Solving it
+    at an assumed low density then overestimates T_e and underestimates
+    O/H -- by up to 1.1 dex in the Hsiao et al. sample.  O III] lambda1666
+    has a far higher critical density, so adding it gives two independent
+    ratios for the two unknowns and breaks the degeneracy.
+
+    Following Hsiao et al. (2026) section IV.3, T_e(n_e) curves are built
+    for each ratio over log(n_e/cm^-3) = 0-7 with 1,000 steps, and the
+    solution is their intersection; when the curves do not cross, the
+    closest approach is used instead.  Uncertainties come from the flux
+    posterior, as in the paper.
+
+    Parameters
+    ----------
+    flux_1666 : float
+        O III] 1666 flux (dust-corrected).
+    flux_4363 : float
+        [O III] 4363 flux (dust-corrected).
+    flux_5007 : float
+        [O III] 5007 flux (dust-corrected).
+    flux_4959 : float
+        [O III] 4959 flux (dust-corrected).  Optional; the nebular
+        denominator is ``flux_5007 + flux_4959``.
+    err_1666, err_4363, err_5007, err_4959 : float or None
+        1 sigma flux errors.  When *err_1666*, *err_4363* and *err_5007*
+        are all given and positive, a *n_draws* posterior is run and the
+        error bars, upper-limit flag and convergence fraction are filled in.
+    coll_file : str
+        O III collision-strength file; see :func:`_get_oiii_atom`.  The
+        default is the package's :data:`OIII_1666_COLL_FILE` (TZ17);
+        ``"o_iii_coll_AK99.dat"`` reproduces Hsiao et al. exactly and
+        shifts T_e by 1-2 % and log(O++/H+) by ~0.02 dex.
+    n_draws : int
+        Posterior draws for the uncertainties (default 500).
+    seed : int
+        RNG seed for the posterior draws.
+
+    Returns
+    -------
+    SelfConsistentOIII
+        The joint solution, its uncertainties and the three T_e(n_e) curves.
+
+    Raises
+    ------
+    ValueError
+        If a flux is non-positive, or the observed ratios cannot be
+        reproduced anywhere on the model grid.
+
+    References
+    ----------
+    Hsiao et al. (2026), arXiv:2608.20339; the method is due to Berg (2018)
+    and Arellano-Cordova et al. (2020).
+    """
+    f_neb = float(flux_5007) + float(flux_4959)
+    if f_neb <= 0:
+        raise ValueError("[OIII] nebular flux (5007+4959) is non-positive.")
+    if flux_4363 <= 0:
+        raise ValueError("[OIII] 4363 flux is non-positive.")
+    if flux_1666 <= 0:
+        raise ValueError("O III] 1666 flux is non-positive.")
+
+    grid = _oiii_te_ne_grid(coll_file)
+    solved = _solve_oiii_once(grid, float(flux_1666), float(flux_4363), f_neb)
+    if solved is None:
+        raise ValueError(
+            f"No self-consistent (T_e, n_e) reproduces "
+            f"[OIII] 4363/(5007+4959) = {flux_4363 / f_neb:.6g} and "
+            f"O III] 1666/[OIII] 4363 = {flux_1666 / flux_4363:.6g} anywhere on "
+            f"log T_e = {OIII_GRID_LOGTE[0]}-{OIII_GRID_LOGTE[1]}, "
+            f"log n_e = {OIII_GRID_LOGNE[0]}-{OIII_GRID_LOGNE[1]}. "
+            f"Check the dust correction: the UV/optical ratio is the most "
+            f"reddening-sensitive of the three."
+        )
+    log_Te, log_ne, converged, c4363, c1666, c5007 = solved
+
+    logTe_ax, logne_ax = grid["logTe"], grid["logne"]
+    step_T = logTe_ax[1] - logTe_ax[0]
+    step_n = logne_ax[1] - logne_ax[0]
+    at_edge = bool(
+        log_Te <= logTe_ax[0] + step_T or log_Te >= logTe_ax[-1] - step_T
+        or log_ne <= logne_ax[0] + step_n or log_ne >= logne_ax[-1] - step_n
+    )
+
+    out = SelfConsistentOIII(
+        Te=float(10.0 ** log_Te),
+        ne=float(10.0 ** log_ne),
+        converged=converged,
+        Te_intersection=float(10.0 ** log_Te),
+        ne_intersection=float(10.0 ** log_ne),
+        at_grid_edge=at_edge,
+        coll_file=coll_file,
+        logne_grid=logne_ax,
+        Te_curve_4363=10.0 ** c4363,
+        Te_curve_1666_4363=10.0 ** c1666,
+        Te_curve_5007_1666=10.0 ** c5007,
+    )
+
+    errs = (err_1666, err_4363, err_5007)
+    if not all(e is not None and e > 0 for e in errs):
+        return out
+
+    rng = np.random.default_rng(seed)
+    e4959 = err_4959 if (err_4959 is not None and err_4959 > 0) else 0.0
+    lTe_d, lne_d = [], []
+    n_conv = 0
+    for _ in range(int(n_draws)):
+        d1666 = rng.normal(flux_1666, err_1666)
+        d4363 = rng.normal(flux_4363, err_4363)
+        dneb = rng.normal(flux_5007, err_5007) + rng.normal(flux_4959, e4959)
+        hit = _solve_oiii_once(grid, d1666, d4363, dneb)
+        if hit is None:
+            continue
+        lTe_d.append(hit[0])
+        lne_d.append(hit[1])
+        n_conv += bool(hit[2])
+
+    if not lTe_d:
+        return out
+
+    lTe_d = np.asarray(lTe_d)
+    lne_d = np.asarray(lne_d)
+    out.Te_posterior = 10.0 ** lTe_d
+    out.ne_posterior = 10.0 ** lne_d
+    out.converged_fraction = n_conv / len(lTe_d)
+
+    tlo, tmed, thi = np.percentile(out.Te_posterior, [16, 50, 84])
+    out.Te_err = (float(tmed - tlo), float(thi - tmed))
+    nlo, nmed, nhi = np.percentile(out.ne_posterior, [16, 50, 84])
+    out.ne_err = (float(nmed - nlo), float(nhi - nmed))
+
+    # Adopt the posterior median rather than the intersection of the
+    # unperturbed curves.  In the density-sensitive regime the two agree to
+    # well under a grid step; in the flat regime the single intersection is
+    # placed by sub-grid noise and the median is far more stable (recovering
+    # log n_e = 4.26 against a truth of 4.48 where the raw crossing lands at
+    # 1.44).  This is also what Hsiao et al. mean by propagating through the
+    # posterior samples.
+    out.Te, out.ne = float(tmed), float(nmed)
+    log_Te_med = float(np.log10(tmed))
+
+    # Below the density at which lambda5007 starts to be collisionally
+    # de-excited, the auroral/nebular ratio is flat and any lower density
+    # fits equally well -- n_e is then bounded only from above.  Compare the
+    # 1 sigma lower bound of the posterior against that floor, computed at
+    # the measured precision of the ratio.  Hsiao et al. report exactly such
+    # a limit for their non-converged object.
+    sig_neb = float(np.hypot(err_5007, e4959))
+    sigma_log_ratio = float(
+        np.hypot(err_4363 / flux_4363, sig_neb / f_neb) / np.log(10.0)
+    )
+    floor = _ne_sensitivity_floor(grid, log_Te_med, sigma_log_ratio)
+    if np.percentile(lne_d, 16) < floor:
+        out.ne_is_upper_limit = True
+        out.ne_upper_limit = float(nhi)
+
+    return out
+
 
 
 def compute_Te_NII(
