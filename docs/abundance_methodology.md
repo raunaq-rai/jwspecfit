@@ -169,9 +169,9 @@ When [OIII] 4363 is unavailable or has insufficient SNR, the O III]
 R_1666 = O III] 1666 / ([OIII] 5007 + [OIII] 4959)
 ```
 
-The 1666 Å line arises from the 5→2 transition with a 7.5 eV energy
-gap (compared to 2.8 eV for 4363), making this ratio more
-temperature-sensitive.  PyNEB's `Atom("O", 3).getTemDen()` is used
+The 1666 Å line arises from the 6→3 transition, whose upper level sits
+7.48 eV above ground (against 5.35 eV for 4363 and 2.51 eV for 5007),
+making this ratio more temperature-sensitive.  PyNEB's `Atom("O", 3).getTemDen()` is used
 with `to_eval="(L(1666))/(L(5007)+L(4959))"` and solver range
 extended to 250,000 K (`start_x=3.0, end_x=5.4`).  The ratio is
 monotonically increasing with T_e, so the solution is unique.
@@ -180,7 +180,86 @@ This diagnostic is automatically used as a fallback in
 `compute_abundances()` when [OIII] 4363 is not detected but O III]
 1666 and the [OIII] 5007+4959 nebular lines are available.
 
-### 3.3 Secondary diagnostic: [NII] auroral-to-nebular ratio
+### 3.3 Self-consistent T_e **and** n_e from UV + optical oxygen
+
+**Source:** `jwspecabund.direct.compute_Te_ne_OIII`, following Hsiao et
+al. (2026), [arXiv:2608.20339](https://arxiv.org/abs/2608.20339); the
+method is due to Berg (2018) and Arellano-Córdova et al. (2020).
+
+Sections 3.1 and 3.2 each solve T_e from **one** ratio at an assumed or
+borrowed density.  That is safe only while the density stays well below
+the critical density of the nebular line.  [OIII] 5007 has
+n_crit ≈ 7 × 10⁵ cm⁻³, so above n_e ~ 10⁵ cm⁻³ it is collisionally
+de-excited: the observed 4363/5007 ratio rises, and if it is inverted at
+an assumed low density the temperature comes out too high and the oxygen
+abundance too low.  Hsiao et al. show this misclassifies ordinary
+galaxies as extremely metal-poor by up to **1.1 dex**.
+
+O III] 1666 has a far higher critical density, so it does not suffer the
+same suppression.  With all three lines measured there are two
+independent ratios for the two unknowns, and both can be solved at once:
+
+```
+R_1 = [OIII] 4363 / ([OIII] 5007 + [OIII] 4959)
+R_2 = O III] 1666 / [OIII] 4363
+```
+
+Each ratio alone traces a curve of (T_e, n_e) pairs that reproduce it.
+Following Hsiao et al. §IV.3, those T_e(n_e) curves are built over
+log(n_e/cm⁻³) = 0–7 in **1,000 steps**, and the solution is where they
+cross — the one pair that reproduces both ratios.  Where they do not
+cross, the closest approach is used, as in the paper.  A third curve
+([OIII] 5007 / O III] 1666) is computed for display; it is the ratio of
+the other two and carries no independent information.
+
+Uncertainties come from the flux posterior, again as in the paper: every
+draw is re-solved, and T_e and n_e are the posterior medians with 68 %
+percentile errors.
+
+**Upper limits.** Below n_e ~ 10⁴·⁵ cm⁻³ both ratios go density-flat and
+the curves run parallel, so no density can be picked out — only bounded.
+This is detected by comparing the 1σ lower bound of the density
+posterior against the density at which R_1 first departs from its
+low-density limit by more than the measured error on the ratio.  When it
+falls below, `ne_is_upper_limit` is set, the 84th percentile is reported
+as the 1σ limit, and the single-ratio temperature of §3.1 is adopted
+instead — with the borrowed density capped at that limit, since a
+density that violates the bound would bias T_e and O/H.  Hsiao et al.
+report exactly such a limit for the one object in their sample where the
+curves do not converge.
+
+**Atomic data.** All four lines must come from one atom, or the
+"intersection" is between curves drawn from different atomic physics.
+PyNEB's default `o_iii_coll_SSB14.dat` tabulates only 5 levels and cannot
+represent λ1666 at all, so the joint solve uses the 6-level
+`o_iii_coll_TZ17.dat` (Tayal & Zatsarinny 2017) — the same dataset §3.2
+already uses.  `oiii_coll_file` selects an alternative:
+`"o_iii_coll_AK99.dat"` (Aggarwal & Keenan 1999) reproduces Hsiao et al.
+exactly and shifts T_e by 1–2 %, n_e by ≤0.1 dex and log(O²⁺/H⁺) by
+~0.02 dex (worst case 0.09).
+
+**When it is used.** `compute_abundances(..., self_consistent_OIII="auto")`
+is the default and engages whenever λ1666, λ4363 and λ5007 all clear
+`snr_auroral`.  Pass `True` to force the attempt or `False` to restore the
+single-ratio behaviour.  Whichever method is adopted, the result always
+reports what each single ratio would have given on its own, in
+`alt_results["direct_4363"]` and `alt_results["direct_1666"]` and as a
+side-by-side table in `summary()`.
+
+`jwspecabund.plot_te_ne_diagnostic()` draws the curves, their 1σ bands
+and the posterior contours — the figure 3 of Hsiao et al.
+
+**Worked example.** Synthetic O III fluxes for
+12 + log(O²⁺/H⁺) = 8.000 at 5 % flux errors:
+
+| truth | self-consistent | [OIII] 4363 only (n_e borrowed) |
+|---|---|---|
+| T_e = 15,000 K, n_e = 10⁵ | 7.998 (T_e = 14,998 K) | 7.877 (T_e = 16,254 K) |
+| T_e = 13,000 K, n_e = 10⁶ | 8.005 (T_e = 12,976 K) | 6.849 (T_e = 33,310 K) |
+
+---
+
+### 3.4 Secondary diagnostic: [NII] auroral-to-nebular ratio
 
 When [NII] 5756 is detected, T_e(N+) is computed from:
 
@@ -190,7 +269,7 @@ R_NII = [NII] 5756 / [NII] 6585
 
 using PyNEB's `Atom("N", 2).getTemDen()`.
 
-### 3.4 T_e–T_e relations for zone temperatures
+### 3.5 T_e–T_e relations for zone temperatures
 
 A single auroral line measures T_e in one ionisation zone.  The
 `Te_relation` argument maps T_e(O2+) (the high zone) to the intermediate
@@ -906,10 +985,13 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 | Reference | Context |
 |-----------|---------|
 | Abdurro'uf et al., 2024, ApJ, 973, 47 (arXiv:2404.16201) | Low-ionisation n_e redshift-evolution fallback: 54·(1+z)^1.2 |
+| Aggarwal, K. M. & Keenan, F. P., 1999, ApJS, 123, 311 | Alternative 6-level O III collision strengths (oiii_coll_file) |
 | Aggarwal, K. M. & Keenan, F. P., 2004, A&A, 427, 763 | N V effective collision strengths (CHIANTI v10) |
 | Aller, L. H., 1984, Physics of Thermal Gaseous Nebulae (Reidel) | Hbeta Case B recombination formula for T_e > 30,000 K |
 | Asplund, M. et al., 2009, ARA&A, 47, 481 | Solar oxygen abundance: 12 + log(O/H)_sun = 8.69 |
 | Berg, D. A. et al., 2025, arXiv:2511.13591 | Six-step UV nitrogen abundance procedure |
+| Arellano-Córdova, K. Z. et al., 2020, MNRAS, 496, 1051 | Self-consistent T_e-n_e from UV + optical O III |
+| Berg, D. A., 2018, ApJ, 859, 164 | Self-consistent T_e-n_e from UV + optical O III |
 | Calzetti, D. et al., 2000, ApJ, 533, 682 | Starburst attenuation curve (base for Salim+18) |
 | Campbell, A., Terlevich, R. & Melnick, J., 1986, MNRAS, 223, 811 | T_e–T_e relation: T_low = 0.7 × T_high + 3000 |
 | Cardelli, J. A., Clayton, G. C. & Mathis, J. S., 1989, ApJ, 345, 245 | Milky Way extinction law |
@@ -917,6 +999,7 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 | DESI Collaboration, 2026, arXiv:2601.02463 | Updated T_e–T_e relation: T_low = 0.648 × T_high + 3270 |
 | Garnett, D. R., 1992, AJ, 103, 1330 | Classical T_e–T_e relations for intermediate/low zones |
 | Garnett, D. R. et al., 1997, ApJ, 489, 63 | C/O ionisation correction factor: ICF_C = (O+ + O++)/O++ |
+| Hsiao, T. Y.-Y. et al., 2026, arXiv:2608.20339 | Self-consistent O III T_e-n_e; high-density EMPG impostors |
 | Izotov, Y. I. et al., 2006, A&A, 448, 955 | ICF equations 18–23 for N, Ne, S, Ar |
 | Jones, T. et al., 2023 | C/O from direct ionic sum: (C2+ + C3+) / O2+ |
 | Martinez, Z. et al., 2025, "Under Pressure", arXiv:2510.21960 | Default N/O ICFs, O32/N43 log(U) diagnostics, 3-tier T_e zones, and mid/high n_e redshift evolution (Eqs 4 & 5) |
@@ -925,6 +1008,7 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 | Osterbrock, D. E. & Ferland, G. J., 2006, Astrophysics of Gaseous Nebulae and Active Galactic Nuclei (University Science Books) | Case B recombination ratios |
 | Salim, S. et al., 2018, ApJ, 859, 11 | UV slope and bump calibration for dust attenuation |
 | Sanders, R. L. et al., 2025 | Strong-line metallicity calibrations (O3, O2, R23, O32) |
+| Tayal, S. S. & Zatsarinny, O., 2017, ApJ, 850, 147 | 6-level O III collision strengths (required for lambda1666) |
 | Storey, P. J. & Hummer, D. G., 1995, MNRAS, 272, 41 | H I recombination emissivity tables (valid to 30,000 K) |
 
 

@@ -4,6 +4,46 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### `jwspecabund` — self-consistent O²⁺ temperature and density
+
+- **T_e and n_e are now solved together in the O²⁺ zone when O III] λ1666,
+  [O III] λ4363 and [O III] λ5007 are all detected**, following Hsiao et al.
+  (2026), [arXiv:2608.20339](https://arxiv.org/abs/2608.20339). [O III] λ5007
+  has a critical density of only ~7 × 10⁵ cm⁻³, so above n_e ~ 10⁵ cm⁻³ it is
+  collisionally de-excited and the classical λ4363/λ5007 ratio depends on both
+  T_e and n_e. Solving it at an assumed low density then overestimates T_e and
+  underestimates O/H — by up to 1.1 dex, which is how ordinary galaxies get
+  misclassified as extremely metal-poor. λ1666 has a far higher critical
+  density, so the two ratios give two independent constraints on the two
+  unknowns. On a synthetic object at T_e = 13,000 K and n_e = 10⁶ cm⁻³ with
+  12 + log(O/H) = 8.000, the joint solve returns 8.005 where λ4363 alone
+  returns 6.849.
+- **New `compute_Te_ne_OIII()`** builds the T_e(n_e) curve for each ratio over
+  log(n_e/cm⁻³) = 0–7 in 1,000 steps and takes their intersection, with the
+  closest approach as the fallback, exactly as the paper prescribes.
+  Uncertainties come from the flux posterior.
+- **Densities that cannot be constrained are reported as 1σ upper limits.**
+  Below n_e ~ 10⁴·⁵ cm⁻³ both ratios go density-flat and the curves run
+  parallel; the solve detects this, falls back to the single-ratio
+  temperature, and caps the borrowed density at the bound the O III lines
+  impose.
+- **`compute_abundances()` gains `self_consistent_OIII` (default `"auto"`) and
+  `oiii_coll_file`.** `"auto"` engages the joint solve whenever all three lines
+  clear `snr_auroral`; pass `False` for the previous single-ratio behaviour.
+  `oiii_coll_file="o_iii_coll_AK99.dat"` reproduces Hsiao et al.'s atomic data
+  (1–2 % in T_e, ~0.02 dex in O²⁺/H⁺).
+- **Every result now reports what each single ratio would have given on its
+  own**, in `alt_results["direct_4363"]` / `alt_results["direct_1666"]` and as
+  a side-by-side table in `AbundanceResult.summary()`, so the effect of the
+  adopted diagnostic is visible rather than implied. `AbundanceResult` gains
+  `Te_diagnostic`, `ne_Opp_err`, `ne_Opp_is_upper_limit` and
+  `Te_ne_selfconsistent`.
+- **New `plot_te_ne_diagnostic()`** reproduces figure 3 of Hsiao et al.: the
+  three T_e(n_e) curves with 1σ bands, the posterior contours, and the adopted
+  solution.
+
 ## 1.1.8 — 2026-08-14
 
 ### Citation

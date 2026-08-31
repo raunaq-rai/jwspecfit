@@ -111,6 +111,7 @@ are gated by their own dedicated checks (auroral SNR, nitrogen gating, logU doub
 
 | `method=` | Condition | Path |
 |-----------|-----------|------|
+| `"auto"` | O III] 1666, OIII_4363 and OIII_5007 all SNR >= `snr_auroral` | Direct Te — **self-consistent Te + ne** |
 | `"auto"` | OIII_4363 SNR >= `snr_auroral` | Direct Te (4363) |
 | `"auto"` | OIII_4363 absent but O III] 1666 available | Direct Te (1666 fallback) |
 | `"auto"` | No auroral line detected | Strong-line |
@@ -160,7 +161,12 @@ value is used directly.
 ### Step 2 — Electron temperature
 
 ```python
-# Primary: [OIII] 4363
+# Preferred, when O III] 1666 + [OIII] 4363 + [OIII] 5007 are all detected:
+# Te and ne solved together in the O++ zone (Hsiao+2026).
+sol = compute_Te_ne_OIII(flux_1666, flux_4363, flux_5007, flux_4959)
+Te_high, ne_Opp = sol.Te, sol.ne
+
+# Primary single ratio: [OIII] 4363
 Te_high = compute_Te_OIII(flux_4363, flux_5007, flux_4959, ne_high)
 
 # Fallback: O III] 1666 (when 4363 is unavailable)
@@ -169,6 +175,13 @@ Te_high = compute_Te_OIII_1666(flux_1666, flux_5007, flux_4959, ne_high)
 Te_low  = Te_low_from_high(Te_high, relation=Te_relation)
 ```
 
+- `compute_Te_ne_OIII()` intersects the Te(ne) curves of 4363/(5007+4959) and
+  1666/4363 over log ne = 0–7 in 1,000 steps. Necessary once ne approaches the
+  [OIII] 5007 critical density (~7e5 cm^-3), where a single ratio no longer
+  determines Te alone — see
+  [methodology §3.3](abundance_methodology.md#33-self-consistent-t_e-and-n_e-from-uv--optical-oxygen).
+  Controlled by `self_consistent_OIII` (default `"auto"`); set `False` to
+  restore the single-ratio behaviour.
 - `compute_Te_OIII()` uses PyNEB with `log=True, start_x=3.0, end_x=5.0` for
   convergence at Te > 25,000 K.
 - `compute_Te_OIII_1666()` uses the UV 1666/(5007+4959) ratio with solver
@@ -408,7 +421,7 @@ When MCMC posteriors are available, posterior samples are propagated directly
 
 | Parameter | Default | What it gates | Where checked |
 |-----------|---------|---------------|---------------|
-| `snr_auroral` | 3.0 | OIII 4363 for direct vs strong-line selection | `compute_abundances()` |
+| `snr_auroral` | 3.0 | OIII 4363 for direct vs strong-line selection; also all three O III lines for the self-consistent Te-ne solve | `compute_abundances()` |
 | `snr_line` | 2.0 | All lines not in `_SNR_PROTECTED` | `_filter_low_snr()` |
 | `snr_ne` | 3.0 | Both members of density-sensitive doublets | `_doublet_snr_ok()` |
 | `snr_logU` | 1.5 | Total doublet SNR for NIV]/NIII] in N43 | `_compute_logU()` |
