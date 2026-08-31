@@ -930,6 +930,12 @@ class SelfConsistentOIII:
         O III collision-strength file the solve used.
     logne_grid, Te_curve_4363, Te_curve_1666_4363, Te_curve_5007_1666 : ndarray
         The three T_e(n_e) curves of Hsiao et al. figure 3, for plotting.
+    log_ratios : dict
+        Observed log10 line ratios, keyed ``"4363"``
+        (lambda4363/(lambda5007+lambda4959)), ``"1666_4363"`` and
+        ``"5007_1666"``.
+    log_ratio_errs : dict or None
+        1 sigma errors on those log10 ratios, when flux errors were given.
     Te_posterior, ne_posterior : ndarray or None
         Per-draw solutions, when flux errors were supplied.
     """
@@ -950,6 +956,8 @@ class SelfConsistentOIII:
     Te_curve_4363: np.ndarray | None = field(default=None, repr=False)
     Te_curve_1666_4363: np.ndarray | None = field(default=None, repr=False)
     Te_curve_5007_1666: np.ndarray | None = field(default=None, repr=False)
+    log_ratios: dict[str, float] | None = field(default=None, repr=False)
+    log_ratio_errs: dict[str, float] | None = field(default=None, repr=False)
     Te_posterior: np.ndarray | None = field(default=None, repr=False)
     ne_posterior: np.ndarray | None = field(default=None, repr=False)
 
@@ -1093,6 +1101,11 @@ def compute_Te_ne_OIII(
         Te_curve_4363=10.0 ** c4363,
         Te_curve_1666_4363=10.0 ** c1666,
         Te_curve_5007_1666=10.0 ** c5007,
+        log_ratios={
+            "4363": float(np.log10(flux_4363 / f_neb)),
+            "1666_4363": float(np.log10(flux_1666 / flux_4363)),
+            "5007_1666": float(np.log10(f_neb / flux_1666)),
+        },
     )
 
     errs = (err_1666, err_4363, err_5007)
@@ -1101,6 +1114,17 @@ def compute_Te_ne_OIII(
 
     rng = np.random.default_rng(seed)
     e4959 = err_4959 if (err_4959 is not None and err_4959 > 0) else 0.0
+
+    _ln10 = np.log(10.0)
+    _r1666 = err_1666 / flux_1666
+    _r4363 = err_4363 / flux_4363
+    _rneb = float(np.hypot(err_5007, e4959)) / f_neb
+    out.log_ratio_errs = {
+        "4363": float(np.hypot(_r4363, _rneb) / _ln10),
+        "1666_4363": float(np.hypot(_r1666, _r4363) / _ln10),
+        "5007_1666": float(np.hypot(_rneb, _r1666) / _ln10),
+    }
+
     lTe_d, lne_d = [], []
     n_conv = 0
     for _ in range(int(n_draws)):
@@ -1144,11 +1168,7 @@ def compute_Te_ne_OIII(
     # 1 sigma lower bound of the posterior against that floor, computed at
     # the measured precision of the ratio.  Hsiao et al. report exactly such
     # a limit for their non-converged object.
-    sig_neb = float(np.hypot(err_5007, e4959))
-    sigma_log_ratio = float(
-        np.hypot(err_4363 / flux_4363, sig_neb / f_neb) / np.log(10.0)
-    )
-    floor = _ne_sensitivity_floor(grid, log_Te_med, sigma_log_ratio)
+    floor = _ne_sensitivity_floor(grid, log_Te_med, out.log_ratio_errs["4363"])
     if np.percentile(lne_d, 16) < floor:
         out.ne_is_upper_limit = True
         out.ne_upper_limit = float(nhi)

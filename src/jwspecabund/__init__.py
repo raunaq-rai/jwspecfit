@@ -74,6 +74,7 @@ from .dust import (
     salim_attenuation,
 )
 from .icf import icf_argon, icf_neon, icf_nitrogen, icf_sulfur
+from .plotting import plot_te_ne_diagnostic
 from .result import AbundanceResult
 from .strong_line import compute_line_ratios, sanders25_metallicity
 
@@ -100,6 +101,7 @@ __all__ = [
     "compute_NO_martinez25",
     "compute_Te_NII",
     "compute_Te_ne_OIII",
+    "plot_te_ne_diagnostic",
     "compute_Te_OIII",
     "compute_Te_OIII_1666",
     "SelfConsistentOIII",
