@@ -580,8 +580,6 @@ class TestUnsolvableAuroralRatio:
 
     def test_falls_through_to_1666(self):
         """An unsolvable lambda4363 must not hide a good O III] 1666."""
-        import pyneb as pn
-
         result = _mock_result(15000, 1e3)
         o3 = _get_oiii_atom()
         Te, ne = 15000.0, 1e3
