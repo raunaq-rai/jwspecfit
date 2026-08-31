@@ -223,10 +223,18 @@ posterior against the density at which R_1 first departs from its
 low-density limit by more than the measured error on the ratio.  When it
 falls below, `ne_is_upper_limit` is set, the 84th percentile is reported
 as the 1σ limit, and the single-ratio temperature of §3.1 is adopted
-instead — with the borrowed density capped at that limit, since a
-density that violates the bound would bias T_e and O/H.  Hsiao et al.
-report exactly such a limit for the one object in their sample where the
-curves do not converge.
+instead.  Hsiao et al. report exactly such a limit for the one object in
+their sample where the curves do not converge.
+
+The borrowed density is capped at that limit **only if the curves
+actually cross** (and do so in at least half the posterior draws).  When
+they never cross, no (T_e, n_e) pair reproduces both ratios at any
+density, and the "limit" is merely where near-parallel curves come
+closest — a position that moves with a fraction of the atomic-data
+systematic on λ1666.  Capping on that would let a non-detection of
+density silently override a density measured from another ion; on a real
+stacked spectrum it shifted 12+log(O/H) by 0.05 dex.  In that case the
+limit is reported, a warning is logged, and nothing downstream changes.
 
 **Atomic data.** All four lines must come from one atom, or the
 "intersection" is between curves drawn from different atomic physics.

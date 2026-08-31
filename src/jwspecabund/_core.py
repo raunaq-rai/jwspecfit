@@ -807,6 +807,13 @@ def _draw_Te_ne_OIII(
     return Te, ne_Opp
 
 
+#: Minimum fraction of posterior draws that must yield a genuine curve
+#: crossing before the joint solve's n_e upper limit is allowed to cap a
+#: density measured from another ion.  Below this the two O III ratios are
+#: not mutually consistent and the "limit" carries no density information.
+_NE_CAP_MIN_CONVERGED_FRAC: float = 0.5
+
+
 #: Human-readable labels for each T_e(O++) diagnostic.
 _TE_DIAG_LABELS = {
     "self_consistent": "self-consistent O III] 1666 + [OIII] 4363 + [OIII] 5007",
@@ -991,15 +998,35 @@ def _solve_densities_refined(
 
     if (sc is not None and sc.ne_is_upper_limit
             and sc.ne_upper_limit is not None and nopp > sc.ne_upper_limit):
-        # The joint solve could not pin n_e(O++) down, but it still bounds
-        # it from above -- and that bound comes from the very lines that set
-        # O++/H+.  A density borrowed from another ion (or from the z-scaled
-        # fallback) that violates it would bias T_e and O/H, so cap it.
-        logger.info(
-            "n_e(O++) = %.0f cm^-3 exceeds the %.0f cm^-3 1σ upper limit from "
-            "the O III lines; capping at the limit.", nopp, sc.ne_upper_limit,
-        )
-        nopp = sc.ne_upper_limit
+        # The joint solve could not pin n_e(O++) down.  If it nonetheless
+        # found a self-consistent solution, the limit is a real bound from
+        # the very lines that set O++/H+, and a density borrowed from
+        # another ion that violates it would bias T_e and O/H -- so cap it.
+        #
+        # But only then.  When the curves never cross, no (T_e, n_e) pair
+        # reproduces both ratios at any density: the "limit" is just where
+        # near-parallel curves come closest, which moves with a fraction of
+        # the atomic-data systematic on lambda1666.  Capping on that would
+        # let a non-detection of density silently override a measured one.
+        if sc.converged and (
+            sc.converged_fraction is None
+            or sc.converged_fraction >= _NE_CAP_MIN_CONVERGED_FRAC
+        ):
+            logger.info(
+                "n_e(O++) = %.0f cm^-3 exceeds the %.0f cm^-3 1σ upper limit "
+                "from the O III lines; capping at the limit.",
+                nopp, sc.ne_upper_limit,
+            )
+            nopp = sc.ne_upper_limit
+        else:
+            logger.warning(
+                "The O III T_e-n_e curves do not converge (%.0f%% of draws "
+                "cross), so their n_e < %.0f cm^-3 bound is not used; keeping "
+                "n_e(O++) = %.0f cm^-3. T_e(lambda4363) and T_e(lambda1666) "
+                "disagree beyond their errors -- check the dust correction, "
+                "which the UV/optical ratio is most sensitive to.",
+                100.0 * (sc.converged_fraction or 0.0), sc.ne_upper_limit, nopp,
+            )
 
     # Recompute T_e(O++) at the refined O²⁺-zone density.
     Te_high2, diag2, _ = _solve_Te_high(fluxes, nopp)

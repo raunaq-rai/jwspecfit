@@ -245,6 +245,32 @@ class TestComputeAbundancesIntegration:
         # The adopted density may not exceed the bound the O III lines set.
         assert res.ne_Opp <= sc.ne_upper_limit + 1.0
 
+    def test_non_converged_solve_does_not_cap_density(self):
+        """A non-crossing solve must not override a measured density.
+
+        Regression: when the two O III ratios are not mutually consistent,
+        the curves never cross and the reported "upper limit" is only where
+        near-parallel curves come closest -- it moves with a fraction of the
+        atomic-data systematic on lambda1666.  Capping the borrowed density
+        on that let a non-detection of density silently shift O/H (0.05 dex
+        on a real stacked spectrum).  It must be inert instead.
+        """
+        result = _mock_result(17000, 1e3)
+        # Break the mutual consistency: lambda1666 20 % brighter than any
+        # (T_e, n_e) pair can produce alongside the observed lambda4363.
+        result.lines["OIII_1666"].flux *= 1.2
+
+        on = self._run(result)
+        off = self._run(result, self_consistent_OIII=False)
+        sc = on.Te_ne_selfconsistent
+        assert sc is not None and not sc.converged
+        # The limit is still reported...
+        assert on.ne_Opp_is_upper_limit
+        # ...but nothing downstream may move because of it.
+        assert on.ne_Opp == pytest.approx(off.ne_Opp, rel=1e-12)
+        assert on.OH == pytest.approx(off.OH, abs=1e-12)
+        assert on.Te_high == pytest.approx(off.Te_high, abs=1e-12)
+
     def test_rejects_bad_flag_value(self):
         with pytest.raises(ValueError, match="self_consistent_OIII"):
             self._run(_mock_result(15000, 1e5), self_consistent_OIII="yes")

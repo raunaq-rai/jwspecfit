@@ -28,7 +28,9 @@ history on GitHub is the authoritative source.
   Below n_e ~ 10⁴·⁵ cm⁻³ both ratios go density-flat and the curves run
   parallel; the solve detects this, falls back to the single-ratio
   temperature, and caps the borrowed density at the bound the O III lines
-  impose.
+  impose — but only when the curves genuinely cross. If they never do, the
+  two ratios are not mutually consistent, the bound carries no density
+  information, and nothing downstream is allowed to move because of it.
 - **`compute_abundances()` gains `self_consistent_OIII` (default `"auto"`) and
   `oiii_coll_file`.** `"auto"` engages the joint solve whenever all three lines
   clear `snr_auroral`; pass `False` for the previous single-ratio behaviour.
