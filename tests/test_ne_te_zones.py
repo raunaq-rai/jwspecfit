@@ -514,7 +514,7 @@ class TestDensityRefinement:
         errors = {k: v / 50.0 for k, v in fluxes.items()}
         (
             ne_low, ne_mid, ne_high, ne_Opp,
-            Te_high, Te_int, Te_low, diag, fail,
+            Te_high, Te_int, Te_low, diag, fail, sc, ne_Opp_single,
         ) = _solve_densities_refined(
             fluxes, errors, z=6.0, Te_relation="3_tier",
             snr_ne=3.0, ne_high_max=5e5, niv_rejected=False,

@@ -11,6 +11,13 @@ from typing import Any
 
 import numpy as np
 
+#: Short labels for the T_e(O++) diagnostics, for the summary table.
+_TE_DIAG_SHORT = {
+    "self_consistent": "self-consistent (UV+opt)",
+    "4363": "[OIII] 4363 only",
+    "1666": "O III] 1666 only",
+}
+
 
 def _fmt_err(err: float | tuple[float, float], prec: int = 3) -> str:
     """Format an uncertainty for display.
@@ -73,6 +80,20 @@ class AbundanceResult:
         log(Ne/O) if [NeIII] available.
     ArO : float or None
         log(Ar/O) if [ArIII] available.
+    ne_Opp_err : float or tuple of float or None
+        Uncertainty on the O²⁺-zone density, when it was measured rather
+        than borrowed.
+    ne_Opp_is_upper_limit : bool
+        ``True`` when the self-consistent solve could only bound the
+        O²⁺-zone density from above (the density-insensitive regime), in
+        which case the single-ratio temperature was adopted instead.
+    Te_diagnostic : str or None
+        Which T_e(O++) diagnostic was adopted: ``"self_consistent"``,
+        ``"4363"`` or ``"1666"``.
+    Te_ne_selfconsistent : SelfConsistentOIII or None
+        Full joint O++ T_e-n_e solution, including the T_e(n_e) curves, when
+        one was computed.  See
+        :func:`~jwspecabund.direct.compute_Te_ne_OIII`.
     excluded_lines : list of str or None
         Line names excluded by the per-line SNR filter.
     failures : dict or None
@@ -115,6 +136,10 @@ class AbundanceResult:
     ne_mid: float | None = None
     ne_high: float | None = None
     ne_Opp: float | None = None
+    ne_Opp_err: float | tuple[float, float] | None = None
+    ne_Opp_is_upper_limit: bool = False
+    Te_diagnostic: str | None = None
+    Te_ne_selfconsistent: Any | None = field(default=None, repr=False)
     icf_method: str | None = None
     NO_icf_name: str | None = None
     lya_f_esc: float | None = None
@@ -191,7 +216,23 @@ class AbundanceResult:
             if self.ne_mid is not None:
                 lines.append(f"  n_e(mid)    = {self.ne_mid:.0f} cm^-3")
             if self.ne_Opp is not None:
-                lines.append(f"  n_e(O++)    = {self.ne_Opp:.0f} cm^-3")
+                _sc = self.Te_ne_selfconsistent
+                if self.ne_Opp_is_upper_limit and _sc is not None and _sc.ne_upper_limit:
+                    _extra = (
+                        "" if abs(self.ne_Opp - _sc.ne_upper_limit) < 1.0
+                        else f"; adopted {self.ne_Opp:.0f}"
+                    )
+                    lines.append(
+                        f"  n_e(O++)    < {_sc.ne_upper_limit:.0f} cm^-3 "
+                        f"(1σ upper limit from O III{_extra})"
+                    )
+                elif self.ne_Opp_err is not None:
+                    lines.append(
+                        f"  n_e(O++)    = {self.ne_Opp:.0f} "
+                        f"{_fmt_err(self.ne_Opp_err, 0)} cm^-3"
+                    )
+                else:
+                    lines.append(f"  n_e(O++)    = {self.ne_Opp:.0f} cm^-3")
             lines.append(f"  n_e(high)   = {self.ne_high:.0f} cm^-3")
         if self.logU is not None:
             if self.logU_err is not None:
@@ -203,6 +244,39 @@ class AbundanceResult:
                 lines.append(f"  A_V         = {self.Av:.3f} +/- {self.Av_err:.3f}")
             else:
                 lines.append(f"  A_V         = {self.Av:.3f}")
+
+        # --- T_e(O++) diagnostics, side by side ---
+        _alt_direct = {
+            k[len("direct_"):]: v
+            for k, v in (self.alt_results or {}).items()
+            if k.startswith("direct_") and v.Te_high is not None
+        }
+        if self.Te_diagnostic is not None and _alt_direct:
+            lines.append("")
+            lines.append("T_e(O++) diagnostics:")
+            rows = [(self.Te_diagnostic, self.Te_high, self.ne_Opp, self.OH, True)]
+            rows += [
+                (k, v.Te_high, v.ne_Opp, v.OH, False)
+                for k, v in sorted(_alt_direct.items())
+            ]
+            for name, te, ne_opp, oh, adopted in rows:
+                if te is None:
+                    continue
+                label = _TE_DIAG_SHORT.get(name, name)
+                ne_txt = "" if ne_opp is None else f"  n_e(O++) = {ne_opp:.3g} cm^-3"
+                oh_txt = "" if oh is None or not np.isfinite(oh) else (
+                    f"  12+log(O/H) = {oh:.3f}"
+                )
+                mark = "*" if adopted else " "
+                lines.append(
+                    f"  {mark} {label:22s} T_e = {te:.0f} K{ne_txt}{oh_txt}"
+                    + ("  [adopted]" if adopted else "")
+                )
+            _sc = self.Te_ne_selfconsistent
+            if _sc is not None and not _sc.converged:
+                lines.append(
+                    "    (joint curves do not intersect; closest approach used)"
+                )
 
         # --- Lyα escape fraction ---
         if self.lya_f_esc is not None and np.isfinite(self.lya_f_esc):

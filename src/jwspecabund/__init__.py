@@ -39,6 +39,7 @@ except PackageNotFoundError:  # running from a source tree without an install
 from ._core import compute_abundances
 from .forward import forward_model, hbeta_emissivity_aller84
 from .direct import (
+    SelfConsistentOIII,
     Te_int_from_high,
     Te_low_from_high,
     compute_ionic_abundances,
@@ -48,6 +49,7 @@ from .direct import (
     compute_ne_NIV,
     compute_ne_SiIII,
     compute_Te_NII,
+    compute_Te_ne_OIII,
     compute_Te_OIII,
     compute_Te_OIII_1666,
     compute_total_abundances,
@@ -97,8 +99,10 @@ __all__ = [
     "ne_zone_fallback",
     "compute_NO_martinez25",
     "compute_Te_NII",
+    "compute_Te_ne_OIII",
     "compute_Te_OIII",
     "compute_Te_OIII_1666",
+    "SelfConsistentOIII",
     "compute_total_abundances",
     "dust_correct_fluxes",
     "forward_model",

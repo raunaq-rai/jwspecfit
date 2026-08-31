@@ -647,27 +647,251 @@ def _compute_multi_ne(
     return ne_low, ne_mid, ne_high, ne_Opp, ne_failures
 
 
-def _solve_Te_high(
-    fluxes: dict[str, float], ne: float,
-) -> tuple[float | None, str | None]:
-    """Solve T_e(O++) from [OIII] 4363 (preferred) or O III] 1666.
+#: O III lines the self-consistent T_e-n_e solve needs, all above
+#: *snr_auroral*.  lambda4959 is optional (it only widens the nebular
+#: denominator), so it is not required here.
+_SELF_CONSISTENT_LINES = ("OIII_1666", "OIII_4363", "OIII_5007")
 
-    Returns ``(Te_high, diagnostic)`` where *diagnostic* is ``"4363"`` or
-    ``"1666"``.  Returns ``(None, None)`` when neither auroral line is
-    present.  Propagates ``ValueError`` from PyNEB if a present line ratio
-    cannot be solved.
+
+def _self_consistent_oiii_ok(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    snr_auroral: float,
+) -> bool:
+    """Whether both auroral O III lines and lambda5007 are solidly detected.
+
+    The joint solve needs O III] 1666, [OIII] 4363 and [OIII] 5007
+    simultaneously; a marginal detection of any one of them makes the curve
+    intersection meaningless, so all three are held to *snr_auroral*.
     """
-    from .direct import compute_Te_OIII, compute_Te_OIII_1666
+    for name in _SELF_CONSISTENT_LINES:
+        flux = fluxes.get(name, 0.0)
+        if flux <= 0:
+            return False
+        err = errors.get(name)
+        if err is not None and err > 0 and flux / err < snr_auroral:
+            return False
+    return True
 
+
+def _solve_Te_high(
+    fluxes: dict[str, float],
+    ne: float,
+    *,
+    self_consistent: bool = False,
+    errors: dict[str, float] | None = None,
+    snr_auroral: float = 3.0,
+    oiii_coll_file: str | None = None,
+) -> tuple[float | None, str | None, Any]:
+    """Solve T_e(O++), jointly with n_e when the UV auroral line allows it.
+
+    With *self_consistent* set and O III] 1666, [OIII] 4363 and [OIII] 5007
+    all detected above *snr_auroral*, T_e and n_e are solved together in the
+    O²⁺ zone following Hsiao+2026 (see
+    :func:`~jwspecabund.direct.compute_Te_ne_OIII`) — the only route that is
+    valid once n_e approaches the [OIII] 5007 critical density.  Otherwise,
+    or when that solve leaves n_e as an upper limit, T_e falls back to the
+    single-ratio diagnostic evaluated at the supplied *ne*.
+
+    Returns ``(Te_high, diagnostic, sc)`` where *diagnostic* is
+    ``"self_consistent"``, ``"4363"`` or ``"1666"``, and *sc* is the
+    :class:`~jwspecabund.direct.SelfConsistentOIII` solution (kept for
+    reporting even when it is not adopted) or ``None``.  Returns
+    ``(None, None, sc)`` when no auroral line is present.  Propagates
+    ``ValueError`` from PyNEB if a present single-ratio line pair cannot be
+    solved.
+    """
+    from .direct import (
+        OIII_1666_COLL_FILE,
+        compute_Te_ne_OIII,
+        compute_Te_OIII,
+        compute_Te_OIII_1666,
+    )
+
+    errors = errors or {}
     f4363 = fluxes.get("OIII_4363", 0.0)
     f5007 = fluxes.get("OIII_5007", 0.0)
     f4959 = fluxes.get("OIII_4959", 0.0)
     f1666 = fluxes.get("OIII_1666", 0.0)
+
+    sc = None
+    if self_consistent and _self_consistent_oiii_ok(fluxes, errors, snr_auroral):
+        try:
+            sc = compute_Te_ne_OIII(
+                f1666, f4363, f5007, f4959,
+                err_1666=errors.get("OIII_1666"),
+                err_4363=errors.get("OIII_4363"),
+                err_5007=errors.get("OIII_5007"),
+                err_4959=errors.get("OIII_4959"),
+                coll_file=oiii_coll_file or OIII_1666_COLL_FILE,
+            )
+        except (ValueError, RuntimeError) as exc:
+            logger.warning(
+                "Self-consistent [OIII] T_e-n_e solve failed (%s); "
+                "falling back to the single-ratio diagnostic.", exc,
+            )
+
+    if sc is not None and not sc.ne_is_upper_limit:
+        return sc.Te, "self_consistent", sc
+
     if f4363 > 0 and f5007 > 0:
-        return compute_Te_OIII(f4363, f5007, f4959, ne), "4363"
+        return compute_Te_OIII(f4363, f5007, f4959, ne), "4363", sc
     if f1666 > 0 and f5007 > 0:
-        return compute_Te_OIII_1666(f1666, f5007, f4959, ne), "1666"
-    return None, None
+        return compute_Te_OIII_1666(f1666, f5007, f4959, ne), "1666", sc
+    return None, None, sc
+
+
+def _draw_Te_ne_OIII(
+    diagnostic: str | None,
+    sample: dict[str, float],
+    ne_Opp: float,
+    *,
+    oiii_coll_file: str | None = None,
+) -> tuple[float, float]:
+    """T_e(O++) and the O²⁺-zone density for a single posterior draw.
+
+    Mirrors the point-estimate diagnostic chosen by :func:`_solve_Te_high`
+    so the posterior is never a silent mixture of methods.  Under
+    ``"self_consistent"`` the density is re-solved per draw alongside the
+    temperature — that is where the density uncertainty enters O++/H+,
+    which matters because the lambda5007 emissivity is what the density is
+    correcting.
+
+    Returns
+    -------
+    tuple of float
+        ``(T_e(O++), n_e(O++))`` for this draw.
+
+    Raises
+    ------
+    ValueError
+        If the draw cannot be solved (handled by the callers, which skip it).
+    """
+    from .direct import (
+        OIII_1666_COLL_FILE,
+        _oiii_te_ne_grid,
+        _solve_oiii_once,
+        compute_Te_OIII,
+        compute_Te_OIII_1666,
+    )
+
+    if diagnostic == "self_consistent":
+        grid = _oiii_te_ne_grid(oiii_coll_file or OIII_1666_COLL_FILE)
+        hit = _solve_oiii_once(
+            grid,
+            sample.get("OIII_1666", 0.0),
+            sample.get("OIII_4363", 0.0),
+            sample.get("OIII_5007", 0.0) + sample.get("OIII_4959", 0.0),
+        )
+        if hit is None:
+            raise ValueError(
+                "self-consistent [OIII] T_e-n_e solve found no solution "
+                "for this draw"
+            )
+        return 10.0 ** hit[0], 10.0 ** hit[1]
+
+    if diagnostic == "1666":
+        Te = compute_Te_OIII_1666(
+            sample.get("OIII_1666", 0.0),
+            sample.get("OIII_5007", 0.0),
+            sample.get("OIII_4959", 0.0),
+            ne_Opp,
+        )
+    else:
+        Te = compute_Te_OIII(
+            sample.get("OIII_4363", 0.0),
+            sample.get("OIII_5007", 0.0),
+            sample.get("OIII_4959", 0.0),
+            ne_Opp,
+        )
+    return Te, ne_Opp
+
+
+#: Human-readable labels for each T_e(O++) diagnostic.
+_TE_DIAG_LABELS = {
+    "self_consistent": "self-consistent O III] 1666 + [OIII] 4363 + [OIII] 5007",
+    "4363": "[OIII] 4363/(5007+4959)",
+    "1666": "O III] 1666/(5007+4959)",
+}
+
+
+def _single_ratio_alternatives(
+    fluxes: dict[str, float],
+    adopted_diag: str | None,
+    ne_Opp_single: float,
+    ne_low: float,
+    ne_mid: float | None,
+    ne_high: float,
+    Te_relation: str,
+) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+    """Evaluate each single-ratio T_e diagnostic that was *not* adopted.
+
+    Gives the traditional [OIII] 4363-only and O III] 1666-only answers
+    alongside whichever method was adopted, so the effect of the choice is
+    visible rather than implied.  Both are evaluated at *ne_Opp_single* --
+    the density a single-ratio diagnostic would have borrowed from [Ar IV]
+    or CIII] -- because that, not the jointly-solved density, is what the
+    traditional method actually assumes.
+
+    Point estimates only: propagating either through the MC/posterior loop
+    would cost as much again as the adopted method, for a cross-check.
+
+    Returns
+    -------
+    tuple
+        ``(alternatives, diagnostics)``.  *alternatives* maps ``"4363"`` /
+        ``"1666"`` to a dict of ``Te_high``, ``Te_low``, ``OH``, ``ionic``
+        and ``ne_Opp``; *diagnostics* holds the matching summary strings.
+    """
+    from .direct import (
+        Te_int_from_high,
+        Te_low_from_high,
+        compute_ionic_abundances,
+        compute_Te_OIII,
+        compute_Te_OIII_1666,
+    )
+
+    f5007 = fluxes.get("OIII_5007", 0.0)
+    f4959 = fluxes.get("OIII_4959", 0.0)
+    alts: dict[str, dict[str, Any]] = {}
+    diag: dict[str, str] = {}
+    if f5007 <= 0:
+        return alts, diag
+
+    for key, flux, solver in (
+        ("4363", fluxes.get("OIII_4363", 0.0), compute_Te_OIII),
+        ("1666", fluxes.get("OIII_1666", 0.0), compute_Te_OIII_1666),
+    ):
+        if key == adopted_diag or flux <= 0:
+            continue
+        try:
+            Te_alt = solver(flux, f5007, f4959, ne_Opp_single)
+            Te_alt_low = Te_low_from_high(Te_alt, relation=Te_relation)
+            Te_alt_int = Te_int_from_high(Te_alt, relation=Te_relation)
+            ionic_alt = compute_ionic_abundances(
+                fluxes, Te_alt, Te_alt_low, ne_low, ne_mid=ne_mid,
+                ne_high=ne_high, Te_int=Te_alt_int, ne_Opp=ne_Opp_single,
+            )
+            OH_alt = ionic_alt.get("O+/H+", 0.0) + ionic_alt.get("O++/H+", 0.0)
+            OH_alt_12 = 12.0 + np.log10(OH_alt) if OH_alt > 0 else np.nan
+        except (ValueError, RuntimeError) as exc:
+            logger.info("Alternative T_e from %s failed: %s", key, exc)
+            continue
+
+        alts[key] = {
+            "Te_high": Te_alt,
+            "Te_mid": Te_alt_int,
+            "Te_low": Te_alt_low,
+            "ne_Opp": ne_Opp_single,
+            "OH": OH_alt_12,
+            "ionic": ionic_alt,
+        }
+        diag[f"Te(high) from {key}"] = (
+            f"{_TE_DIAG_LABELS[key]} at n_e(O++) = {ne_Opp_single:.0f} cm^-3 "
+            f"-> T_e = {Te_alt:.0f} K -> 12+log(O/H) = {OH_alt_12:.3f} "
+            f"(point estimate, not adopted)"
+        )
+    return alts, diag
 
 
 def _solve_densities_refined(
@@ -681,10 +905,13 @@ def _solve_densities_refined(
     ne_low_override: float | None = None,
     ne_mid_override: float | None = None,
     ne_high_override: float | None = None,
+    self_consistent_OIII: bool = False,
+    snr_auroral: float = 3.0,
+    oiii_coll_file: str | None = None,
 ) -> tuple[
     float, float | None, float, float,
     float | None, float | None, float | None, str | None,
-    dict[str, str],
+    dict[str, str], Any, float,
 ]:
     """Solve zone densities and temperatures with one refinement iteration.
 
@@ -694,10 +921,20 @@ def _solve_densities_refined(
     re-solved once at those zone temperatures.  T_e(O++) is finally
     recomputed at the refined O²⁺-zone density.
 
+    With *self_consistent_OIII* set and all three O III lines detected,
+    T_e(O++) and n_e(O++) instead come from the joint UV+optical solve (see
+    :func:`_solve_Te_high`).  That pair is self-contained — it needs no
+    density from another ion — so the refinement iteration applies only to
+    the remaining zones.
+
     Returns ``(ne_low, ne_mid, ne_high, ne_Opp, Te_high, Te_int, Te_low,
-    Te_diagnostic, ne_failures)``.  The temperatures are ``None`` when
-    neither [OIII] 4363 nor O III] 1666 is available.  Propagates
-    ``ValueError`` from PyNEB on a failed (present) line solve.
+    Te_diagnostic, ne_failures, sc, ne_Opp_single)``.  The temperatures are
+    ``None`` when neither [OIII] 4363 nor O III] 1666 is available; *sc* is
+    the :class:`~jwspecabund.direct.SelfConsistentOIII` solution or ``None``;
+    *ne_Opp_single* is the O²⁺-zone density the single-ratio diagnostics
+    would have used ([Ar IV] -> CIII] -> z-fallback), kept so the
+    single-ratio comparisons can be reported on their own terms.
+    Propagates ``ValueError`` from PyNEB on a failed (present) line solve.
     """
     from .direct import Te_int_from_high, Te_low_from_high
 
@@ -720,30 +957,58 @@ def _solve_densities_refined(
     )
     nl, nm, nh, nopp = _apply_overrides(nl, nm, nh, nopp)
 
-    Te_high, diag = _solve_Te_high(fluxes, nopp)
+    Te_high, diag, sc = _solve_Te_high(
+        fluxes, nopp, self_consistent=self_consistent_OIII, errors=errors,
+        snr_auroral=snr_auroral, oiii_coll_file=oiii_coll_file,
+    )
     if Te_high is None:
-        return nl, nm, nh, nopp, None, None, None, None, fail
+        return nl, nm, nh, nopp, None, None, None, None, fail, sc, nopp
+
+    if diag == "self_consistent":
+        nopp = sc.ne
 
     Te_int = Te_int_from_high(Te_high, Te_relation)
     Te_low = Te_low_from_high(Te_high, Te_relation)
 
     # Second pass: re-solve densities at the refined zone temperatures.
-    nl, nm, nh, nopp, fail = _compute_multi_ne(
+    nl, nm, nh, nopp2, fail = _compute_multi_ne(
         fluxes, errors=errors, snr_ne=snr_ne, ne_high_max=ne_high_max,
         niv_density_invalid=niv_rejected, z=z,
         te_low=Te_low, te_int=(Te_int if Te_int is not None else 1.5e4),
         te_high=Te_high,
     )
-    nl, nm, nh, nopp = _apply_overrides(nl, nm, nh, nopp)
+    nl, nm, nh, nopp2 = _apply_overrides(nl, nm, nh, nopp2)
+
+    if diag == "self_consistent":
+        # The joint solve already fixes both T_e(O++) and n_e(O++) from the
+        # O III lines alone, so there is nothing here to refine: keep them
+        # and let only the other zones' densities move.  This also means an
+        # ne_mid_override no longer leaks into n_e(O++), which is now a
+        # direct measurement rather than a stand-in borrowed from CIII].
+        return nl, nm, nh, nopp, Te_high, Te_int, Te_low, diag, fail, sc, nopp2
+
+    nopp = nopp2
+
+    if (sc is not None and sc.ne_is_upper_limit
+            and sc.ne_upper_limit is not None and nopp > sc.ne_upper_limit):
+        # The joint solve could not pin n_e(O++) down, but it still bounds
+        # it from above -- and that bound comes from the very lines that set
+        # O++/H+.  A density borrowed from another ion (or from the z-scaled
+        # fallback) that violates it would bias T_e and O/H, so cap it.
+        logger.info(
+            "n_e(O++) = %.0f cm^-3 exceeds the %.0f cm^-3 1σ upper limit from "
+            "the O III lines; capping at the limit.", nopp, sc.ne_upper_limit,
+        )
+        nopp = sc.ne_upper_limit
 
     # Recompute T_e(O++) at the refined O²⁺-zone density.
-    Te_high2, diag2 = _solve_Te_high(fluxes, nopp)
+    Te_high2, diag2, _ = _solve_Te_high(fluxes, nopp)
     if Te_high2 is not None:
         Te_high, diag = Te_high2, diag2
         Te_int = Te_int_from_high(Te_high, Te_relation)
         Te_low = Te_low_from_high(Te_high, Te_relation)
 
-    return nl, nm, nh, nopp, Te_high, Te_int, Te_low, diag, fail
+    return nl, nm, nh, nopp, Te_high, Te_int, Te_low, diag, fail, sc, nopp
 
 
 def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
@@ -1237,6 +1502,7 @@ def _build_diagnostics(
     Te_int: float | None = None,
     te_high_diag: str | None = None,
     z: float = 0.0,
+    sc: Any = None,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -1287,7 +1553,33 @@ def _build_diagnostics(
         or (_has_arIV and ne_mid is None and ne_Opp is not None)
         else "CIII] 1907/1909 -> z-fallback"
     )
-    if Te_high is not None:
+    if Te_high is not None and te_high_diag == "self_consistent":
+        _ul = sc is not None and sc.ne_is_upper_limit
+        _conv = "curves intersect" if (sc is None or sc.converged) else (
+            "curves do not intersect; closest approach adopted"
+        )
+        diag["Te(high) method"] = (
+            f"self-consistent O III] 1666 + [OIII] 4363 + [OIII] 5007 -> "
+            f"T_e = {Te_high:.0f} K, n_e = {_ne_OIII:.0f} cm^-3 (PyNEB)"
+        )
+        diag["Te(high)"] = (
+            f"T_e and n_e solved together in the O²⁺ zone from the "
+            f"T_e(n_e) curves of [OIII] 4363/(5007+4959) and "
+            f"O III] 1666/[OIII] 4363 over log n_e = 0-7 in 1,000 steps "
+            f"(Hsiao+2026); {_conv}"
+        )
+        diag["O++/H+ density"] = (
+            f"O²⁺-zone n_e = {_ne_OIII:.0f} cm^-3 measured jointly with T_e "
+            f"from the same O III lines that set O++/H+, so no density is "
+            f"borrowed from another ion"
+            + ("; only a 1σ upper limit is constrained" if _ul else "")
+        )
+        if sc is not None:
+            diag["O III atomic data"] = (
+                f"{sc.coll_file} (6-level; PyNEB's SSB14 default stops at 5 "
+                f"levels and cannot represent λ1666)"
+            )
+    elif Te_high is not None:
         _te_line = (
             "O III] 1666/(5007+4959)" if te_high_diag == "1666"
             else "[OIII] 4363/(5007+4959)"
@@ -1448,6 +1740,9 @@ def _run_direct(
     ne_mid_override: float | None = None,
     ne_high_override: float | None = None,
     z: float = 0.0,
+    self_consistent_OIII: bool = False,
+    snr_auroral: float = 3.0,
+    oiii_coll_file: str | None = None,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -1491,8 +1786,6 @@ def _run_direct(
         Te_int_from_high,
         Te_low_from_high,
         compute_ionic_abundances,
-        compute_Te_OIII,
-        compute_Te_OIII_1666,
         compute_total_abundances,
     )
     from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
@@ -1505,12 +1798,16 @@ def _run_direct(
     # CIII] -> z-fallback).
     (
         ne_low, ne_mid, ne_high, ne_Opp,
-        Te_high, Te_int, Te_low, _Te_diagnostic, ne_failures,
+        Te_high, Te_int, Te_low, _Te_diagnostic, ne_failures, _sc,
+        ne_Opp_single,
     ) = _solve_densities_refined(
         fluxes, errors, z, Te_relation, snr_ne, ne_high_max, niv_rejected,
         ne_low_override=ne_low_override,
         ne_mid_override=ne_mid_override,
         ne_high_override=ne_high_override,
+        self_consistent_OIII=self_consistent_OIII,
+        snr_auroral=snr_auroral,
+        oiii_coll_file=oiii_coll_file,
     )
     ne_OIII = ne_Opp
     if Te_high is None:
@@ -1522,11 +1819,6 @@ def _run_direct(
             "[OIII] 4363 not available; using O III] 1666/(5007+4959) "
             "for T_e(high) = %.0f K.", Te_high,
         )
-    f_4363 = fluxes.get("OIII_4363", 0.0)
-    f_5007 = fluxes.get("OIII_5007", 0.0)
-    f_4959 = fluxes.get("OIII_4959", 0.0)
-    f_1666 = fluxes.get("OIII_1666", 0.0)
-
     # --- Step 3: Ionic abundances with zone-appropriate ne and Te ---
     ionic = compute_ionic_abundances(
         fluxes, Te_high, Te_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
@@ -1611,6 +1903,7 @@ def _run_direct(
         logU, logU_diag, icf_method, NO_icf_name, NE_DEFAULT,
         totals=totals, niv_rejected=niv_rejected,
         ne_Opp=ne_Opp, Te_int=Te_int, te_high_diag=_Te_diagnostic, z=z,
+        sc=_sc,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -1645,28 +1938,20 @@ def _run_direct(
             mc_fluxes[name] = max(mc_fluxes[name], 1e-50)
 
         try:
-            # Use fixed ne (varying ne per MC iteration adds noise
-            # without improving accuracy for the density diagnostics).
-            # Use the same Te diagnostic as the point estimate.
-            if _Te_diagnostic == "4363":
-                Te_h = compute_Te_OIII(
-                    mc_fluxes.get("OIII_4363", 0),
-                    mc_fluxes.get("OIII_5007", 0),
-                    mc_fluxes.get("OIII_4959", 0),
-                    ne_OIII,
-                )
-            else:
-                Te_h = compute_Te_OIII_1666(
-                    mc_fluxes.get("OIII_1666", 0),
-                    mc_fluxes.get("OIII_5007", 0),
-                    mc_fluxes.get("OIII_4959", 0),
-                    ne_OIII,
-                )
+            # The other zones' densities are held fixed (varying them per
+            # MC iteration adds noise without improving accuracy), but under
+            # the self-consistent diagnostic n_e(O++) is solved jointly with
+            # T_e for each draw.  Use the same Te diagnostic as the point
+            # estimate so the posterior is never a mixture.
+            Te_h, ne_Opp_i = _draw_Te_ne_OIII(
+                _Te_diagnostic, mc_fluxes, ne_OIII,
+                oiii_coll_file=oiii_coll_file,
+            )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
             Te_i = Te_int_from_high(Te_h, relation=Te_relation)
             ionic_mc = compute_ionic_abundances(
                 mc_fluxes, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
-                Te_int=Te_i, ne_Opp=ne_Opp,
+                Te_int=Te_i, ne_Opp=ne_Opp_i,
             )
 
             # Compute Z_Zsun for this MC iteration.
@@ -1847,34 +2132,12 @@ def _run_direct(
                 NO_tiers[k] = med
                 NO_tiers[f"_err_{k}"] = float(np.nanstd(arr))
 
-    # --- Alternative Te from O III] 1666 (cross-check) ---
-    _alt_1666 = None
-    if _Te_diagnostic == "4363" and f_1666 > 0 and f_5007 > 0:
-        try:
-            Te_alt = compute_Te_OIII_1666(f_1666, f_5007, f_4959, ne_OIII)
-            Te_alt_low = Te_low_from_high(Te_alt, relation=Te_relation)
-            Te_alt_int = Te_int_from_high(Te_alt, relation=Te_relation)
-            ionic_alt = compute_ionic_abundances(
-                fluxes, Te_alt, Te_alt_low, ne_low, ne_mid=ne_mid, ne_high=ne_high,
-                Te_int=Te_alt_int, ne_Opp=ne_Opp,
-            )
-            OH_alt = ionic_alt.get("O+/H+", 0.0) + ionic_alt.get("O++/H+", 0.0)
-            OH_alt_12 = 12.0 + np.log10(OH_alt) if OH_alt > 0 else np.nan
-            _alt_1666 = {
-                "Te_high": Te_alt,
-                "Te_low": Te_alt_low,
-                "OH": OH_alt_12,
-                "ionic": ionic_alt,
-            }
-            # Point estimate only — no MC.  This is a cross-check on the
-            # adopted lambda4363 temperature; propagating it would add a
-            # second MC pass as costly as the main loop.
-            diagnostics["Te(high) from 1666"] = (
-                f"O III] 1666/(5007+4959) → T_e = {Te_alt:.0f} K → "
-                f"12+log(O/H) = {OH_alt_12:.3f} (point estimate, not adopted)"
-            )
-        except (ValueError, RuntimeError) as e:
-            logger.info("Could not compute alternative Te from 1666: %s", e)
+    # --- Single-ratio T_e diagnostics, reported alongside the adopted one ---
+    _alt_single, _alt_diag = _single_ratio_alternatives(
+        fluxes, _Te_diagnostic, ne_Opp_single, ne_low, ne_mid, ne_high,
+        Te_relation,
+    )
+    diagnostics.update(_alt_diag)
 
     return {
         "OH": OH_med_mc,
@@ -1897,6 +2160,15 @@ def _run_direct(
         "ne_mid": ne_mid,
         "ne_high": ne_high,
         "ne_Opp": ne_Opp,
+        "ne_Opp_single": ne_Opp_single,
+        "ne_Opp_err": (
+            _sc.ne_err if (_sc is not None and _Te_diagnostic == "self_consistent")
+            else None
+        ),
+        "ne_Opp_is_upper_limit": bool(_sc is not None and _sc.ne_is_upper_limit),
+        "Te_diagnostic": _Te_diagnostic,
+        "selfconsistent_OIII": _sc,
+        "alt_single_ratio": _alt_single or None,
         "logU": logU,
         "logU_err": logU_err,
         "icf_method": icf_method,
@@ -1982,6 +2254,9 @@ def _run_direct_mcmc(
     ne_mid_override: float | None = None,
     ne_high_override: float | None = None,
     z: float = 0.0,
+    self_consistent_OIII: bool = False,
+    snr_auroral: float = 3.0,
+    oiii_coll_file: str | None = None,
     # Per-draw dust resampling (when Av_err is set).
     Av: float | None = None,
     Av_err: float | None = None,
@@ -2043,8 +2318,6 @@ def _run_direct_mcmc(
         Te_int_from_high,
         Te_low_from_high,
         compute_ionic_abundances,
-        compute_Te_OIII,
-        compute_Te_OIII_1666,
         compute_total_abundances,
     )
     from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
@@ -2091,13 +2364,17 @@ def _run_direct_mcmc(
     try:
         (
             ne_low, ne_mid, ne_high, ne_Opp,
-            Te_high_pt, Te_int_pt, Te_low_pt, _Te_diagnostic, ne_failures,
+            Te_high_pt, Te_int_pt, Te_low_pt, _Te_diagnostic, ne_failures, _sc,
+            ne_Opp_single,
         ) = _solve_densities_refined(
             med_fluxes, med_errors, z, Te_relation, snr_ne, ne_high_max,
             niv_rejected,
             ne_low_override=ne_low_override,
             ne_mid_override=ne_mid_override,
             ne_high_override=ne_high_override,
+            self_consistent_OIII=self_consistent_OIII,
+            snr_auroral=snr_auroral,
+            oiii_coll_file=oiii_coll_file,
         )
         if Te_high_pt is None:
             Te_high_pt = np.nan
@@ -2110,6 +2387,7 @@ def _run_direct_mcmc(
             )
     except ValueError:
         # PyNEB could not solve the (present) auroral ratio at the medians.
+        _sc = None
         ne_low, ne_mid, ne_high, ne_Opp, ne_failures = _compute_multi_ne(
             med_fluxes, errors=med_errors, snr_ne=snr_ne,
             ne_high_max=ne_high_max, niv_density_invalid=niv_rejected, z=z,
@@ -2125,6 +2403,7 @@ def _run_direct_mcmc(
         Te_low_pt = np.nan
         Te_int_pt = None
         _Te_diagnostic = None
+        ne_Opp_single = ne_Opp
 
     ne_OIII = ne_Opp
 
@@ -2201,25 +2480,15 @@ def _run_direct_mcmc(
             sample = _dust_correct_sample(sample, Av_draw, dust_law, _dk)
 
         try:
-            if _Te_diagnostic == "4363":
-                Te_h = compute_Te_OIII(
-                    sample.get("OIII_4363", 0),
-                    sample.get("OIII_5007", 0),
-                    sample.get("OIII_4959", 0),
-                    ne_OIII,
-                )
-            else:
-                Te_h = compute_Te_OIII_1666(
-                    sample.get("OIII_1666", 0),
-                    sample.get("OIII_5007", 0),
-                    sample.get("OIII_4959", 0),
-                    ne_OIII,
-                )
+            Te_h, ne_Opp_i = _draw_Te_ne_OIII(
+                _Te_diagnostic, sample, ne_OIII,
+                oiii_coll_file=oiii_coll_file,
+            )
             Te_l = Te_low_from_high(Te_h, relation=Te_relation)
             Te_i = Te_int_from_high(Te_h, relation=Te_relation)
             ionic_i = compute_ionic_abundances(
                 sample, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
-                Te_int=Te_i, ne_Opp=ne_Opp,
+                Te_int=Te_i, ne_Opp=ne_Opp_i,
             )
 
             # Z_Zsun for this sample.
@@ -2403,31 +2672,11 @@ def _run_direct_mcmc(
                 NO_tiers[k] = med
                 NO_tiers[f"_err_{k}"] = (lo, hi)
 
-    # --- Alternative Te from O III] 1666 (cross-check) ---
-    _diag_extra = {}
-    if _Te_diagnostic == "4363" and med_fluxes.get("OIII_1666", 0) > 0 and med_fluxes.get("OIII_5007", 0) > 0:
-        try:
-            Te_alt = compute_Te_OIII_1666(
-                med_fluxes["OIII_1666"], med_fluxes["OIII_5007"],
-                med_fluxes.get("OIII_4959", 0), ne_OIII,
-            )
-            Te_alt_low = Te_low_from_high(Te_alt, relation=Te_relation)
-            Te_alt_int = Te_int_from_high(Te_alt, relation=Te_relation)
-            ionic_alt = compute_ionic_abundances(
-                med_fluxes, Te_alt, Te_alt_low, ne_low, ne_mid=ne_mid,
-                ne_high=ne_high, Te_int=Te_alt_int, ne_Opp=ne_Opp,
-            )
-            OH_alt = ionic_alt.get("O+/H+", 0.0) + ionic_alt.get("O++/H+", 0.0)
-            OH_alt_12 = 12.0 + np.log10(OH_alt) if OH_alt > 0 else np.nan
-            # Point estimate only — no MC.  This is a cross-check on the
-            # adopted lambda4363 temperature; propagating it through the
-            # posterior would add a second pass as costly as the main loop.
-            _diag_extra["Te(high) from 1666"] = (
-                f"O III] 1666/(5007+4959) → T_e = {Te_alt:.0f} K → "
-                f"12+log(O/H) = {OH_alt_12:.3f} (point estimate, not adopted)"
-            )
-        except (ValueError, RuntimeError) as e:
-            logger.info("Could not compute alternative Te from 1666: %s", e)
+    # --- Single-ratio T_e diagnostics, reported alongside the adopted one ---
+    _alt_single, _diag_extra = _single_ratio_alternatives(
+        med_fluxes, _Te_diagnostic, ne_Opp_single, ne_low, ne_mid, ne_high,
+        Te_relation,
+    )
 
     # Intermediate-zone temperature (deterministic function of T_e(high)).
     _Te_high_final = (
@@ -2460,6 +2709,15 @@ def _run_direct_mcmc(
         "ne_mid": ne_mid,
         "ne_high": ne_high,
         "ne_Opp": ne_Opp,
+        "ne_Opp_single": ne_Opp_single,
+        "ne_Opp_err": (
+            _sc.ne_err if (_sc is not None and _Te_diagnostic == "self_consistent")
+            else None
+        ),
+        "ne_Opp_is_upper_limit": bool(_sc is not None and _sc.ne_is_upper_limit),
+        "Te_diagnostic": _Te_diagnostic,
+        "selfconsistent_OIII": _sc,
+        "alt_single_ratio": _alt_single or None,
         "logU": logU_med if logU_med is not None else logU_pt,
         "logU_err": (logU_lo, logU_hi) if logU_lo is not None else None,
         "icf_method": icf_method,
@@ -2483,7 +2741,7 @@ def _run_direct_mcmc(
                 icf_method, NO_icf_name, NE_DEFAULT,
                 totals=totals_pt, niv_rejected=niv_rejected,
                 ne_Opp=ne_Opp, Te_int=_Te_mid_final,
-                te_high_diag=_Te_diagnostic, z=z,
+                te_high_diag=_Te_diagnostic, z=z, sc=_sc,
             ),
             **_diag_extra,
         },
@@ -2605,6 +2863,8 @@ def compute_abundances(
     Av_err: float | None = None,
     Av_prior: str = "gaussian",
     method: str = "auto",
+    self_consistent_OIII: bool | str = "auto",
+    oiii_coll_file: str | None = None,
     snr_auroral: float = 3.0,
     snr_line: float = 2.0,
     ne_high_max: float = 5e5,
@@ -2711,8 +2971,35 @@ def compute_abundances(
         ``"strong_line"``.  ``"auto"`` uses direct if [OIII] 4363
         SNR >= *snr_auroral*.  ``"forward"`` runs the Bayesian
         forward model (Cullen+25) — see :func:`forward_model`.
+    self_consistent_OIII : bool or str
+        Whether to solve T_e(O++) and n_e(O++) *together* from O III] 1666,
+        [OIII] 4363 and [OIII] 5007 (Hsiao et al. 2026, arXiv:2608.20339)
+        instead of solving T_e from one ratio at a density borrowed from
+        another ion.  ``"auto"`` (default) uses it whenever all three lines
+        are detected above *snr_auroral*; ``True`` forces it; ``False``
+        restores the single-ratio behaviour.
+
+        This matters once n_e approaches the [OIII] 5007 critical density
+        (~7e5 cm^-3): above ~1e5 cm^-3 lambda5007 is collisionally
+        de-excited, so the classical lambda4363/lambda5007 ratio depends on
+        both T_e and n_e and solving it at an assumed low density
+        overestimates T_e and underestimates O/H — by up to 1.1 dex in the
+        Hsiao et al. sample.  When the solve leaves n_e as an upper limit
+        (the density-insensitive regime), the single-ratio result is adopted
+        instead and the limit is reported.
+
+        The single-ratio answers are always reported alongside, in
+        ``alt_results["direct_4363"]`` / ``alt_results["direct_1666"]``.
+    oiii_coll_file : str or None
+        O III collision-strength file for the joint solve.  ``None``
+        (default) uses the package's TZ17 dataset, matching the existing
+        O III] 1666 temperature path.  ``"o_iii_coll_AK99.dat"`` reproduces
+        Hsiao et al. exactly (1-2 % in T_e, ~0.02 dex in O++/H+).  PyNEB's
+        SSB14 default has only 5 levels and cannot be used here.
     snr_auroral : float
         Minimum SNR for [OIII] 4363 to use the direct method (default 3.0).
+        Also the per-line threshold all three O III lines must clear for
+        *self_consistent_OIII* ``"auto"`` to engage.
     snr_line : float
         Minimum per-line SNR for inclusion in the abundance calculation
         (default 2.0).  Lines below this threshold are removed from
@@ -3109,6 +3396,19 @@ def compute_abundances(
     # --- Direct method ---
     primary_result = None
 
+    # "auto" defers to _solve_Te_high, which engages the joint solve only
+    # when all three O III lines clear snr_auroral; True forces the attempt
+    # (it still falls back if a line is missing or the solve fails).
+    if isinstance(self_consistent_OIII, str):
+        if self_consistent_OIII != "auto":
+            raise ValueError(
+                f"self_consistent_OIII must be True, False or 'auto', "
+                f"got {self_consistent_OIII!r}."
+            )
+        _self_consistent = True
+    else:
+        _self_consistent = bool(self_consistent_OIII)
+
     if use_direct:
         if is_mcmc and posteriors and "OIII_4363" in posteriors:
             direct_out = _run_direct_mcmc(
@@ -3122,6 +3422,9 @@ def compute_abundances(
                 ne_mid_override=ne_mid_override,
                 ne_high_override=ne_high_override,
                 z=_z_ne,
+                self_consistent_OIII=_self_consistent,
+                snr_auroral=snr_auroral,
+                oiii_coll_file=oiii_coll_file,
                 Av=Av_derived, Av_err=Av_err,
                 Av_prior=Av_prior, dust_law=dust_law,
                 dust_kwargs=dust_kwargs,
@@ -3138,6 +3441,9 @@ def compute_abundances(
                 ne_mid_override=ne_mid_override,
                 ne_high_override=ne_high_override,
                 z=_z_ne,
+                self_consistent_OIII=_self_consistent,
+                snr_auroral=snr_auroral,
+                oiii_coll_file=oiii_coll_file,
             )
 
         primary_result = AbundanceResult(
@@ -3183,7 +3489,34 @@ def compute_abundances(
             icf_values=direct_out.get("icf_values"),
             failures=direct_out.get("failures"),
             diagnostics=direct_out.get("diagnostics"),
+            Te_diagnostic=direct_out.get("Te_diagnostic"),
+            ne_Opp_err=direct_out.get("ne_Opp_err"),
+            ne_Opp_is_upper_limit=direct_out.get("ne_Opp_is_upper_limit", False),
+            Te_ne_selfconsistent=direct_out.get("selfconsistent_OIII"),
         )
+
+        # Report what each single ratio would have given on its own, so the
+        # effect of the adopted diagnostic is visible rather than implied.
+        # Point estimates: a second MC/posterior pass per alternative would
+        # roughly double the runtime for a cross-check.
+        _alts = direct_out.get("alt_single_ratio") or {}
+        if _alts:
+            primary_result.alt_results = {
+                f"direct_{key}": AbundanceResult(
+                    method=f"direct ({_TE_DIAG_LABELS[key]}, point estimate)",
+                    OH=val["OH"],
+                    OH_err=np.nan,
+                    Te_high=val["Te_high"],
+                    Te_low=val["Te_low"],
+                    Te_mid=val["Te_mid"],
+                    ne_Opp=val["ne_Opp"],
+                    Te_diagnostic=key,
+                    Av=Av_derived,
+                    Av_err=Av_err_derived,
+                    ionic=val["ionic"],
+                )
+                for key, val in _alts.items()
+            }
 
     # Inject per-line Balmer decrement details into diagnostics.
     if _balmer_info and primary_result is not None and primary_result.diagnostics is not None:
@@ -3206,8 +3539,9 @@ def compute_abundances(
         )
 
     # --- Auto mode: run the alternative method for comparison ---
-    if method == "auto" and primary_result.alt_results is None:
-        alt = {}
+    if method == "auto":
+        # Keep the single-ratio comparisons already attached above.
+        alt = dict(primary_result.alt_results or {})
         if primary_result.method == "direct":
             # Also run strong-line for comparison.
             try:
@@ -3217,56 +3551,9 @@ def compute_abundances(
                 )
             except Exception:
                 logger.info("Alternative strong-line method failed; skipping.")
-            # If primary used 4363, also compute Te from 1666 as an alternative.
-            f_1666_alt = fluxes.get("OIII_1666", 0.0)
-            f_5007_alt = fluxes.get("OIII_5007", 0.0)
-            _has_1666_flux = f_1666_alt > 0 and f_5007_alt > 0
-            if _has_1666_flux and fluxes.get("OIII_4363", 0.0) > 0:
-                # Point estimate only.  This is a cross-check on the adopted
-                # lambda4363 temperature, so it does not warrant a second
-                # full MC/posterior pass over the direct method — that would
-                # roughly double the runtime of compute_abundances.  Solve
-                # T_e once from the dust-corrected fluxes and propagate it
-                # deterministically through the ionic abundances; no error
-                # bar is reported, by design.
-                from .direct import (
-                    NE_DEFAULT,
-                    Te_int_from_high,
-                    Te_low_from_high,
-                    compute_ionic_abundances,
-                    compute_Te_OIII_1666,
-                )
-                try:
-                    _ne_lo = primary_result.ne_low or NE_DEFAULT
-                    Te_1666_pt = compute_Te_OIII_1666(
-                        f_1666_alt, f_5007_alt,
-                        fluxes.get("OIII_4959", 0.0),
-                        primary_result.ne_mid or _ne_lo,
-                    )
-                    Te_1666_low = Te_low_from_high(Te_1666_pt, relation=Te_relation)
-                    Te_1666_int = Te_int_from_high(Te_1666_pt, relation=Te_relation)
-                    ionic_1666 = compute_ionic_abundances(
-                        fluxes, Te_1666_pt, Te_1666_low, _ne_lo,
-                        ne_mid=primary_result.ne_mid,
-                        ne_high=primary_result.ne_high,
-                        Te_int=Te_1666_int,
-                    )
-                    OH_1666 = ionic_1666.get("O+/H+", 0.0) + ionic_1666.get("O++/H+", 0.0)
-                    alt["direct_1666"] = AbundanceResult(
-                        method="direct (O III] 1666, point estimate)",
-                        OH=12.0 + np.log10(OH_1666) if OH_1666 > 0 else np.nan,
-                        # No error bar by design: this is a deterministic
-                        # cross-check, not a sampled measurement.
-                        OH_err=np.nan,
-                        Te_high=Te_1666_pt,
-                        Te_low=Te_1666_low,
-                        Te_mid=Te_1666_int,
-                        Av=Av_derived,
-                        Av_err=Av_err_derived,
-                        ionic=ionic_1666,
-                    )
-                except (ValueError, RuntimeError) as e:
-                    logger.info("Point-estimate T_e from 1666 failed: %s", e)
+            # The single-ratio T_e comparisons (direct_4363 / direct_1666)
+            # are attached to primary_result above, from the densities the
+            # direct run actually used.
         elif primary_result.method == "strong_line":
             # Also try direct if 4363 is present (even if SNR was below threshold).
             has_auroral_alt = (
@@ -3286,6 +3573,9 @@ def compute_abundances(
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
                             z=_z_ne,
+                            self_consistent_OIII=_self_consistent,
+                            snr_auroral=snr_auroral,
+                            oiii_coll_file=oiii_coll_file,
                             Av=Av_derived, Av_err=Av_err,
                             Av_prior=Av_prior, dust_law=dust_law,
                             dust_kwargs=dust_kwargs,
@@ -3301,6 +3591,9 @@ def compute_abundances(
                             ne_mid_override=ne_mid_override,
                             ne_high_override=ne_high_override,
                             z=_z_ne,
+                            self_consistent_OIII=_self_consistent,
+                            snr_auroral=snr_auroral,
+                            oiii_coll_file=oiii_coll_file,
                         )
                     alt["direct"] = AbundanceResult(
                         method="direct",
