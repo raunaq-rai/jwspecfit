@@ -523,3 +523,77 @@ class TestOIIIUVDoublet:
         assert "CO_uv" in (res.alt_results or {})
         assert np.isfinite(res.alt_results["CO_uv"].CO)
         assert "C/O (UV only)" in res.diagnostics
+
+
+class TestUnsolvableAuroralRatio:
+    """A noisy auroral line must not take down the whole calculation."""
+
+    @staticmethod
+    def _bad_4363():
+        """lambda4363 far above the physical maximum, with no lambda1666.
+
+        Without the UV line there is no second diagnostic to fall through
+        to, so this is the case that used to raise out of the top-level
+        call.  (With lambda1666 present the joint solve instead absorbs the
+        bad flux into a spurious high-density solution -- see
+        test_bad_4363_with_1666_is_not_silently_trusted.)
+        """
+        result = _mock_result(15000, 1e3, with_1666=False)
+        result.lines["OIII_4363"].flux *= 12.0
+        return result
+
+    def test_bad_4363_with_1666_is_not_silently_trusted(self):
+        """A wrong lambda4363 plus lambda1666 yields a converged wrong answer.
+
+        Garbage in, garbage out: the two ratios do intersect, just not at
+        the truth.  Nothing in the solve can detect that, which is why the
+        lambda1661/lambda1666 branching-ratio check and the convergence
+        flags matter -- record the behaviour so it is not mistaken for a
+        guarantee.
+        """
+        result = _mock_result(15000, 1e3)
+        result.lines["OIII_4363"].flux *= 12.0
+        res = compute_abundances(
+            result, z=6.0, method="direct", dust_correct=False,
+            n_mc=50, progress=False,
+        )
+        assert res.Te_diagnostic == "self_consistent"
+        # Badly wrong, and not flagged by the solver itself.
+        assert res.Te_high < 12000
+
+    def test_auto_falls_back_to_strong_line(self):
+        res = compute_abundances(
+            self._bad_4363(), z=6.0, method="auto", dust_correct=False,
+            n_mc=50, progress=False,
+        )
+        assert res.method == "strong_line"
+        assert "direct method" in (res.failures or {})
+        assert "physical range" in res.failures["direct method"]
+
+    def test_explicit_direct_still_raises(self):
+        """method="direct" asked for that measurement, so say it failed."""
+        with pytest.raises(ValueError, match="outside the physical range"):
+            compute_abundances(
+                self._bad_4363(), z=6.0, method="direct", dust_correct=False,
+                n_mc=50, progress=False,
+            )
+
+    def test_falls_through_to_1666(self):
+        """An unsolvable lambda4363 must not hide a good O III] 1666."""
+        import pyneb as pn
+
+        result = _mock_result(15000, 1e3)
+        o3 = _get_oiii_atom()
+        Te, ne = 15000.0, 1e3
+        scale = result.lines["OIII_5007"].flux / o3.getEmissivity(Te, ne, wave=5007)
+        f = scale * o3.getEmissivity(Te, ne, lev_i=6, lev_j=3)
+        result.lines["OIII_1666"] = _Line(f, 0.05 * f)
+        result.lines["OIII_4363"].flux *= 12.0
+
+        res = compute_abundances(
+            result, z=6.0, method="direct", dust_correct=False,
+            self_consistent_OIII=False, n_mc=50, progress=False,
+        )
+        assert res.method == "direct"
+        assert res.Te_diagnostic == "1666"
+        assert res.Te_high == pytest.approx(Te, rel=0.15)

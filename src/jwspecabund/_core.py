@@ -734,10 +734,23 @@ def _solve_Te_high(
     if sc is not None and not sc.ne_is_upper_limit:
         return sc.Te, "self_consistent", sc
 
-    if f4363 > 0 and f5007 > 0:
-        return compute_Te_OIII(f4363, f5007, f4959, ne), "4363", sc
-    if f1666 > 0 and f5007 > 0:
-        return compute_Te_OIII_1666(f1666, f5007, f4959, ne), "1666", sc
+    # Try each single-ratio diagnostic in turn.  An auroral line whose ratio
+    # PyNEB cannot invert -- a noisy or over-fit lambda4363 can land above
+    # the physical maximum -- must not abort the whole calculation when the
+    # other diagnostic is available and fine.
+    for key, solver, args in (
+        ("4363", compute_Te_OIII, (f4363, f5007, f4959)),
+        ("1666", compute_Te_OIII_1666, (f1666, f5007, f4959)),
+    ):
+        if args[0] <= 0 or f5007 <= 0:
+            continue
+        try:
+            return solver(*args, ne), key, sc
+        except (ValueError, RuntimeError) as exc:
+            logger.warning(
+                "T_e from lambda%s could not be solved (%s); trying the next "
+                "diagnostic.", key, exc,
+            )
     return None, None, sc
 
 
@@ -1926,6 +1939,17 @@ def _run_direct(
     )
     ne_OIII = ne_Opp
     if Te_high is None:
+        _present = [
+            n for n in ("OIII_4363", "OIII_1666")
+            if fluxes.get(n, 0.0) > 0
+        ]
+        if _present and fluxes.get("OIII_5007", 0.0) > 0:
+            raise ValueError(
+                f"T_e(O++) could not be solved: {', '.join(_present)} present "
+                f"but the ratio against [OIII] 5007 lies outside the physical "
+                f"range. Usually a noisy or over-fit auroral line, or a dust "
+                f"correction that has over-inflated the UV. Check the line fit."
+            )
         raise ValueError(
             "Neither [OIII] 4363 nor O III] 1666 available for T_e computation."
         )
@@ -3588,6 +3612,7 @@ def compute_abundances(
 
     # --- Direct method ---
     primary_result = None
+    _direct_failure: str | None = None
 
     # "auto" defers to _solve_Te_high, which engages the joint solve only
     # when all three O III lines clear snr_auroral; True forces the attempt
@@ -3603,134 +3628,148 @@ def compute_abundances(
         _self_consistent = bool(self_consistent_OIII)
 
     if use_direct:
-        if is_mcmc and posteriors and "OIII_4363" in posteriors:
-            direct_out = _run_direct_mcmc(
-                posteriors, Te_relation, n_posterior=n_posterior,
-                progress=progress, ne_high_max=ne_high_max,
-                snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
-                continuum_rms_limits=continuum_rms_limits,
-                niv_rejected=_niv_rejected,
-                ne_low_override=ne_low_override,
-                ne_mid_override=ne_mid_override,
-                ne_high_override=ne_high_override,
-                z=_z_ne,
-                self_consistent_OIII=_self_consistent,
-                snr_auroral=snr_auroral,
-                oiii_coll_file=oiii_coll_file,
-                Av=Av_derived, Av_err=Av_err,
-                Av_prior=Av_prior, dust_law=dust_law,
-                dust_kwargs=dust_kwargs,
-            )
-        else:
-            direct_out = _run_direct(
-                fluxes, errors, Te_relation, n_mc,
-                progress=progress, ne_high_max=ne_high_max,
-                snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
-                continuum_rms_limits=continuum_rms_limits,
-                niv_rejected=_niv_rejected,
-                ne_low_override=ne_low_override,
-                ne_mid_override=ne_mid_override,
-                ne_high_override=ne_high_override,
-                z=_z_ne,
-                self_consistent_OIII=_self_consistent,
-                snr_auroral=snr_auroral,
-                oiii_coll_file=oiii_coll_file,
-            )
-
-        primary_result = AbundanceResult(
-            method="direct",
-            OH=direct_out["OH"],
-            OH_err=direct_out["OH_err"],
-            NO=direct_out.get("NO"),
-            NO_err=direct_out.get("NO_err"),
-            CO=direct_out.get("CO"),
-            CO_err=direct_out.get("CO_err"),
-            Te_high=direct_out.get("Te_high"),
-            Te_high_err=direct_out.get("Te_high_err"),
-            Te_mid=direct_out.get("Te_mid"),
-            Te_mid_err=direct_out.get("Te_mid_err"),
-            Te_low=direct_out.get("Te_low"),
-            Te_low_err=direct_out.get("Te_low_err"),
-            ne=direct_out.get("ne"),
-            Av=Av_derived,
-            Av_err=Av_err_derived,
-            Av_posterior=direct_out.get("Av_posterior"),
-            ionic=direct_out.get("ionic"),
-            ionic_upper_limits=direct_out.get("ionic_upper_limits"),
-            ionic_ul_details=direct_out.get("ionic_ul_details"),
-            OH_posterior=direct_out.get("OH_posterior"),
-            NO_posterior=direct_out.get("NO_posterior"),
-            CO_posterior=direct_out.get("CO_posterior"),
-            SO=direct_out.get("SO"),
-            SO_err=direct_out.get("SO_err"),
-            NeO=direct_out.get("NeO"),
-            NeO_err=direct_out.get("NeO_err"),
-            ArO=direct_out.get("ArO"),
-            ArO_err=direct_out.get("ArO_err"),
-            logU=direct_out.get("logU"),
-            logU_err=direct_out.get("logU_err"),
-            ne_low=direct_out.get("ne_low"),
-            ne_mid=direct_out.get("ne_mid"),
-            ne_high=direct_out.get("ne_high"),
-            ne_Opp=direct_out.get("ne_Opp"),
-            icf_method=direct_out.get("icf_method"),
-            NO_icf_name=direct_out.get("NO_icf_name"),
-            excluded_lines=excluded_lines if excluded_lines else None,
-            NO_tiers=direct_out.get("NO_tiers"),
-            icf_values=direct_out.get("icf_values"),
-            failures=direct_out.get("failures"),
-            diagnostics=direct_out.get("diagnostics"),
-            Te_diagnostic=direct_out.get("Te_diagnostic"),
-            ne_Opp_err=direct_out.get("ne_Opp_err"),
-            ne_Opp_is_upper_limit=direct_out.get("ne_Opp_is_upper_limit", False),
-            Te_ne_selfconsistent=direct_out.get("selfconsistent_OIII"),
-        )
-
-        # Report what each single ratio would have given on its own, so the
-        # effect of the adopted diagnostic is visible rather than implied.
-        # Point estimates: a second MC/posterior pass per alternative would
-        # roughly double the runtime for a cross-check.
-        _alts = direct_out.get("alt_single_ratio") or {}
-        _alt_map: dict[str, AbundanceResult] = {}
-        if _alts:
-            _alt_map = {
-                f"direct_{key}": AbundanceResult(
-                    method=f"direct ({_TE_DIAG_LABELS[key]}, point estimate)",
-                    OH=val["OH"],
-                    OH_err=np.nan,
-                    Te_high=val["Te_high"],
-                    Te_low=val["Te_low"],
-                    Te_mid=val["Te_mid"],
-                    ne_Opp=val["ne_Opp"],
-                    Te_diagnostic=key,
-                    Av=Av_derived,
-                    Av_err=Av_err_derived,
-                    ionic=val["ionic"],
+        try:
+            if is_mcmc and posteriors and "OIII_4363" in posteriors:
+                direct_out = _run_direct_mcmc(
+                    posteriors, Te_relation, n_posterior=n_posterior,
+                    progress=progress, ne_high_max=ne_high_max,
+                    snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
+                    icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                    continuum_rms_limits=continuum_rms_limits,
+                    niv_rejected=_niv_rejected,
+                    ne_low_override=ne_low_override,
+                    ne_mid_override=ne_mid_override,
+                    ne_high_override=ne_high_override,
+                    z=_z_ne,
+                    self_consistent_OIII=_self_consistent,
+                    snr_auroral=snr_auroral,
+                    oiii_coll_file=oiii_coll_file,
+                    Av=Av_derived, Av_err=Av_err,
+                    Av_prior=Av_prior, dust_law=dust_law,
+                    dust_kwargs=dust_kwargs,
                 )
-                for key, val in _alts.items()
-            }
+            else:
+                direct_out = _run_direct(
+                    fluxes, errors, Te_relation, n_mc,
+                    progress=progress, ne_high_max=ne_high_max,
+                    snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
+                    icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                    continuum_rms_limits=continuum_rms_limits,
+                    niv_rejected=_niv_rejected,
+                    ne_low_override=ne_low_override,
+                    ne_mid_override=ne_mid_override,
+                    ne_high_override=ne_high_override,
+                    z=_z_ne,
+                    self_consistent_OIII=_self_consistent,
+                    snr_auroral=snr_auroral,
+                    oiii_coll_file=oiii_coll_file,
+                )
 
-        # The pure-UV C/O: C III] 1907,1909 against O III] 1661,1666 instead
-        # of the optical [OIII] 5007.  Both lines sit ~240 A apart, so it is
-        # nearly reddening-free and needs no Hbeta -- a genuinely different
-        # systematic from the adopted value, worth seeing side by side.
-        if direct_out.get("CO_uv") is not None:
-            _alt_map["CO_uv"] = AbundanceResult(
-                method="C/O (UV only: CIII] / O III] 1661,1666)",
-                OH=np.nan,
-                OH_err=np.nan,
-                CO=direct_out["CO_uv"],
-                CO_err=direct_out.get("CO_uv_err"),
+            primary_result = AbundanceResult(
+                method="direct",
+                OH=direct_out["OH"],
+                OH_err=direct_out["OH_err"],
+                NO=direct_out.get("NO"),
+                NO_err=direct_out.get("NO_err"),
+                CO=direct_out.get("CO"),
+                CO_err=direct_out.get("CO_err"),
                 Te_high=direct_out.get("Te_high"),
-                ne_Opp=direct_out.get("ne_Opp"),
+                Te_high_err=direct_out.get("Te_high_err"),
+                Te_mid=direct_out.get("Te_mid"),
+                Te_mid_err=direct_out.get("Te_mid_err"),
+                Te_low=direct_out.get("Te_low"),
+                Te_low_err=direct_out.get("Te_low_err"),
+                ne=direct_out.get("ne"),
                 Av=Av_derived,
                 Av_err=Av_err_derived,
+                Av_posterior=direct_out.get("Av_posterior"),
+                ionic=direct_out.get("ionic"),
+                ionic_upper_limits=direct_out.get("ionic_upper_limits"),
+                ionic_ul_details=direct_out.get("ionic_ul_details"),
+                OH_posterior=direct_out.get("OH_posterior"),
+                NO_posterior=direct_out.get("NO_posterior"),
+                CO_posterior=direct_out.get("CO_posterior"),
+                SO=direct_out.get("SO"),
+                SO_err=direct_out.get("SO_err"),
+                NeO=direct_out.get("NeO"),
+                NeO_err=direct_out.get("NeO_err"),
+                ArO=direct_out.get("ArO"),
+                ArO_err=direct_out.get("ArO_err"),
+                logU=direct_out.get("logU"),
+                logU_err=direct_out.get("logU_err"),
+                ne_low=direct_out.get("ne_low"),
+                ne_mid=direct_out.get("ne_mid"),
+                ne_high=direct_out.get("ne_high"),
+                ne_Opp=direct_out.get("ne_Opp"),
+                icf_method=direct_out.get("icf_method"),
+                NO_icf_name=direct_out.get("NO_icf_name"),
+                excluded_lines=excluded_lines if excluded_lines else None,
+                NO_tiers=direct_out.get("NO_tiers"),
+                icf_values=direct_out.get("icf_values"),
+                failures=direct_out.get("failures"),
+                diagnostics=direct_out.get("diagnostics"),
+                Te_diagnostic=direct_out.get("Te_diagnostic"),
+                ne_Opp_err=direct_out.get("ne_Opp_err"),
+                ne_Opp_is_upper_limit=direct_out.get("ne_Opp_is_upper_limit", False),
+                Te_ne_selfconsistent=direct_out.get("selfconsistent_OIII"),
             )
-        if _alt_map:
-            primary_result.alt_results = _alt_map
-        primary_result.oiii_uv_doublet = direct_out.get("oiii_uv_doublet")
+
+            # Report what each single ratio would have given on its own, so the
+            # effect of the adopted diagnostic is visible rather than implied.
+            # Point estimates: a second MC/posterior pass per alternative would
+            # roughly double the runtime for a cross-check.
+            _alts = direct_out.get("alt_single_ratio") or {}
+            _alt_map: dict[str, AbundanceResult] = {}
+            if _alts:
+                _alt_map = {
+                    f"direct_{key}": AbundanceResult(
+                        method=f"direct ({_TE_DIAG_LABELS[key]}, point estimate)",
+                        OH=val["OH"],
+                        OH_err=np.nan,
+                        Te_high=val["Te_high"],
+                        Te_low=val["Te_low"],
+                        Te_mid=val["Te_mid"],
+                        ne_Opp=val["ne_Opp"],
+                        Te_diagnostic=key,
+                        Av=Av_derived,
+                        Av_err=Av_err_derived,
+                        ionic=val["ionic"],
+                    )
+                    for key, val in _alts.items()
+                }
+
+            # The pure-UV C/O: C III] 1907,1909 against O III] 1661,1666 instead
+            # of the optical [OIII] 5007.  Both lines sit ~240 A apart, so it is
+            # nearly reddening-free and needs no Hbeta -- a genuinely different
+            # systematic from the adopted value, worth seeing side by side.
+            if direct_out.get("CO_uv") is not None:
+                _alt_map["CO_uv"] = AbundanceResult(
+                    method="C/O (UV only: CIII] / O III] 1661,1666)",
+                    OH=np.nan,
+                    OH_err=np.nan,
+                    CO=direct_out["CO_uv"],
+                    CO_err=direct_out.get("CO_uv_err"),
+                    Te_high=direct_out.get("Te_high"),
+                    ne_Opp=direct_out.get("ne_Opp"),
+                    Av=Av_derived,
+                    Av_err=Av_err_derived,
+                )
+            if _alt_map:
+                primary_result.alt_results = _alt_map
+            primary_result.oiii_uv_doublet = direct_out.get("oiii_uv_doublet")
+        except ValueError as exc:
+            # The direct method needs an invertible auroral ratio.  When the
+            # line fit does not provide one, "auto" should degrade to the
+            # strong-line method rather than take the whole call down with it;
+            # an explicit method="direct" still raises, because there the
+            # caller asked for this specific measurement.
+            if method != "auto":
+                raise
+            logger.warning(
+                "Direct method failed (%s); falling back to strong-line.", exc,
+            )
+            primary_result = None
+            _direct_failure = str(exc)
 
     # Inject per-line Balmer decrement details into diagnostics.
     if _balmer_info and primary_result is not None and primary_result.diagnostics is not None:
@@ -3751,6 +3790,9 @@ def compute_abundances(
             fluxes, errors, is_mcmc, posteriors, n_mc, n_posterior,
             progress, Av_derived, Av_err_derived, excluded_lines,
         )
+        if _direct_failure is not None:
+            primary_result.failures = dict(primary_result.failures or {})
+            primary_result.failures["direct method"] = _direct_failure
 
     # --- Auto mode: run the alternative method for comparison ---
     if method == "auto":
