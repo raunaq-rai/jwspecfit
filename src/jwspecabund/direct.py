@@ -1177,6 +1177,220 @@ def compute_Te_ne_OIII(
 
 
 
+# ---------------------------------------------------------------------------
+# Pure-UV C/O from C III] 1907,1909 and O III] 1661,1666
+# ---------------------------------------------------------------------------
+
+_OIII_UV_BRANCHING: dict[str, float] = {}
+
+
+def oiii_uv_branching_ratio(coll_file: str = OIII_1666_COLL_FILE) -> float:
+    """Return the theoretical O III] lambda1661/lambda1666 ratio.
+
+    Both components are decays of the *same* upper level (the 5-S-2 state,
+    to 3-P-1 and 3-P-2 respectively), so their ratio is a pure branching
+    ratio -- fixed by the transition probabilities and wavelengths alone,
+    with no dependence on T_e, n_e or abundance.  That makes it a free
+    consistency check on any fit that measures the doublet: a departure is
+    a measurement problem, not physics.
+
+    Parameters
+    ----------
+    coll_file : str
+        O III collision-strength file; see :func:`_get_oiii_atom`.  The
+        ratio depends only on the *atom* file, so this argument changes
+        nothing in practice -- it is accepted so callers can stay
+        consistent with the atom they are otherwise using.
+
+    Returns
+    -------
+    float
+        lambda1661/lambda1666, ~0.40.
+    """
+    cached = _OIII_UV_BRANCHING.get(coll_file)
+    if cached is not None:
+        return cached
+    atom = _get_oiii_atom(coll_file)
+    # Evaluated at arbitrary conditions: the upper-level population cancels.
+    ratio = float(
+        atom.getEmissivity(1.5e4, 1e3, lev_i=6, lev_j=2)
+        / atom.getEmissivity(1.5e4, 1e3, lev_i=6, lev_j=3)
+    )
+    _OIII_UV_BRANCHING[coll_file] = ratio
+    return ratio
+
+
+def check_oiii_uv_doublet(
+    flux_1661: float,
+    flux_1666: float,
+    err_1661: float | None = None,
+    err_1666: float | None = None,
+    *,
+    n_sigma: float = 3.0,
+    coll_file: str = OIII_1666_COLL_FILE,
+) -> dict[str, Any]:
+    """Test the O III] 1661/1666 doublet against its fixed branching ratio.
+
+    See :func:`oiii_uv_branching_ratio`.  Because the expected ratio has no
+    free parameters, this is a direct check on the *measurement* of the two
+    components -- worth running before trusting anything derived from
+    lambda1666 (the UV C/O, or the joint T_e-n_e solve).
+
+    Parameters
+    ----------
+    flux_1661, flux_1666 : float
+        Dust-corrected fluxes of the two components.
+    err_1661, err_1666 : float or None
+        1 sigma flux errors.  Without both, the deviation cannot be put in
+        sigma and *ok* is left ``None``.
+    n_sigma : float
+        Deviation beyond which the doublet is flagged (default 3.0).
+    coll_file : str
+        O III collision-strength file.
+
+    Returns
+    -------
+    dict
+        ``observed``, ``expected``, ``deviation_sigma`` (or ``None``),
+        ``ok`` (``True``/``False``, or ``None`` when untestable) and a
+        human-readable ``message``.
+    """
+    expected = oiii_uv_branching_ratio(coll_file)
+    out: dict[str, Any] = {
+        "observed": None, "expected": expected,
+        "deviation_sigma": None, "ok": None, "message": "",
+    }
+    if flux_1661 <= 0 or flux_1666 <= 0:
+        out["message"] = "O III] 1661/1666 not testable (a component is missing)"
+        return out
+
+    observed = flux_1661 / flux_1666
+    out["observed"] = observed
+    if not (err_1661 and err_1666 and err_1661 > 0 and err_1666 > 0):
+        out["message"] = (
+            f"O III] 1661/1666 = {observed:.3f} vs {expected:.3f} expected "
+            f"(no errors given, so not tested)"
+        )
+        return out
+
+    sigma = observed * float(np.hypot(err_1661 / flux_1661, err_1666 / flux_1666))
+    dev = (observed - expected) / sigma if sigma > 0 else np.inf
+    out["deviation_sigma"] = float(dev)
+    out["ok"] = bool(abs(dev) <= n_sigma)
+    out["message"] = (
+        f"O III] 1661/1666 = {observed:.3f} +/- {sigma:.3f} vs {expected:.3f} "
+        f"expected from the branching ratio ({dev:+.1f} sigma)"
+    )
+    return out
+
+
+def compute_CppOpp_uv(
+    flux_1907: float,
+    flux_1909: float,
+    Te: float,
+    ne: float,
+    *,
+    flux_1661: float = 0.0,
+    flux_1666: float = 0.0,
+    coll_file: str = OIII_1666_COLL_FILE,
+) -> tuple[float, str]:
+    """C2+/O2+ from the UV lines alone: C III] 1907,1909 / O III] 1661,1666.
+
+    The classical rest-UV carbon abundance ratio (Garnett et al. 1995; Erb
+    et al. 2010; Berg et al. 2016)::
+
+        C2+/O2+ = I(CIII] 1907+1909) / I(O III] 1661+1666)
+                  x eps_O(1661+1666) / eps_C(1907+1909)
+
+    Its advantage over pairing C III] with the optical [O III] lambda5007
+    is that numerator and denominator sit ~240 A apart, so the ratio is
+    nearly reddening-free (~0.04 dex per magnitude of A_V, against ~0.6-1.3
+    for the UV-to-optical pairing) and needs no Hbeta -- which also removes
+    the relative flux calibration between the gratings covering the UV and
+    the optical.  Both ions span nearly the same ionisation range (C2+
+    24.4-47.9 eV, O2+ 35.1-54.9 eV), so the same C2+/O2+ -> C/O ionisation
+    correction applies as for the optical route.
+
+    The cost is sensitivity to the assumed conditions: roughly +0.03 dex
+    per +1700 K in *Te*, and -0.03 dex if *ne* falls from 3e4 to 1e3 cm^-3
+    (C III] lambda1907 has a low critical density).
+
+    Parameters
+    ----------
+    flux_1907, flux_1909 : float
+        Dust-corrected C III] fluxes.  Either may be zero; the other is
+        then scaled to the doublet sum using the modelled ratio at
+        (*Te*, *ne*), which is density-sensitive.
+    Te : float
+        Electron temperature in K for both ions.  This diagnostic treats
+        C2+ and O2+ as co-spatial, so a single temperature is used --
+        conventionally T_e(O2+).
+    ne : float
+        Electron density in cm^-3 for both ions.
+    flux_1661, flux_1666 : float
+        Dust-corrected O III] fluxes.  At least one must be positive; a
+        missing component is filled in from the fixed branching ratio
+        (:func:`oiii_uv_branching_ratio`).
+    coll_file : str
+        O III collision-strength file; see :func:`_get_oiii_atom`.
+
+    Returns
+    -------
+    tuple
+        ``(C2+/O2+, note)`` where *note* records which components were
+        measured and which were inferred.
+
+    Raises
+    ------
+    ValueError
+        If no C III] or no O III] component is available, or the
+        emissivities are non-positive.
+    """
+    pn = _get_pyneb()
+    o3 = _get_oiii_atom(coll_file)
+    c3 = pn.Atom("C", 3)
+
+    e1661 = o3.getEmissivity(Te, ne, lev_i=6, lev_j=2)
+    e1666 = o3.getEmissivity(Te, ne, lev_i=6, lev_j=3)
+    e1907 = c3.getEmissivity(Te, ne, wave=1907)
+    e1909 = c3.getEmissivity(Te, ne, wave=1909)
+    if min(e1661, e1666, e1907, e1909) <= 0:
+        raise ValueError(
+            f"Non-positive O III]/C III] emissivity at Te={Te:.0f} K, "
+            f"ne={ne:.3g} cm^-3."
+        )
+
+    ratio = oiii_uv_branching_ratio(coll_file)
+    notes = []
+    if flux_1661 > 0 and flux_1666 > 0:
+        o_sum = flux_1661 + flux_1666
+        notes.append("O III] 1661+1666 measured")
+    elif flux_1666 > 0:
+        o_sum = flux_1666 * (1.0 + ratio)
+        notes.append(f"O III] from lambda1666 x (1+{ratio:.3f})")
+    elif flux_1661 > 0:
+        o_sum = flux_1661 * (1.0 + ratio) / ratio
+        notes.append(f"O III] from lambda1661 x (1+{ratio:.3f})/{ratio:.3f}")
+    else:
+        raise ValueError("Neither O III] 1661 nor 1666 is available.")
+
+    if flux_1907 > 0 and flux_1909 > 0:
+        c_sum = flux_1907 + flux_1909
+        notes.append("C III] 1907+1909 measured")
+    elif flux_1909 > 0:
+        c_sum = flux_1909 * (1.0 + e1907 / e1909)
+        notes.append("C III] from lambda1909, doublet ratio modelled")
+    elif flux_1907 > 0:
+        c_sum = flux_1907 * (1.0 + e1909 / e1907)
+        notes.append("C III] from lambda1907, doublet ratio modelled")
+    else:
+        raise ValueError("Neither C III] 1907 nor 1909 is available.")
+
+    cpp_opp = (c_sum / o_sum) * ((e1661 + e1666) / (e1907 + e1909))
+    return float(cpp_opp), "; ".join(notes)
+
+
+
 def compute_Te_NII(
     flux_5756: float,
     flux_6585: float,

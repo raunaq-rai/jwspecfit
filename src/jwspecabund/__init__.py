@@ -49,6 +49,8 @@ from .direct import (
     compute_ne_NIV,
     compute_ne_SiIII,
     compute_Te_NII,
+    check_oiii_uv_doublet,
+    compute_CppOpp_uv,
     compute_Te_ne_OIII,
     compute_Te_OIII,
     compute_Te_OIII_1666,
@@ -56,6 +58,7 @@ from .direct import (
     ciii_ratio_at_density,
     heI_4714_over_4472,
     ne_zone_fallback,
+    oiii_uv_branching_ratio,
     niv_ratio_at_density,
 )
 from .martinez25_icf import (
@@ -101,6 +104,9 @@ __all__ = [
     "compute_NO_martinez25",
     "compute_Te_NII",
     "compute_Te_ne_OIII",
+    "compute_CppOpp_uv",
+    "check_oiii_uv_doublet",
+    "oiii_uv_branching_ratio",
     "plot_te_ne_diagnostic",
     "compute_Te_OIII",
     "compute_Te_OIII_1666",

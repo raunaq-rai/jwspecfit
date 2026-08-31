@@ -19,6 +19,19 @@ _TE_DIAG_SHORT = {
 }
 
 
+def _fmt_err_or_blank(err: float | tuple[float, float] | None, prec: int = 3) -> str:
+    """Like :func:`_fmt_err`, but empty for a NaN error.
+
+    The point-estimate cross-checks carry no error bar by design, and
+    printing "+/- nan" reads as a bug rather than as "not sampled".
+    """
+    if err is None:
+        return ""
+    if not isinstance(err, (tuple, list)) and not np.isfinite(err):
+        return ""
+    return _fmt_err(err, prec)
+
+
 def _fmt_err(err: float | tuple[float, float], prec: int = 3) -> str:
     """Format an uncertainty for display.
 
@@ -90,6 +103,9 @@ class AbundanceResult:
     Te_diagnostic : str or None
         Which T_e(O++) diagnostic was adopted: ``"self_consistent"``,
         ``"4363"`` or ``"1666"``.
+    oiii_uv_doublet : dict or None
+        Result of the O III] 1661/1666 branching-ratio check; see
+        :func:`~jwspecabund.direct.check_oiii_uv_doublet`.
     Te_ne_selfconsistent : SelfConsistentOIII or None
         Full joint O++ T_e-n_e solution, including the T_e(n_e) curves, when
         one was computed.  See
@@ -140,6 +156,7 @@ class AbundanceResult:
     ne_Opp_is_upper_limit: bool = False
     Te_diagnostic: str | None = None
     Te_ne_selfconsistent: Any | None = field(default=None, repr=False)
+    oiii_uv_doublet: dict[str, Any] | None = field(default=None, repr=False)
     icf_method: str | None = None
     NO_icf_name: str | None = None
     lya_f_esc: float | None = None
@@ -481,11 +498,12 @@ class AbundanceResult:
             lines.append("Alternative methods (not selected):")
             for alt_name, alt in self.alt_results.items():
                 lines.append(f"  [{alt_name}]")
-                lines.append(f"    12+log(O/H) = {alt.OH:.3f} {_fmt_err(alt.OH_err)}")
+                if alt.OH is not None and np.isfinite(alt.OH):
+                    lines.append(f"    12+log(O/H) = {alt.OH:.3f} {_fmt_err_or_blank(alt.OH_err)}")
                 if alt.NO is not None:
-                    lines.append(f"    log(N/O)    = {alt.NO:.3f} {_fmt_err(alt.NO_err)}")
+                    lines.append(f"    log(N/O)    = {alt.NO:.3f} {_fmt_err_or_blank(alt.NO_err)}")
                 if alt.CO is not None:
-                    lines.append(f"    log(C/O)    = {alt.CO:.3f} {_fmt_err(alt.CO_err)}")
+                    lines.append(f"    log(C/O)    = {alt.CO:.3f} {_fmt_err_or_blank(alt.CO_err)}")
                 if alt.ratios_used:
                     lines.append(f"    Ratios used = {alt.ratios_used}")
                 if alt.Te_high is not None:

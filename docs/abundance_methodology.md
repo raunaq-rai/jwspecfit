@@ -580,7 +580,65 @@ The CII] λ2326 multiplet (five components from 2323 to 2328 Å) traces
 C+ in the low-ionisation zone.  When detected, the C+ ionic abundance
 is included in the carbon budget.
 
-### 7.4 Total C/O
+### 7.4 Pure-UV C/O — C III] 1907,1909 / O III] 1661,1666
+
+**Source:** `jwspecabund.direct.compute_CppOpp_uv`; Garnett et al. (1995),
+Erb et al. (2010), Berg et al. (2016).
+
+The C/O of §7.5 divides C²⁺ (from C III] λ1907,1909) by O²⁺ (from
+[O III] λ5007), both normalised to Hβ.  Hβ cancels algebraically, but the
+surviving ratio still spans the whole UV-to-optical baseline.  Pairing
+C III] with the *UV* oxygen lines instead keeps everything within 240 Å:
+
+```
+C2+/O2+ = I(C III] 1907+1909) / I(O III] 1661+1666)
+          × eps_O(1661+1666) / eps_C(1907+1909)
+```
+
+C²⁺ (24.4–47.9 eV) and O²⁺ (35.1–54.9 eV) span nearly the same ionisation
+range, so the same C²⁺/O²⁺ → C/O ICF applies (the Martinez ICF of §8; the
+Garnett+97 ICF does **not**, as it assumes C³⁺ has been added in).
+
+**Why it is better conditioned.** Reddening leverage on log(C/O), measured
+on a real spectrum:
+
+| | pure-UV (1907 vs 1666) | UV-optical (1907 vs 5007) |
+|---|---|---|
+| Cardelli | +0.042 dex/mag | +0.603 dex/mag |
+| Salim | −0.036 dex/mag | +1.328 dex/mag |
+
+A factor 14–37 less, with the sign flipping between laws — i.e.
+consistent with zero.  It also needs no Hβ, which removes the relative
+flux calibration between the gratings covering the UV and the optical.
+
+**What it costs.** Sensitivity to the assumed conditions: about +0.03 dex
+per +1700 K in T_e, and −0.03 dex if n_e falls from 3×10⁴ to 10³ cm⁻³
+(C III] λ1907 has a low critical density, so this diagnostic wants the
+density of §3.3).  And λ1661/λ1666 are ~20× fainter than λ5007.
+
+Both ions are evaluated at a single T_e and n_e — the O²⁺-zone values —
+because the diagnostic's validity rests on them being co-spatial.
+
+**Reporting.** This is always computed alongside the adopted C/O when the
+lines are present, as `alt_results["CO_uv"]`, with its own posterior. It
+is not adopted automatically: the two routes can differ by ~0.2 dex, and
+which to trust depends on the λ1661/λ1666 check below.
+
+### 7.5 O III] 1661/1666 — a free consistency check
+
+λ1660.81 and λ1666.15 are both decays of the same upper level (⁵S₂ → ³P₁
+and ³P₂), so their ratio is a pure branching ratio: **0.402, with no
+dependence on T_e, n_e, density or abundance**.  Any departure is a
+problem with the line measurement, not the physics.
+
+`check_oiii_uv_doublet()` tests it, and `compute_abundances` runs it
+automatically whenever both components are detected, recording the result
+in `AbundanceResult.oiii_uv_doublet` and `diagnostics`, and logging a
+warning past 3σ.  It is worth checking before trusting anything that
+leans on λ1666 — both the pure-UV C/O above and the joint T_e–n_e solve of
+§3.3.
+
+### 7.6 Total C/O
 
 C/O uses the intermediate (C2+/O2+) ionisation zone.  The method is set by
 `co_icf_method` (default `"auto"`).
@@ -1005,9 +1063,12 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 | Cardelli, J. A., Clayton, G. C. & Mathis, J. S., 1989, ApJ, 345, 245 | Milky Way extinction law |
 | Cullen, F. et al., 2025, (EXCELS) | Bayesian forward model for emission-line abundances |
 | DESI Collaboration, 2026, arXiv:2601.02463 | Updated T_e–T_e relation: T_low = 0.648 × T_high + 3270 |
+| Garnett, D. R. et al., 1995, ApJ, 443, 64 | Pure-UV C/O from C III] 1907,09 / O III] 1661,66 |
 | Garnett, D. R., 1992, AJ, 103, 1330 | Classical T_e–T_e relations for intermediate/low zones |
 | Garnett, D. R. et al., 1997, ApJ, 489, 63 | C/O ionisation correction factor: ICF_C = (O+ + O++)/O++ |
 | Hsiao, T. Y.-Y. et al., 2026, arXiv:2608.20339 | Self-consistent O III T_e-n_e; high-density EMPG impostors |
+| Erb, D. K. et al., 2010, ApJ, 719, 1168 | Rest-UV C/O in a lensed star-forming galaxy |
+| Berg, D. A. et al., 2016, ApJ, 827, 126 | Rest-UV C/O in low-metallicity dwarfs |
 | Izotov, Y. I. et al., 2006, A&A, 448, 955 | ICF equations 18–23 for N, Ne, S, Ar |
 | Jones, T. et al., 2023 | C/O from direct ionic sum: (C2+ + C3+) / O2+ |
 | Martinez, Z. et al., 2025, "Under Pressure", arXiv:2510.21960 | Default N/O ICFs, O32/N43 log(U) diagnostics, 3-tier T_e zones, and mid/high n_e redshift evolution (Eqs 4 & 5) |

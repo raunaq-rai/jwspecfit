@@ -314,3 +314,158 @@ def test_plot_requires_a_solution():
 
     with pytest.raises(ValueError, match="No self-consistent"):
         plot_te_ne_diagnostic(AbundanceResult(method="direct", OH=8.0, OH_err=0.1))
+
+
+class TestUVCarbonOxygen:
+    """Pure-UV C/O: C III] 1907,1909 against O III] 1661,1666."""
+
+    @staticmethod
+    def _uv_fluxes(Te, ne, cpp_opp):
+        """C III] and O III] fluxes encoding a known C2+/O2+."""
+        import pyneb as pn
+
+        o3 = _get_oiii_atom()
+        c3 = pn.Atom("C", 3)
+        o = {
+            "OIII_1661": o3.getEmissivity(Te, ne, lev_i=6, lev_j=2),
+            "OIII_1666": o3.getEmissivity(Te, ne, lev_i=6, lev_j=3),
+        }
+        c = {
+            "CIII]_1907": cpp_opp * c3.getEmissivity(Te, ne, wave=1907),
+            "CIII]": cpp_opp * c3.getEmissivity(Te, ne, wave=1909),
+        }
+        return {**o, **c}
+
+    @pytest.mark.parametrize("cpp_opp", [0.05, 0.2, 1.0])
+    def test_round_trip(self, cpp_opp):
+        from jwspecabund import compute_CppOpp_uv
+
+        Te, ne = 16000.0, 1e4
+        f = self._uv_fluxes(Te, ne, cpp_opp)
+        got, note = compute_CppOpp_uv(
+            f["CIII]_1907"], f["CIII]"], Te, ne,
+            flux_1661=f["OIII_1661"], flux_1666=f["OIII_1666"],
+        )
+        assert got == pytest.approx(cpp_opp, rel=1e-6)
+        assert "measured" in note
+
+    def test_single_oiii_component_uses_branching_ratio(self):
+        """lambda1666 alone must reproduce the full doublet answer."""
+        from jwspecabund import compute_CppOpp_uv
+
+        Te, ne = 16000.0, 1e4
+        f = self._uv_fluxes(Te, ne, 0.2)
+        both, _ = compute_CppOpp_uv(
+            f["CIII]_1907"], f["CIII]"], Te, ne,
+            flux_1661=f["OIII_1661"], flux_1666=f["OIII_1666"],
+        )
+        only_1666, note = compute_CppOpp_uv(
+            f["CIII]_1907"], f["CIII]"], Te, ne, flux_1666=f["OIII_1666"],
+        )
+        only_1661, _ = compute_CppOpp_uv(
+            f["CIII]_1907"], f["CIII]"], Te, ne, flux_1661=f["OIII_1661"],
+        )
+        assert only_1666 == pytest.approx(both, rel=1e-6)
+        assert only_1661 == pytest.approx(both, rel=1e-6)
+        assert "1666" in note
+
+    def test_needs_both_ions(self):
+        from jwspecabund import compute_CppOpp_uv
+
+        f = self._uv_fluxes(16000.0, 1e4, 0.2)
+        with pytest.raises(ValueError, match="O III]"):
+            compute_CppOpp_uv(f["CIII]_1907"], f["CIII]"], 16000.0, 1e4)
+        with pytest.raises(ValueError, match="C III]"):
+            compute_CppOpp_uv(0.0, 0.0, 16000.0, 1e4, flux_1666=f["OIII_1666"])
+
+    def test_nearly_reddening_free(self):
+        """The whole point: the UV pairing barely moves with A_V."""
+        from jwspecabund import compute_CppOpp_uv, dust_correct_fluxes
+
+        Te, ne = 16000.0, 1e4
+        f = self._uv_fluxes(Te, ne, 0.2)
+        waves = {"OIII_1661": 1660.809, "OIII_1666": 1666.15,
+                 "CIII]_1907": 1906.68, "CIII]": 1908.73, "OIII_5007": 5006.84}
+        f["OIII_5007"] = 1.0
+        vals = []
+        for av in (0.0, 1.0):
+            d = dust_correct_fluxes(
+                {k: (v, 0.01 * v, waves[k]) for k, v in f.items()},
+                av, law="cardelli",
+            )
+            g = {k: v[0] for k, v in d.items()}
+            vals.append(np.log10(compute_CppOpp_uv(
+                g["CIII]_1907"], g["CIII]"], Te, ne,
+                flux_1661=g["OIII_1661"], flux_1666=g["OIII_1666"])[0]))
+            # For contrast, the UV-to-optical pairing over the same A_V.
+        assert abs(vals[1] - vals[0]) < 0.10, "UV C/O should be ~dust-free"
+        # The optical pairing moves an order of magnitude more.
+        inp = {k: (v, 0.01 * v, waves[k]) for k, v in f.items()}
+        d0 = dust_correct_fluxes(inp, 0.0, law="cardelli")
+        d1 = dust_correct_fluxes(inp, 1.0, law="cardelli")
+        opt = abs(np.log10(
+            (d1["CIII]_1907"][0] / d1["OIII_5007"][0])
+            / (d0["CIII]_1907"][0] / d0["OIII_5007"][0])))
+        assert opt > 5 * abs(vals[1] - vals[0])
+
+
+class TestOIIIUVDoublet:
+    """The lambda1661/lambda1666 branching-ratio consistency check."""
+
+    def test_ratio_is_a_constant(self):
+        """It is a branching ratio: no Te, ne or atomic-data dependence."""
+        from jwspecabund import oiii_uv_branching_ratio
+
+        r = oiii_uv_branching_ratio()
+        assert r == pytest.approx(0.40, abs=0.02)
+        o3 = _get_oiii_atom()
+        for Te, ne in ((6000.0, 1e1), (25000.0, 1e6)):
+            here = (o3.getEmissivity(Te, ne, lev_i=6, lev_j=2)
+                    / o3.getEmissivity(Te, ne, lev_i=6, lev_j=3))
+            assert here == pytest.approx(r, rel=1e-6)
+
+    def test_consistent_doublet_passes(self):
+        from jwspecabund import check_oiii_uv_doublet, oiii_uv_branching_ratio
+
+        r = oiii_uv_branching_ratio()
+        chk = check_oiii_uv_doublet(r * 100.0, 100.0, r * 5.0, 5.0)
+        assert chk["ok"] is True
+        assert abs(chk["deviation_sigma"]) < 0.1
+
+    def test_inconsistent_doublet_flagged(self):
+        from jwspecabund import check_oiii_uv_doublet
+
+        # lambda1666 twice as bright as the branching ratio allows.
+        chk = check_oiii_uv_doublet(0.40 * 100.0, 200.0, 1.0, 2.0)
+        assert chk["ok"] is False
+        assert chk["deviation_sigma"] < -3.0
+
+    def test_untestable_without_errors(self):
+        from jwspecabund import check_oiii_uv_doublet
+
+        chk = check_oiii_uv_doublet(40.0, 100.0)
+        assert chk["ok"] is None
+        assert chk["observed"] == pytest.approx(0.4)
+
+    def test_reported_on_the_result(self):
+        result = _mock_result(15000, 1e5)
+        # Give the object a UV carbon/oxygen set to exercise both features.
+        import pyneb as pn
+        o3, c3 = _get_oiii_atom(), pn.Atom("C", 3)
+        Te, ne = 15000.0, 1e5
+        scale = result.lines["OIII_5007"].flux / o3.getEmissivity(Te, ne, wave=5007)
+        for name, kw in (("OIII_1661", dict(lev_i=6, lev_j=2)),
+                         ("OIII_1666", dict(lev_i=6, lev_j=3))):
+            f = scale * o3.getEmissivity(Te, ne, **kw)
+            result.lines[name] = _Line(f, 0.05 * f)
+        for name, w in (("CIII]_1907", 1907), ("CIII]", 1909)):
+            f = 0.2 * scale * c3.getEmissivity(Te, ne, wave=w)
+            result.lines[name] = _Line(f, 0.05 * f)
+
+        res = TestComputeAbundancesIntegration._run(result)
+        assert res.oiii_uv_doublet is not None
+        assert res.oiii_uv_doublet["ok"] is True
+        assert "O III] 1661/1666" in res.diagnostics
+        assert "CO_uv" in (res.alt_results or {})
+        assert np.isfinite(res.alt_results["CO_uv"].CO)
+        assert "C/O (UV only)" in res.diagnostics

@@ -6,6 +6,33 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### `jwspecabund` — pure-UV C/O and an O III] doublet check
+
+- **New `compute_CppOpp_uv()`: C/O from C III] λλ1907,1909 against
+  O III] λλ1661,1666**, the classical rest-UV route (Garnett et al. 1995;
+  Erb et al. 2010; Berg et al. 2016). Numerator and denominator sit ~240 Å
+  apart, so it carries ~0.04 dex of reddening leverage per magnitude of A_V
+  against ~0.6–1.3 dex for the C III]-vs-[O III] λ5007 pairing the adopted
+  C/O uses — and it needs no Hβ, which removes the relative flux calibration
+  between the gratings covering the UV and the optical. The cost is
+  sensitivity to the assumed conditions (~0.03 dex per 1700 K in T_e, and
+  −0.03 dex from n_e = 3×10⁴ → 10³, since C III] λ1907 has a low critical
+  density).
+- **It is computed and reported automatically**, with its own posterior, as
+  `alt_results["CO_uv"]` whenever the four lines are present. It is *not*
+  adopted in place of the existing C/O: on a stacked spectrum the two routes
+  differ by ~0.19 dex, and which to trust depends on the check below.
+- **New `check_oiii_uv_doublet()`, run automatically.** O III] λ1661 and
+  λ1666 decay from the same upper level, so their ratio is a pure branching
+  ratio — 0.402, with no T_e, n_e or abundance dependence. A departure is
+  therefore a line-measurement problem, and it propagates into everything
+  built on λ1666 (the pure-UV C/O, and the self-consistent T_e–n_e solve).
+  The result lands in `AbundanceResult.oiii_uv_doublet` and `diagnostics`,
+  with a warning past 3σ.
+- The adopted C/O now has a `diagnostics["C/O"]` entry when the Martinez ICF
+  is used; previously only the direct-sum and Garnett+97 routes described
+  themselves.
+
 ### `jwspecabund` — self-consistent O²⁺ temperature and density
 
 - **T_e and n_e are now solved together in the O²⁺ zone when O III] λ1666,

@@ -807,6 +807,74 @@ def _draw_Te_ne_OIII(
     return Te, ne_Opp
 
 
+#: Deviation (sigma) beyond which the O III] 1661/1666 doublet is flagged
+#: as inconsistent with its fixed branching ratio.
+_OIII_UV_DOUBLET_NSIGMA: float = 3.0
+
+
+def _oiii_uv_doublet_check(
+    fluxes: dict[str, float], errors: dict[str, float],
+) -> dict[str, Any] | None:
+    """Check the O III] UV doublet and warn if it fails its own physics.
+
+    O III] 1661 and 1666 decay from the same upper level, so their ratio is
+    a fixed branching ratio -- no free parameters, no T_e or n_e
+    dependence.  A departure therefore indicts the *measurement*, and
+    everything downstream that leans on lambda1666 (the joint T_e-n_e solve
+    and the UV C/O) inherits the problem.  Returns ``None`` when the
+    doublet is not measurable.
+    """
+    from .direct import check_oiii_uv_doublet
+
+    f1661 = fluxes.get("OIII_1661", 0.0)
+    f1666 = fluxes.get("OIII_1666", 0.0)
+    if f1661 <= 0 or f1666 <= 0:
+        return None
+
+    chk = check_oiii_uv_doublet(
+        f1661, f1666, errors.get("OIII_1661"), errors.get("OIII_1666"),
+        n_sigma=_OIII_UV_DOUBLET_NSIGMA,
+    )
+    if chk["ok"] is False:
+        logger.warning(
+            "%s. This ratio is fixed atomic physics, so the discrepancy is in "
+            "the line measurement -- treat any lambda1666-based quantity "
+            "(the self-consistent T_e-n_e solve, the UV C/O) with caution.",
+            chk["message"],
+        )
+    return chk
+
+
+def _compute_CO_uv(
+    fluxes: dict[str, float],
+    Te: float,
+    ne: float,
+    icf: float | None,
+) -> tuple[float, str] | None:
+    """log(C/O) from the UV lines alone, or ``None`` if unavailable.
+
+    See :func:`~jwspecabund.direct.compute_CppOpp_uv`.  *icf* is the
+    C2+/O2+ -> C/O correction; pass ``None`` when none is applicable, in
+    which case the raw ionic ratio is returned and the note says so.
+    """
+    from .direct import compute_CppOpp_uv
+
+    try:
+        cpp_opp, note = compute_CppOpp_uv(
+            fluxes.get("CIII]_1907", 0.0), fluxes.get("CIII]", 0.0), Te, ne,
+            flux_1661=fluxes.get("OIII_1661", 0.0),
+            flux_1666=fluxes.get("OIII_1666", 0.0),
+        )
+    except (ValueError, RuntimeError, KeyError):
+        return None
+    if cpp_opp <= 0:
+        return None
+
+    if icf is None or not np.isfinite(icf) or icf <= 0:
+        return float(np.log10(cpp_opp)), note + "; raw C2+/O2+, no ICF applied"
+    return float(np.log10(icf * cpp_opp)), note + f"; ICF = {icf:.4f}"
+
+
 #: Minimum fraction of posterior draws that must yield a genuine curve
 #: crossing before the joint solve's n_e upper limit is allowed to cap a
 #: density measured from another ion.  Below this the two O III ratios are
@@ -1020,11 +1088,13 @@ def _solve_densities_refined(
             nopp = sc.ne_upper_limit
         else:
             logger.warning(
-                "The O III T_e-n_e curves do not converge (%.0f%% of draws "
-                "cross), so their n_e < %.0f cm^-3 bound is not used; keeping "
-                "n_e(O++) = %.0f cm^-3. T_e(lambda4363) and T_e(lambda1666) "
-                "disagree beyond their errors -- check the dust correction, "
-                "which the UV/optical ratio is most sensitive to.",
+                "The O III T_e-n_e curves do not cross (%.0f%% of draws do), "
+                "so their n_e < %.0f cm^-3 bound carries no density "
+                "information and is not applied; keeping n_e(O++) = %.0f "
+                "cm^-3. Below the lambda5007 critical density the curves run "
+                "near-parallel, so this is expected there and need not mean "
+                "the two temperatures disagree -- compare them in "
+                "alt_results before reading anything into it.",
                 100.0 * (sc.converged_fraction or 0.0), sc.ne_upper_limit, nopp,
             )
 
@@ -1730,7 +1800,16 @@ def _build_diagnostics(
 
     # C/O method
     co_method = totals.get("CO_method")
-    if co_method == "direct_sum":
+    if co_method == "martinez25":
+        icf_val = totals.get("CO_icf_value", 1.0)
+        diag["C/O"] = (
+            f"Martinez (in prep.) ICF x C²⁺/O²⁺ — ICF = {icf_val:.3f}; "
+            "C²⁺ from CIII] 1907,1909 and O²⁺ from [OIII] 5007, so this "
+            "ratio spans the UV-to-optical baseline and carries the full "
+            "reddening and cross-grating calibration (~0.6-1.3 dex/mag). "
+            "See alt_results['CO_uv'] for the pure-UV alternative"
+        )
+    elif co_method == "direct_sum":
         diag["C/O"] = "direct sum (C⁺ + C²⁺ + C³⁺) / (O⁺ + O²⁺) — CII] detected"
     elif co_method == "garnett97_icf":
         icf_val = totals.get("CO_icf_value", 1.0)
@@ -1943,7 +2022,12 @@ def _run_direct(
     ArO_mc = []
     Te_high_mc = []
     Te_low_mc = []
+    CO_uv_mc: list[float] = []
     logU_mc_arr = []
+    _oiii_uv_chk = _oiii_uv_doublet_check(fluxes, errors)
+    _co_icf_pt = (
+        totals.get("CO_icf_value") if totals.get("CO_method") == "martinez25" else None
+    )
     # Collect per-tier N/O posteriors for uncertainty on each method.
     _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
     NO_tier_mc: dict[str, list[float]] = {k: [] for k in _tier_keys}
@@ -1980,6 +2064,8 @@ def _run_direct(
                 mc_fluxes, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
                 Te_int=Te_i, ne_Opp=ne_Opp_i,
             )
+            _cu = _compute_CO_uv(mc_fluxes, Te_h, ne_Opp_i, _co_icf_pt)
+            CO_uv_mc.append(_cu[0] if _cu is not None else np.nan)
 
             # Compute Z_Zsun for this MC iteration.
             oh_val = ionic_mc.get("O+/H+", 0.0) + ionic_mc.get("O++/H+", 0.0)
@@ -2166,6 +2252,28 @@ def _run_direct(
     )
     diagnostics.update(_alt_diag)
 
+    # --- Pure-UV C/O, reported alongside the adopted C/O ---
+    _co_icf = totals.get("CO_icf_value") if totals.get("CO_method") == "martinez25" else None
+    _co_uv = _compute_CO_uv(fluxes, Te_high, ne_Opp, _co_icf)
+    _co_uv_err = None
+    if _co_uv is not None:
+        arr = np.array(CO_uv_mc, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size > 10:
+            q = np.percentile(arr, [16, 50, 84])
+            _co_uv = (float(q[1]), _co_uv[1])
+            _co_uv_err = (float(q[1] - q[0]), float(q[2] - q[1]))
+        diagnostics["C/O (UV only)"] = (
+            f"C III] 1907+1909 / O III] 1661+1666 at T_e = {Te_high:.0f} K, "
+            f"n_e = {ne_Opp:.0f} cm^-3 -> log(C/O) = {_co_uv[0]:+.3f} "
+            f"({_co_uv[1]}). Reddening leverage ~0.04 dex/mag against ~0.6-1.3 "
+            f"for the C III]-vs-[OIII] 5007 pairing, and no Hbeta needed"
+        )
+    if _oiii_uv_chk is not None:
+        diagnostics["O III] 1661/1666"] = _oiii_uv_chk["message"] + (
+            " — fixed branching ratio, so a departure is a measurement problem"
+        )
+
     return {
         "OH": OH_med_mc,
         "OH_err": OH_err,
@@ -2196,6 +2304,10 @@ def _run_direct(
         "Te_diagnostic": _Te_diagnostic,
         "selfconsistent_OIII": _sc,
         "alt_single_ratio": _alt_single or None,
+        "CO_uv": _co_uv[0] if _co_uv is not None else None,
+        "CO_uv_err": _co_uv_err,
+        "CO_uv_note": _co_uv[1] if _co_uv is not None else None,
+        "oiii_uv_doublet": _oiii_uv_chk,
         "logU": logU,
         "logU_err": logU_err,
         "icf_method": icf_method,
@@ -2374,6 +2486,7 @@ def _run_direct_mcmc(
     ArO_post = []
     Te_high_post = []
     Te_low_post = []
+    CO_uv_post: list[float] = []
     logU_post = []
     Av_post = [] if _resample_dust else None
 
@@ -2490,6 +2603,12 @@ def _run_direct_mcmc(
     _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
     NO_tier_post: dict[str, list[float]] = {k: [] for k in _tier_keys}
 
+    _oiii_uv_chk = _oiii_uv_doublet_check(med_fluxes, med_errors)
+    _co_icf_pt = (
+        totals_pt.get("CO_icf_value")
+        if totals_pt.get("CO_method") == "martinez25" else None
+    )
+
     n_collected = 0  # scanned draws counted toward n_samples (in-bounds N/O
     #                  or solver failure); out-of-bounds draws keep O/H etc.
     scanned = 0
@@ -2517,6 +2636,8 @@ def _run_direct_mcmc(
                 sample, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
                 Te_int=Te_i, ne_Opp=ne_Opp_i,
             )
+            _cu = _compute_CO_uv(sample, Te_h, ne_Opp_i, _co_icf_pt)
+            CO_uv_post.append(_cu[0] if _cu is not None else np.nan)
 
             # Z_Zsun for this sample.
             oh_val = ionic_i.get("O+/H+", 0.0) + ionic_i.get("O++/H+", 0.0)
@@ -2705,6 +2826,30 @@ def _run_direct_mcmc(
         Te_relation,
     )
 
+    # --- Pure-UV C/O, reported alongside the adopted C/O ---
+    _co_uv = (
+        _compute_CO_uv(med_fluxes, Te_high_pt, ne_Opp, _co_icf_pt)
+        if np.isfinite(Te_high_pt) else None
+    )
+    _co_uv_err = None
+    if _co_uv is not None:
+        arr = np.array(CO_uv_post, dtype=float)
+        arr = arr[np.isfinite(arr)]
+        if arr.size > 10:
+            q = np.percentile(arr, [16, 50, 84])
+            _co_uv = (float(q[1]), _co_uv[1])
+            _co_uv_err = (float(q[1] - q[0]), float(q[2] - q[1]))
+        _diag_extra["C/O (UV only)"] = (
+            f"C III] 1907+1909 / O III] 1661+1666 at T_e = {Te_high_pt:.0f} K, "
+            f"n_e = {ne_Opp:.0f} cm^-3 -> log(C/O) = {_co_uv[0]:+.3f} "
+            f"({_co_uv[1]}). Reddening leverage ~0.04 dex/mag against ~0.6-1.3 "
+            f"for the C III]-vs-[OIII] 5007 pairing, and no Hbeta needed"
+        )
+    if _oiii_uv_chk is not None:
+        _diag_extra["O III] 1661/1666"] = _oiii_uv_chk["message"] + (
+            " — fixed branching ratio, so a departure is a measurement problem"
+        )
+
     # Intermediate-zone temperature (deterministic function of T_e(high)).
     _Te_high_final = (
         Te_high_med if Te_high_med is not None
@@ -2745,6 +2890,10 @@ def _run_direct_mcmc(
         "Te_diagnostic": _Te_diagnostic,
         "selfconsistent_OIII": _sc,
         "alt_single_ratio": _alt_single or None,
+        "CO_uv": _co_uv[0] if _co_uv is not None else None,
+        "CO_uv_err": _co_uv_err,
+        "CO_uv_note": _co_uv[1] if _co_uv is not None else None,
+        "oiii_uv_doublet": _oiii_uv_chk,
         "logU": logU_med if logU_med is not None else logU_pt,
         "logU_err": (logU_lo, logU_hi) if logU_lo is not None else None,
         "icf_method": icf_method,
@@ -3527,8 +3676,9 @@ def compute_abundances(
         # Point estimates: a second MC/posterior pass per alternative would
         # roughly double the runtime for a cross-check.
         _alts = direct_out.get("alt_single_ratio") or {}
+        _alt_map: dict[str, AbundanceResult] = {}
         if _alts:
-            primary_result.alt_results = {
+            _alt_map = {
                 f"direct_{key}": AbundanceResult(
                     method=f"direct ({_TE_DIAG_LABELS[key]}, point estimate)",
                     OH=val["OH"],
@@ -3544,6 +3694,26 @@ def compute_abundances(
                 )
                 for key, val in _alts.items()
             }
+
+        # The pure-UV C/O: C III] 1907,1909 against O III] 1661,1666 instead
+        # of the optical [OIII] 5007.  Both lines sit ~240 A apart, so it is
+        # nearly reddening-free and needs no Hbeta -- a genuinely different
+        # systematic from the adopted value, worth seeing side by side.
+        if direct_out.get("CO_uv") is not None:
+            _alt_map["CO_uv"] = AbundanceResult(
+                method="C/O (UV only: CIII] / O III] 1661,1666)",
+                OH=np.nan,
+                OH_err=np.nan,
+                CO=direct_out["CO_uv"],
+                CO_err=direct_out.get("CO_uv_err"),
+                Te_high=direct_out.get("Te_high"),
+                ne_Opp=direct_out.get("ne_Opp"),
+                Av=Av_derived,
+                Av_err=Av_err_derived,
+            )
+        if _alt_map:
+            primary_result.alt_results = _alt_map
+        primary_result.oiii_uv_doublet = direct_out.get("oiii_uv_doublet")
 
     # Inject per-line Balmer decrement details into diagnostics.
     if _balmer_info and primary_result is not None and primary_result.diagnostics is not None:
