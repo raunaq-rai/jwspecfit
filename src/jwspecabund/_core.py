@@ -20,6 +20,7 @@ from jwspecfit.lines import REST_LINES_A
 from .dust import (
     compute_Av_balmer_pair,
     compute_Av_from_balmer,
+    compute_Av_joint_balmer,
     compute_Av_multi_balmer,
     compute_lya_escape_fraction,
     compute_lya_escape_fraction_mc,
@@ -3108,6 +3109,7 @@ def compute_abundances(
     snr_balmer: float = 3.0,
     # Balmer decrement anchor line for A_V derivation
     balmer_anchor: str = "HBETA",
+    balmer_method: str = "anchored",
     balmer_pair: tuple[str, str] | None = None,
     # Forward model kwargs (method="forward")
     forward_sampler: str = "emcee",
@@ -3156,8 +3158,29 @@ def compute_abundances(
         Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ — **Hα is excluded**.  ``"Ha"`` uses
         every other Balmer line (Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα).
         So anchor on Hα when you want Hα included, on Hβ when you don't.
-        Ignored when *Av* is supplied directly, or when *balmer_pair* is
-        set.
+        Ignored when *Av* is supplied directly, when *balmer_pair* is
+        set, or when ``balmer_method="joint"``.
+    balmer_method : str
+        How to combine the Balmer lines into one ``A_V``.
+
+        ``"anchored"`` (default) ratios every line above *snr_balmer*
+        against *balmer_anchor* and takes the weighted mean of the
+        resulting decrements.
+
+        ``"joint"`` instead fits all the detected Balmer lines at once
+        with two free parameters — ``A_V`` and an overall normalisation —
+        so no line is privileged as an anchor and each *flux* is used
+        exactly once.  This is the statistically correct way to use more
+        than two lines: decrements are exactly additive in magnitudes
+        (``D(Hγ/Hα) = D(Hγ/Hβ) + D(Hβ/Hα)``), so forming extra pairs adds
+        no information, and averaging them as if independent understates
+        the error.  The joint fit is also unbiased near ``A_V = 0``,
+        where clipping individual decrements at zero pushes the mean up,
+        and it reports a ``χ²/dof`` that flags a ladder no single ``A_V``
+        can reconcile (stellar Balmer absorption, or a flux-calibration
+        step between gratings).  Needs at least two Balmer lines.
+
+        Ignored when *Av* is supplied directly or when *balmer_pair* is set.
     balmer_pair : tuple of str or None
         Force the A_V derivation onto a single Balmer decrement instead
         of the multi-line fit, given as ``(numerator, denominator)`` line
@@ -3370,6 +3393,7 @@ def compute_abundances(
         "co_icf_method": (co_icf_method, ("auto", "martinez25", "garnett97")),
         "forward_sampler": (forward_sampler, ("emcee", "dynesty")),
         "balmer_anchor": (balmer_anchor, _VALID_BALMER_ANCHORS),
+        "balmer_method": (balmer_method, ("anchored", "joint")),
     }
     if icf_tier is not None:
         _choices["icf_tier"] = (icf_tier, VALID_NO_ICF_TIERS)
@@ -3421,6 +3445,13 @@ def compute_abundances(
                 balmer_out = compute_Av_balmer_pair(
                     fluxes, errors, balmer_pair, law=dust_law, **dust_kwargs,
                 )
+            elif balmer_method == "joint":
+                # Fit the whole ladder at once: two free parameters (A_V and
+                # a normalisation), every detected line used exactly once.
+                balmer_out = compute_Av_joint_balmer(
+                    fluxes, errors, law=dust_law, snr_min=snr_balmer,
+                    **dust_kwargs,
+                )
             else:
                 # Derive A_V from all available Balmer decrements anchored
                 # on either Hβ (default) or Hα via `balmer_anchor`.
@@ -3439,20 +3470,47 @@ def compute_abundances(
                 Av_derived = balmer_out["Av"]
                 Av_err_derived = balmer_out["Av_err"]
                 _balmer_info = balmer_out
-                for r in balmer_out["individual"]:
+                if balmer_out.get("method") == "joint":
+                    for r in balmer_out["individual"]:
+                        logger.info(
+                            "A_V joint fit: %s observed = %.4e, model = %.4e "
+                            "(%.1f sigma)",
+                            r["line"], r["flux"], r["model"],
+                            (r["flux"] - r["model"]) / r["flux_err"]
+                            if r["flux_err"] > 0 else np.nan,
+                        )
                     logger.info(
-                        "A_V from %s/%s = %.3f +/- %.3f  (obs ratio = %.4f, "
-                        "intrinsic = %.4f)",
-                        r["line"], anchor_label,
-                        r["Av"], r["Av_err"],
-                        r["observed_ratio"], r["intrinsic_ratio"],
+                        "A_V joint Balmer fit = %.3f +/- %.3f "
+                        "(%d lines, chi2 = %.2f / %d dof).",
+                        balmer_out["Av"], balmer_out["Av_err"],
+                        balmer_out["n_lines"], balmer_out["chi2"],
+                        balmer_out["dof"],
                     )
-                logger.info(
-                    "A_V weighted mean (anchor=%s) = %.3f +/- %.3f (%d lines).",
-                    anchor_label,
-                    balmer_out["Av"], balmer_out["Av_err"],
-                    balmer_out["n_lines"],
-                )
+                    if balmer_out["dof"] > 0 and (
+                        balmer_out["chi2"] / balmer_out["dof"] > 5.0
+                    ):
+                        logger.warning(
+                            "Balmer ladder is not consistent with a single "
+                            "A_V (chi2/dof = %.1f); check for stellar "
+                            "absorption or a flux-calibration step between "
+                            "gratings.",
+                            balmer_out["chi2"] / balmer_out["dof"],
+                        )
+                else:
+                    for r in balmer_out["individual"]:
+                        logger.info(
+                            "A_V from %s/%s = %.3f +/- %.3f  (obs ratio = %.4f, "
+                            "intrinsic = %.4f)",
+                            r["line"], anchor_label,
+                            r["Av"], r["Av_err"],
+                            r["observed_ratio"], r["intrinsic_ratio"],
+                        )
+                    logger.info(
+                        "A_V weighted mean (anchor=%s) = %.3f +/- %.3f (%d lines).",
+                        anchor_label,
+                        balmer_out["Av"], balmer_out["Av_err"],
+                        balmer_out["n_lines"],
+                    )
             else:
                 Av_derived = 0.0
                 logger.info(
@@ -3773,16 +3831,31 @@ def compute_abundances(
 
     # Inject per-line Balmer decrement details into diagnostics.
     if _balmer_info and primary_result is not None and primary_result.diagnostics is not None:
-        anchor_label = "Hα" if _balmer_info.get("anchor") == "Ha" else "Hβ"
-        parts = []
-        for r in _balmer_info["individual"]:
-            parts.append(
-                f"{r['line']}/{anchor_label} → A_V={r['Av']:.3f}±{r['Av_err']:.3f}"
+        if _balmer_info.get("method") == "joint":
+            parts = []
+            for r in _balmer_info["individual"]:
+                pull = (
+                    (r["flux"] - r["model"]) / r["flux_err"]
+                    if r["flux_err"] > 0 else float("nan")
+                )
+                parts.append(f"{r['line']} {pull:+.1f}σ")
+            dof = _balmer_info["dof"]
+            primary_result.diagnostics["A_V"] = (
+                f"joint fit to {_balmer_info['n_lines']} Balmer lines "
+                f"(χ²={_balmer_info['chi2']:.2f}/{dof} dof); residuals: "
+                + ", ".join(parts)
             )
-        primary_result.diagnostics["A_V"] = (
-            f"weighted mean of {_balmer_info['n_lines']} decrements "
-            f"(anchor={anchor_label}): " + "; ".join(parts)
-        )
+        else:
+            anchor_label = "Hα" if _balmer_info.get("anchor") == "Ha" else "Hβ"
+            parts = []
+            for r in _balmer_info["individual"]:
+                parts.append(
+                    f"{r['line']}/{anchor_label} → A_V={r['Av']:.3f}±{r['Av_err']:.3f}"
+                )
+            primary_result.diagnostics["A_V"] = (
+                f"weighted mean of {_balmer_info['n_lines']} decrements "
+                f"(anchor={anchor_label}): " + "; ".join(parts)
+            )
 
     if primary_result is None:
         # --- Strong-line method ---

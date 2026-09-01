@@ -89,9 +89,26 @@ Two laws are implemented:
 ### 2.3 Multi-Balmer A_V
 
 When multiple Balmer lines are detected (Hgamma through H10), individual
-A_V values are derived from each line's ratio to Hbeta and combined as
-an SNR-weighted average via `compute_Av_multi_balmer()`.  The weights
-are the inverse-variance of each A_V estimate.
+A_V values are derived from each line's ratio to Hbeta and combined by
+generalised least squares via `compute_Av_multi_balmer()`.
+
+Two subtleties matter here.  First, each decrement enters the average
+*unclipped*: attenuation cannot be negative, so clipping the final
+estimate at zero is right, but clipping each decrement beforehand folds
+every noise-driven negative to zero while leaving the positives alone,
+which biases the mean upward whenever the true A_V is near zero.  The
+clip is therefore applied once, to the combined value.  Second, all the
+decrements divide by the same anchor flux, so their errors are
+positively correlated; the covariance is
+
+```
+C_ii = sigma_i^2                  C_ij = s_i s_j   (i != j)
+s_i  = (2.5 / ln 10) * (sigma_anchor / F_anchor) / |dkappa_i|
+```
+
+and the combined value is the GLS mean with error 1 / sqrt(1^T C^-1 1).
+Treating the decrements as independent understates that error by ~20 %
+for a typical four-line ladder anchored on Halpha.
 
 **Excluded lines** (blended at typical NIRSpec resolution):
 - Hepsilon (3971 Å): blended with [NeIII] 3968 Å (Δλ = 3 Å)
@@ -116,6 +133,48 @@ Case-B ratio is taken from the ladder above (extended with Hα = 2.86 and
 Hβ = 1.00).  A_V is still applied as a single point value to all draws;
 its formal error is reported on the result but not marginalised into the
 abundances unless A_V resampling is explicitly enabled (§2.4).
+
+**Joint-ladder option.** Passing `balmer_method="joint"` to
+`compute_abundances` (or calling `compute_Av_joint_balmer()` directly)
+fits every detected Balmer line simultaneously rather than forming
+decrements at all:
+
+```
+F_i^model = C * R_i * 10^(-0.4 * A_V * kappa(lambda_i))
+```
+
+with two free parameters, the normalisation C and A_V.  C enters
+linearly and is solved in closed form at each A_V, so the fit reduces to
+a one-dimensional profile chi-squared scanned on a grid; the error is the
+half-width of the Delta chi-squared = 1 interval.
+
+The motivation is that Balmer decrements are **not independent
+measurements**.  In magnitudes they are exactly additive,
+
+```
+D(Hgamma/Halpha) = D(Hgamma/Hbeta) + D(Hbeta/Halpha)
+```
+
+to machine precision, noise included.  A ladder of N lines therefore
+carries only N-1 independent constraints, however many of the N(N-1)/2
+pairs are formed: adding more pairs contributes no information, and
+averaging them as though independent shrinks the quoted error
+spuriously.  The joint fit uses each *flux* exactly once, which is the
+well-posed way to use them all together.
+
+Relative to the anchored mean it is (i) anchor-free, so no line is
+privileged and the anchor's error is not correlated into every
+decrement; (ii) exact in flux space rather than a first-order
+linearisation of the log-ratio, so it stays unbiased when a line is
+faint; and (iii) equipped with a goodness of fit.  A large `chi2/dof`
+means no single A_V reconciles the ladder — usually stellar Balmer
+absorption eating into the higher-order lines, or a flux-calibration
+step between gratings — a failure the weighted mean silently averages
+away.  A warning is logged above `chi2/dof = 5`.
+
+At least two Balmer lines are required; with exactly two the fit is
+exact (dof = 0) and reproduces that single decrement.  The default
+remains `balmer_method="anchored"`.
 
 ### 2.4 Dust correction of line fluxes
 

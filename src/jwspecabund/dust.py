@@ -264,6 +264,7 @@ def compute_Av_from_balmer(
     intrinsic_ratio: float = 0.468,
     wave_num_A: float = 4341.68,
     wave_den_A: float = 4862.68,
+    clip: bool = True,
     **kwargs,
 ) -> tuple[float, float]:
     """Derive A_V from a Balmer decrement.
@@ -289,6 +290,13 @@ def compute_Av_from_balmer(
         Rest wavelength of numerator line in Angstroms (default Hgamma).
     wave_den_A : float
         Rest wavelength of denominator line in Angstroms (default Hbeta).
+    clip : bool
+        Clip a negative A_V to zero (default ``True``).  Attenuation
+        cannot be negative, so clipping a *final* estimate is right --
+        but clipping each decrement *before* averaging several of them
+        biases the mean upward whenever the true A_V is near zero, so
+        :func:`compute_Av_multi_balmer` passes ``clip=False`` here and
+        clips only the combined value.
     **kwargs
         Extra arguments to the attenuation law.
 
@@ -333,7 +341,7 @@ def compute_Av_from_balmer(
     sigma_R = observed_ratio * frac_err
     Av_err = abs(dAv_dR * sigma_R)
 
-    return max(Av, 0.0), Av_err
+    return (max(Av, 0.0) if clip else Av), Av_err
 
 
 # Balmer-line reference table: {name: (rest wavelength in Å, Case B ratio to Hβ)}.
@@ -350,6 +358,55 @@ _BALMER_LADDER: dict[str, tuple[float, float]] = {
 }
 
 _VALID_BALMER_ANCHORS: tuple[str, ...] = ("HBETA", "Ha")
+
+
+def _kappa(wave_A: np.ndarray, law: str, **kwargs) -> np.ndarray:
+    """Attenuation per unit A_V, kappa(lambda) = A(lambda) / A_V.
+
+    Parameters
+    ----------
+    wave_A : np.ndarray
+        Rest-frame wavelengths in Angstroms.
+    law : str
+        ``"salim"`` or ``"cardelli"``.
+    **kwargs
+        Extra arguments to the attenuation law.
+
+    Returns
+    -------
+    np.ndarray
+        kappa at each wavelength.
+    """
+    wave_A = np.atleast_1d(np.asarray(wave_A, dtype=float))
+    if law == "salim":
+        return salim_attenuation(wave_A, 1.0, **kwargs)
+    if law == "cardelli":
+        return cardelli_extinction(wave_A, 1.0, **kwargs)
+    raise ValueError(f"Unknown dust law: {law!r}. Use 'salim' or 'cardelli'.")
+
+
+def _delta_kappa(wave_num_A: float, wave_den_A: float, law: str, **kwargs) -> float:
+    """kappa(denominator) - kappa(numerator), the lever arm of a decrement.
+
+    Parameters
+    ----------
+    wave_num_A, wave_den_A : float
+        Rest wavelengths of the two lines in Angstroms.
+    law : str
+        ``"salim"`` or ``"cardelli"``.
+    **kwargs
+        Extra arguments to the attenuation law.
+
+    Returns
+    -------
+    float
+        ``kappa(den) - kappa(num)``, matching the ``delta_f`` of
+        :func:`compute_Av_from_balmer`.  It is *negative* when the
+        numerator is the bluer line, which is the usual case; take the
+        absolute value for the lever arm's magnitude.
+    """
+    k = _kappa(np.array([wave_num_A, wave_den_A]), law, **kwargs)
+    return float(k[1] - k[0])
 
 
 def compute_Av_multi_balmer(
@@ -426,16 +483,29 @@ def compute_Av_multi_balmer(
 
         intrinsic_ratio = ratio_over_Hb / anchor_ratio_over_Hb
 
+        # clip=False: each decrement enters the mean unclipped, otherwise
+        # noise-driven negative values are folded to zero and the average
+        # is biased high whenever the true A_V is close to zero.
         av, av_err = compute_Av_from_balmer(
             f, anchor_flux, e, anchor_err,
             law=law, intrinsic_ratio=intrinsic_ratio,
             wave_num_A=wave, wave_den_A=anchor_wave,
-            **kwargs,
+            clip=False, **kwargs,
         )
+        # Part of av_err contributed by the *shared* anchor flux.  Every
+        # decrement is ratioed against the same line, so these pieces are
+        # perfectly correlated between decrements and must not be treated
+        # as independent when the values are averaged.
+        dkappa = abs(_delta_kappa(wave, anchor_wave, law, **kwargs))
+        if dkappa > 0 and anchor_flux > 0:
+            shared = (2.5 / np.log(10.0)) * (anchor_err / anchor_flux) / dkappa
+        else:
+            shared = 0.0
         results.append({
             "line": name, "wave": wave, "Av": av, "Av_err": av_err,
             "observed_ratio": f / anchor_flux,
             "intrinsic_ratio": intrinsic_ratio,
+            "Av_err_shared": shared,
         })
 
     if not results:
@@ -444,14 +514,30 @@ def compute_Av_multi_balmer(
             "n_lines": 0, "anchor": anchor,
         }
 
-    # Inverse-variance weighted mean.
+    # Generalised-least-squares mean.  The decrements share the anchor
+    # flux, so their errors are correlated; the covariance is
+    # C_ii = sigma_i^2, C_ij = s_i s_j (i != j) with s the anchor share.
+    # Ignoring the off-diagonal terms understates the error on the mean.
     avs = np.array([r["Av"] for r in results])
     errs = np.array([r["Av_err"] for r in results])
+    shared = np.array([r.get("Av_err_shared", 0.0) for r in results])
     valid = np.isfinite(errs) & (errs > 0)
     if valid.sum() >= 2:
-        w = 1.0 / errs[valid] ** 2
-        av_mean = np.average(avs[valid], weights=w)
-        av_mean_err = 1.0 / np.sqrt(np.sum(w))
+        a, e, s = avs[valid], errs[valid], shared[valid]
+        cov = np.outer(s, s)
+        np.fill_diagonal(cov, e**2)
+        ones = np.ones_like(a)
+        try:
+            w = np.linalg.solve(cov, ones)
+            norm = float(ones @ w)
+            if not np.isfinite(norm) or norm <= 0:
+                raise np.linalg.LinAlgError
+            av_mean = float(a @ w) / norm
+            av_mean_err = 1.0 / np.sqrt(norm)
+        except np.linalg.LinAlgError:
+            w = 1.0 / e**2
+            av_mean = float(np.average(a, weights=w))
+            av_mean_err = 1.0 / np.sqrt(float(np.sum(w)))
     elif valid.sum() == 1:
         av_mean = avs[valid][0]
         av_mean_err = errs[valid][0]
@@ -465,6 +551,156 @@ def compute_Av_multi_balmer(
         "individual": results,
         "n_lines": len(results),
         "anchor": anchor,
+    }
+
+
+def compute_Av_joint_balmer(
+    fluxes: dict[str, float],
+    errors: dict[str, float],
+    law: str = "salim",
+    snr_min: float = 3.0,
+    Av_min: float = -1.0,
+    Av_max: float = 6.0,
+    n_grid: int = 7001,
+    **kwargs,
+) -> dict[str, object]:
+    """Derive A_V by fitting the whole Balmer ladder at once.
+
+    Rather than forming decrements against a chosen anchor, this fits
+    every detected Balmer line simultaneously with two free parameters --
+    an overall normalisation and ``A_V``::
+
+        F_i^model = C * R_i * 10 ** (-0.4 * A_V * kappa(lambda_i))
+
+    where ``R_i`` is the Case B ratio to Hbeta and ``kappa = A(lambda)/A_V``.
+    The normalisation enters linearly and is solved in closed form at each
+    ``A_V``, so the fit reduces to a one-dimensional profile chi-squared
+    that is scanned on a grid; ``Av_err`` is the half-width of the
+    ``delta chi-squared = 1`` interval.
+
+    Why not simply average more decrements?  Balmer decrements are not
+    independent measurements.  In magnitudes the decrements are exactly
+    additive -- ``D(Hg/Ha) = D(Hg/Hb) + D(Hb/Ha)`` identically -- so a set
+    of ``N`` lines carries only ``N - 1`` independent constraints however
+    many of the ``N(N-1)/2`` pairs are formed.  Adding the remaining pairs
+    contributes no information and, if they are averaged as though they
+    were independent, shrinks the quoted error spuriously.  This fit uses
+    each *flux* once and is the well-posed way to use them all together.
+
+    Compared with :func:`compute_Av_multi_balmer` it is anchor-free (no
+    line is privileged), unbiased near ``A_V = 0`` (nothing is clipped
+    before averaging), and returns a goodness of fit -- a large
+    ``chi2/dof`` flags a ladder that no single ``A_V`` can reconcile,
+    usually stellar Balmer absorption or a flux-calibration step between
+    gratings.
+
+    Parameters
+    ----------
+    fluxes : dict
+        Emission-line fluxes (observed, not dust-corrected).
+    errors : dict
+        Corresponding 1 sigma errors.
+    law : str
+        ``"salim"`` (default) or ``"cardelli"``.
+    snr_min : float
+        Minimum SNR for a Balmer line to be included (default 3.0).
+    Av_min, Av_max : float
+        Bounds of the ``A_V`` scan.  ``Av_min`` is deliberately negative
+        so that the minimum is bracketed for dust-free objects; the
+        returned ``"Av"`` is clipped at zero afterwards.
+    n_grid : int
+        Number of grid points in the scan (default 7001, i.e. 0.001 mag).
+    **kwargs
+        Extra arguments to the attenuation law (Rv, delta, B).
+
+    Returns
+    -------
+    dict
+        Keys: ``"Av"`` (clipped at zero), ``"Av_err"``, ``"Av_fit"``
+        (unclipped best fit), ``"chi2"``, ``"dof"``, ``"individual"``
+        (per-line observed and model fluxes), ``"n_lines"``,
+        ``"anchor"`` (``"joint"``), ``"method"`` (``"joint"``).
+    """
+    empty = {
+        "Av": 0.0, "Av_err": np.nan, "Av_fit": np.nan,
+        "chi2": np.nan, "dof": 0, "individual": [],
+        "n_lines": 0, "anchor": "joint", "method": "joint",
+    }
+
+    names, wave, ratio, flux, err = [], [], [], [], []
+    for name, (w, r) in _BALMER_LADDER.items():
+        f = fluxes.get(name)
+        if f is None or f <= 0:
+            continue
+        e = errors.get(name, 0.0)
+        if e <= 0 or f / e < snr_min:
+            continue
+        names.append(name)
+        wave.append(w)
+        ratio.append(r)
+        flux.append(f)
+        err.append(e)
+
+    # Two free parameters, so two detected lines are the minimum; with
+    # exactly two the fit is exact (dof = 0) and reproduces that decrement.
+    if len(names) < 2:
+        return empty
+
+    wave = np.array(wave)
+    ratio = np.array(ratio)
+    flux = np.array(flux)
+    err = np.array(err)
+    kappa = _kappa(wave, law, **kwargs)
+
+    grid = np.linspace(float(Av_min), float(Av_max), int(n_grid))
+    # shape (grid, line): the ladder shape at each A_V, in units of Hbeta
+    model = ratio[None, :] * 10.0 ** (-0.4 * grid[:, None] * kappa[None, :])
+    weight = model / err**2
+    denom = np.sum(model * weight, axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        norm = (flux @ weight.T) / denom          # best C at each A_V
+    resid = (flux[None, :] - norm[:, None] * model) / err
+    chi2 = np.sum(resid**2, axis=1)
+
+    if not np.any(np.isfinite(chi2)):
+        return empty
+
+    j = int(np.nanargmin(chi2))
+    av_fit = float(grid[j])
+    chi2_min = float(chi2[j])
+
+    within = np.isfinite(chi2) & (chi2 <= chi2_min + 1.0)
+    if np.any(within):
+        lo, hi = float(grid[within].min()), float(grid[within].max())
+        av_err = 0.5 * (hi - lo)
+        # An interval running into a scan edge is a lower bound on the error.
+        if lo <= grid[0] or hi >= grid[-1]:
+            logger.warning(
+                "A_V confidence interval reaches the scan edge "
+                "[%.2f, %.2f]; Av_err is a lower bound.", grid[0], grid[-1]
+            )
+    else:
+        av_err = np.nan
+
+    best_norm = float(norm[j])
+    individual = [
+        {
+            "line": n, "wave": float(w), "flux": float(f), "flux_err": float(e),
+            "model": float(best_norm * r * 10.0 ** (-0.4 * av_fit * k)),
+        }
+        for n, w, r, f, e, k in zip(names, wave, ratio, flux, err, kappa)
+    ]
+
+    return {
+        "Av": max(av_fit, 0.0),
+        "Av_err": av_err,
+        "Av_fit": av_fit,
+        "chi2": chi2_min,
+        "dof": len(names) - 2,
+        "individual": individual,
+        "n_lines": len(names),
+        "anchor": "joint",
+        "method": "joint",
     }
 
 

@@ -6,6 +6,47 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### `jwspecabund` — A_V from the whole Balmer ladder at once
+
+- **New `balmer_method="joint"` on `compute_abundances`** (and
+  `compute_Av_joint_balmer()` in `jwspecabund.dust`). Instead of ratioing
+  every line against a chosen anchor, it fits all the detected Balmer lines
+  simultaneously with two free parameters — `A_V` and an overall
+  normalisation — solving the normalisation in closed form at each `A_V` and
+  scanning a profile χ². The default remains `"anchored"`; nothing changes
+  unless you ask for the joint fit.
+- **Why not just average more decrements?** Balmer decrements are exactly
+  additive in magnitudes: `D(Hγ/Hα) = D(Hγ/Hβ) + D(Hβ/Hα)` holds to machine
+  precision, noise included. A ladder of *N* lines therefore carries *N−1*
+  independent constraints however many of the *N(N−1)/2* pairs you form.
+  Adding the extra pairs contributes no information, and averaging them as
+  though they were independent shrinks the quoted error spuriously.
+- The joint fit is anchor-free, uses each *flux* exactly once, and returns
+  `chi2`/`dof` — a large reduced χ² flags a ladder that no single `A_V` can
+  reconcile (stellar Balmer absorption, or a flux-calibration step between
+  gratings), which the anchored weighted mean silently averages away.
+
+### `jwspecabund` — two fixes to the anchored Balmer estimator
+
+- **Individual decrements are no longer clipped at `A_V ≥ 0` before
+  averaging.** Attenuation cannot be negative, so clipping a *final* estimate
+  is right, but clipping each decrement first folds every noise-driven
+  negative to zero while leaving the positives alone, biasing the mean upward
+  whenever the true `A_V` is near zero. Injecting `A_V = 0` into a four-line
+  ladder at realistic SNR, the old estimator returned **+0.036**; it now
+  returns 0.000. The clip now applies once, to the combined value.
+  `compute_Av_from_balmer()` keeps its clip by default and grows a
+  `clip=False` opt-out for use as an ingredient.
+- **The error on the weighted mean now accounts for the shared anchor.**
+  Every decrement divides by the same anchor flux, so their errors are
+  positively correlated and inverse-variance weighting as if independent
+  understates the result. Replaced with a generalised least squares using the
+  full covariance (`C_ii = σ_i²`, `C_ij = s_i s_j` with `s` the anchor's
+  share), falling back to the diagonal form if the matrix is singular. On a
+  real four-line ladder anchored on Hα the quoted error went from 0.081 to
+  0.100 against a Monte-Carlo truth of 0.097.
+
+
 ### `jwspecfit` — blended-doublet flux ratios corrected
 
 - **O III] λ1661/λ1666 was fixed at 0.83; the true value is 0.4016.** Both
