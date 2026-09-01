@@ -302,8 +302,55 @@ represent λ1666 at all, so the joint solve uses the 6-level
 `o_iii_coll_TZ17.dat` (Tayal & Zatsarinny 2017) — the same dataset §3.2
 already uses.  `oiii_coll_file` selects an alternative:
 `"o_iii_coll_AK99.dat"` (Aggarwal & Keenan 1999) reproduces Hsiao et al.
-exactly and shifts T_e by 1–2 %, n_e by ≤0.1 dex and log(O²⁺/H⁺) by
-~0.02 dex (worst case 0.09).
+exactly; `"o_iii_coll_MBZ20.dat"` is Mao, Badnell & Del Zanna (2020).
+
+*Why TZ17 is the default.*  Nothing in the observations can arbitrate
+between two ab-initio calculations, so the choice rests on how they were
+made.  TZ17 is a 202-level close-coupling expansion; the AK99 file
+resolves 6 levels.  A larger target expansion represents the resonance
+structure and the coupling to higher terms better, and TZ17 is the more
+recent calculation.  Against the one external reference available —
+SSB14, which is modern but 5-level, and which PyNEB still uses for the
+downstream λ5007 emissivity — the two are comparably close (median
+disagreement in λ4363/(λ5007+λ4959) of 1.6 % for TZ17 and 1.1 % for
+AK99; in ε(5007), 1.6 % and 2.3 %).  Neither dominates, so the
+methodological argument decides.  MBZ20 is the outlier of the three and
+is not recommended as a default: it differs from TZ17 by 17 % in
+ε(5007) and 15 % from SSB14.
+
+*How much the choice costs.*  It is strongly density-dependent, and the
+worst case is exactly the regime the joint solve exists for.  Recovering
+a known 12 + log(O²⁺/H⁺) = 8.000 from fluxes generated with TZ17:
+
+| true n_e (cm⁻³) | Δ log(O²⁺/H⁺), AK99 − TZ17 |
+|---|---|
+| 10³ | +0.014 (both curves flat; n_e is an upper limit either way) |
+| 10⁵ | −0.004 |
+| 3 × 10⁵ | +0.026 |
+| 10⁶ | **+0.092** |
+
+So below ~3 × 10⁵ cm⁻³ the choice is worth less than 0.03 dex and is not
+worth agonising over.  Above ~10⁵·⁵ it is worth running the solve both
+ways and quoting the spread as a systematic — which also separates any
+disagreement with Hsiao et al.'s published values from the atomic data,
+since they used AK99.
+
+*One thing that looks worse than it is.*  The AK99 file carries
+Ω(¹D₂→⁵S₂) = Ω(¹S₀→⁵S₂) = 0, i.e. no collisional coupling between the
+λ1666 upper level and the λ4363/λ5007 upper levels — the very physics
+the joint solve exploits.  Zeroing those two transitions in TZ17 and
+re-running isolates the effect: λ4363/(λ5007+λ4959) moves by < 0.01 %,
+λ1666/λ4363 by at most 0.6 % (at n_e = 10⁶), and ε(5007) by 0.03 %.  The
+missing couplings are therefore harmless; the real TZ17-vs-AK99
+difference comes from the transitions both datasets do include, and
+grows to ~13 % in λ4363/(λ5007+λ4959) by n_e = 10⁶.
+
+*Residual inconsistency, documented not fixed.*  The downstream
+`_ionic_abundance` still takes the λ5007 emissivity from PyNEB's default
+SSB14 atom, so a TZ17 temperature feeds an SSB14 emissivity.  Measured
+over T_e = 15,000–25,000 K this is +2.4 % to +3.5 %, i.e. 0.010–0.015 dex
+in O²⁺/H⁺.  Note also that the SSB14 collision grid stops at 25,119 K, so
+above that PyNEB is extrapolating it.
 
 **When it is used.** `compute_abundances(..., self_consistent_OIII="auto")`
 is the default and engages whenever λ1666, λ4363 and λ5007 all clear
