@@ -694,3 +694,55 @@ class TestDefaultValues:
 
     def test_constraints_stored_on_result(self, prism_fit_result):
         assert prism_fit_result.constraints is not None
+
+
+class TestBlendedDoubletRatiosMatchAtomicData:
+    """Pin the blended-doublet flux ratios to PyNEB.
+
+    These constants are used to split an *unresolved* doublet, so a wrong
+    value silently mis-assigns flux between the two components at low
+    resolution.  The sum is still right, but anything using one member
+    alone -- the joint O III] T_e-n_e solve uses lambda1666 by itself -- is
+    then biased.  Two of these were wrong by factors of 2.1 and 4.1 before
+    this test existed.
+    """
+
+    def test_oiii_uv_is_the_branching_ratio(self):
+        """1661/1666 comes from one upper level: no Te or ne dependence."""
+        import pyneb as pn
+
+        from jwspecfit.constraints import _INTERCOM_LOW_DENSITY_RATIOS
+
+        prev = pn.atomicData.getDataFile("O3", "coll")
+        try:
+            pn.atomicData.setDataFile("o_iii_coll_TZ17.dat")
+            atom = pn.Atom("O", 3, NLevels=6)
+        finally:
+            if prev is not None:
+                pn.atomicData.setDataFile(prev)
+
+        const = _INTERCOM_LOW_DENSITY_RATIOS[("OIII_1666", "OIII_1661")]
+        for ne in (1e1, 1e3, 1e6):
+            ratio = (atom.getEmissivity(1.5e4, ne, lev_i=6, lev_j=2)
+                     / atom.getEmissivity(1.5e4, ne, lev_i=6, lev_j=3))
+            assert ratio == pytest.approx(const, rel=0.01), f"ne={ne:g}"
+
+    @pytest.mark.parametrize(
+        ("pri", "sec", "element", "ion", "wave_pri", "wave_sec"),
+        [
+            ("CIII]_1907", "CIII]", "C", 3, 1907, 1909),
+            ("NIV_1486", "NIV_1483", "N", 4, 1486, 1483),
+            ("NIII_1749", "NIII_1752", "N", 3, 1749, 1752),
+            ("SiIII_1", "SiIII_2", "Si", 3, 1883, 1892),
+        ],
+    )
+    def test_low_density_limit(self, pri, sec, element, ion, wave_pri, wave_sec):
+        import pyneb as pn
+
+        from jwspecfit.constraints import _INTERCOM_LOW_DENSITY_RATIOS
+
+        atom = pn.Atom(element, ion)
+        ratio = (atom.getEmissivity(1.5e4, 1e2, wave=wave_sec)
+                 / atom.getEmissivity(1.5e4, 1e2, wave=wave_pri))
+        const = _INTERCOM_LOW_DENSITY_RATIOS[(pri, sec)]
+        assert ratio == pytest.approx(const, rel=0.10)

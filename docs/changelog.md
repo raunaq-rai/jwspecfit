@@ -6,6 +6,34 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### `jwspecfit` — blended-doublet flux ratios corrected
+
+- **O III] λ1661/λ1666 was fixed at 0.83; the true value is 0.4016.** Both
+  components decay from the same upper level (⁵S₂ → ³P₁, ³P₂), so their ratio
+  is a pure branching ratio set by the A-values and wavelengths — no density
+  or temperature dependence whatsoever (verified against PyNEB at
+  n_e = 10, 10³ and 10⁶ cm⁻³). The constant was wrong by a factor 2.07.
+- **N III] λ1752/λ1749 was fixed at 0.67; PyNEB gives 2.75** at the
+  low-density limit (rising to 3.5 by n_e = 10⁵). Wrong by a factor ~4.
+- These ratios are applied **only when the doublet is unresolved**, so fits
+  that resolve the pair are unaffected — the bug bit PRISM and other low-R
+  data. The doublet *sum* was always right; what was wrong was the split
+  between the two members, which matters for anything using one member alone
+  (the self-consistent T_e–n_e solve uses λ1666 by itself).
+- A new test pins every blended-doublet constant to PyNEB so they cannot
+  drift again.
+
+### `jwspecabund` — graceful failure on an unsolvable auroral ratio
+
+- **A noisy or over-fit [O III] λ4363 no longer takes down the whole
+  calculation.** Its ratio against λ5007 can land above the physical maximum,
+  where PyNEB returns no solution; the resulting `ValueError` propagated out
+  of `compute_abundances`. Each single-ratio diagnostic is now tried in turn,
+  so an unsolvable λ4363 cannot hide a good O III] λ1666, and `method="auto"`
+  falls back to the strong-line method with the reason recorded in
+  `failures["direct method"]`. An explicit `method="direct"` still raises,
+  now distinguishing an absent auroral line from an unsolvable one.
+
 ### `jwspecabund` — pure-UV C/O and an O III] doublet check
 
 - **New `compute_CppOpp_uv()`: C/O from C III] λλ1907,1909 against

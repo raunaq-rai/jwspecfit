@@ -32,11 +32,19 @@ _INTERCOM_LOW_DENSITY_RATIOS: dict[tuple[str, str], float] = {
     # (primary, secondary): F(secondary) / F(primary)
     ("NV_1",      "NV_2"):      NV_RATIO,  # resonance, optically thin limit
     ("CIV_1",     "CIV_2"):     0.50,   # optically thin limit
-    ("OIII_1666", "OIII_1661"): 0.83,   # 1/1.20, low-density limit
+    # Pure branching ratio: both components decay from the same upper level
+    # (5S2 -> 3P1, 3P2), so this is fixed by the A-values and wavelengths
+    # alone -- A(6->2)*lam(1666) / (A(6->3)*lam(1661)) -- with no density or
+    # temperature dependence at all.  Verified against PyNEB at
+    # ne = 1e1, 1e3 and 1e6: 0.4016 to four figures throughout.
+    ("OIII_1666", "OIII_1661"): 0.4016,
     ("CIII]_1907", "CIII]"):     0.65,   # Keenan+1992
     ("CII]_2326", "CII]_2324"):  0.49,   # A-value ratio, same upper level
     ("NIV_1486",   "NIV_1483"):  1.48,   # low-density limit (PyNEB); drops below 1 at ne > 5e4
-    ("NIII_1749",  "NIII_1752"): 0.67,
+    # PyNEB N III at Te = 1.5e4 K: 2.75 at ne = 1e2, rising to 3.5 by 1e5.
+    # (lam1748.6 is the 3->1 transition, lam1752.2 the 4->2, so unlike the
+    # O III] pair this one is density-sensitive.)
+    ("NIII_1749",  "NIII_1752"): 2.75,
     ("SiIII_1",   "SiIII_2"):   0.67,
 }
 
