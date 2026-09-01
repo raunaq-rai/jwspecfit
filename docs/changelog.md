@@ -6,6 +6,25 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### `jwspecabund` — flag a low-ionisation density that cannot be measured
+
+- **The diagnostics now say when `n_e(low)` is uninformative.** [S II]
+  6718/6732 and [O II] 3726/3729 have critical densities of only ~3×10³ and
+  ~4×10³ cm⁻³, so their ratios sit on the high-density asymptote well before
+  10⁴ and cannot distinguish 10⁴ from 10⁶ (Arellano-Córdova et al. 2026,
+  arXiv:2602.13007). When the self-consistent O III solve measures the O²⁺
+  zone above 10⁴ cm⁻³, `diagnostics["ne(low)"]` now records that O⁺, N⁺ and
+  S⁺ are being evaluated in a zone that may be orders of magnitude denser
+  than assumed, and a warning is logged. `ne_low_override` is the knob for
+  following Arellano-Córdova's own prescription of 10⁴ cm⁻³.
+- A measured `n_e(low)` that itself solves above 10⁴ cm⁻³ is now labelled a
+  lower limit rather than reported as a value.
+- Nothing is changed automatically: the low-ionisation density is still
+  whatever the doublet or the redshift fallback gives. On OMEGA 77
+  (n_e(O²⁺) = 1.6×10⁵) moving `ne_low` from the 673 cm⁻³ fallback to 10⁴
+  raises 12+log(O/H) by 0.050 dex and lowers log(N/O) by 0.009.
+
+
 ### `jwspecabund` — A_V from the whole Balmer ladder at once
 
 - **New `balmer_method="joint"` on `compute_abundances`** (and

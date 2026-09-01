@@ -904,6 +904,13 @@ def _compute_CO_uv(
 #: not mutually consistent and the "limit" carries no density information.
 _NE_CAP_MIN_CONVERGED_FRAC: float = 0.5
 
+#: Density above which the low-ionisation doublets stop carrying
+#: information.  [S II] 6718/6732 and [O II] 3726/3729 have critical
+#: densities of only ~3e3 and ~4e3 cm^-3, so their ratios sit on the
+#: high-density asymptote well before 1e4 and cannot distinguish 1e4 from
+#: 1e6 (Arellano-Cordova et al. 2026, arXiv:2602.13007).
+_NE_LOW_SATURATION: float = 1.0e4
+
 
 #: Human-readable labels for each T_e(O++) diagnostic.
 _TE_DIAG_LABELS = {
@@ -1759,6 +1766,38 @@ def _build_diagnostics(
         )
         diag["ne(low)"] = (
             f"z-fallback ({_fb_low:.0f} cm^-3, Topping+2025a) — {_why}"
+        )
+
+    # Consistency between the low-ionisation zone and a *measured* dense
+    # O++ zone.  [S II]/[O II] saturate below 1e4 cm^-3, so when the joint
+    # solve puts O++ above that, ne(low) is not a measurement of anything
+    # -- yet O+, N+ and S+ are still evaluated at it.
+    _dense_Opp = (
+        ne_Opp is not None
+        and ne_Opp >= _NE_LOW_SATURATION
+        and (sc is None or (sc.converged and not sc.ne_is_upper_limit))
+    )
+    if _dense_Opp and ne_low < _NE_LOW_SATURATION:
+        diag["ne(low)"] += (
+            f" — NOTE: n_e(O++) = {ne_Opp:.3g} cm^-3, but [S II]/[O II] "
+            f"saturate below {_NE_LOW_SATURATION:.0g} cm^-3, so this value "
+            "is uninformative at that density; O+, N+ and S+ may be "
+            "evaluated in a far denser zone than assumed "
+            "(Arellano-Cordova+2026 adopt 1e4 cm^-3 here; set "
+            "ne_low_override to follow them)"
+        )
+        logger.warning(
+            "n_e(O++) = %.3g cm^-3 but n_e(low) = %.0f cm^-3: the low-ionisation "
+            "doublets saturate below %.0g cm^-3 and cannot constrain a zone "
+            "this dense.  O+/N+/S+ are evaluated at %.0f cm^-3; pass "
+            "ne_low_override to adopt a denser low-ionisation zone.",
+            ne_Opp, ne_low, _NE_LOW_SATURATION, ne_low,
+        )
+    elif _measured_low and ne_low >= _NE_LOW_SATURATION:
+        diag["ne(low)"] += (
+            f" — NOTE: above {_NE_LOW_SATURATION:.0g} cm^-3 the doublet "
+            "ratio is on its high-density asymptote, so treat this as a "
+            "lower limit"
         )
 
     # ne(mid)

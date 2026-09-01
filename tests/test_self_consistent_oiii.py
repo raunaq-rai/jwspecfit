@@ -595,3 +595,68 @@ class TestUnsolvableAuroralRatio:
         assert res.method == "direct"
         assert res.Te_diagnostic == "1666"
         assert res.Te_high == pytest.approx(Te, rel=0.15)
+
+
+class TestLowIonisationDensityConsistency:
+    """[S II]/[O II] cannot constrain a zone denser than ~1e4 cm^-3.
+
+    Their critical densities are only ~3e3 and ~4e3 cm^-3, so the doublet
+    ratios sit on their high-density asymptote well before 1e4.  When the
+    joint O III solve puts the O++ zone above that, whatever ne(low) holds
+    is not a measurement of anything — but O+, N+ and S+ are still
+    evaluated at it (Arellano-Cordova et al. 2026, arXiv:2602.13007).
+    The diagnostics must say so rather than reporting a bare number.
+    """
+
+    @staticmethod
+    def _diag(ne_low, ne_Opp, sc=None):
+        from jwspecabund._core import _build_diagnostics
+
+        return _build_diagnostics(
+            fluxes={"OIII_5007": 1.0, "OIII_4363": 0.05, "OIII_1666": 0.02},
+            Te_high=14000.0, Te_relation="3_tier",
+            ne_low=ne_low, ne_mid=None, ne_high=ne_Opp,
+            logU=None, logU_diag=None, icf_method=None, NO_icf_name=None,
+            ne_default=100.0, ne_Opp=ne_Opp, Te_int=12000.0, z=7.0, sc=sc,
+        )
+
+    def test_warns_when_Opp_is_dense_and_ne_low_is_not(self):
+        diag = self._diag(ne_low=700.0, ne_Opp=1.6e5)
+        assert "saturate" in diag["ne(low)"]
+        assert "ne_low_override" in diag["ne(low)"]
+
+    def test_silent_when_both_zones_are_low_density(self):
+        diag = self._diag(ne_low=700.0, ne_Opp=300.0)
+        assert "saturate" not in diag["ne(low)"]
+
+    def test_silent_when_ne_low_is_already_dense(self):
+        diag = self._diag(ne_low=3.0e4, ne_Opp=1.6e5)
+        assert "saturate" not in diag["ne(low)"]
+
+    def test_measured_dense_ne_low_is_flagged_as_a_lower_limit(self):
+        """A doublet solving above 1e4 is on its asymptote, not a value."""
+        from jwspecabund._core import _build_diagnostics
+        from jwspecabund.direct import ne_zone_fallback
+
+        # ne_low must differ from the z-fallback to count as "measured".
+        ne_low = 3.0e4
+        assert abs(ne_low - ne_zone_fallback("low", 7.0)) > 1.0
+        diag = _build_diagnostics(
+            fluxes={"SII_6718": 1.0, "SII_6732": 1.0, "OIII_5007": 1.0},
+            Te_high=14000.0, Te_relation="3_tier",
+            ne_low=ne_low, ne_mid=None, ne_high=1.0e4,
+            logU=None, logU_diag=None, icf_method=None, NO_icf_name=None,
+            ne_default=100.0, ne_Opp=1.0e4, Te_int=12000.0, z=7.0,
+        )
+        assert "lower limit" in diag["ne(low)"]
+
+    def test_an_upper_limit_density_does_not_trigger_the_warning(self):
+        """A non-crossing solve gives a limit, not a measured dense zone."""
+        from jwspecabund.direct import SelfConsistentOIII
+
+        sc = SelfConsistentOIII(
+            Te=14000.0, ne=1.6e5, converged=False,
+            ne_is_upper_limit=True, ne_upper_limit=1.6e5,
+        )
+        diag = self._diag(ne_low=700.0, ne_Opp=1.6e5, sc=sc)
+        assert "saturate" not in diag["ne(low)"]
