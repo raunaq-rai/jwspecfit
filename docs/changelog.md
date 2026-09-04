@@ -4,7 +4,7 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
-## Unreleased
+## 1.1.9 — 2026-09-04
 
 ### `jwspecabund` — flag a low-ionisation density that cannot be measured
 
@@ -153,6 +153,14 @@ history on GitHub is the authoritative source.
   clear `snr_auroral`; pass `False` for the previous single-ratio behaviour.
   `oiii_coll_file="o_iii_coll_AK99.dat"` reproduces Hsiao et al.'s atomic data
   (1–2 % in T_e, ~0.02 dex in O²⁺/H⁺).
+- **Which O III collision dataset to use is now argued out in the
+  methodology page** rather than asserted. TZ17 stays the default on the
+  strength of its 202-level close-coupling expansion against AK99's 6, with
+  both comparably close to SSB14 on the quantities SSB14 can compute. The
+  cost of the choice is strongly density-dependent — recovering a known
+  O²⁺/H⁺ from TZ17 fluxes, AK99 differs by 0.014 dex at n_e = 10³ cm⁻³ but
+  0.092 dex at 10⁶ — so above ~10⁵·⁵ cm⁻³ it is worth running both and
+  quoting the spread.
 - **Every result now reports what each single ratio would have given on its
   own**, in `alt_results["direct_4363"]` / `alt_results["direct_1666"]` and as
   a side-by-side table in `AbundanceResult.summary()`, so the effect of the
@@ -162,6 +170,13 @@ history on GitHub is the authoritative source.
 - **New `plot_te_ne_diagnostic()`** reproduces figure 3 of Hsiao et al.: the
   three T_e(n_e) curves with 1σ bands, the posterior contours, and the adopted
   solution.
+
+### `jwspecfit` — N V in the default line markers
+
+- **N V λλ1238,1242 is now drawn by `plot_spectrum_interactive` and
+  `plot_2d_1d`.** It sits between Lyα and N IV] in the default marker list,
+  so the highest-ionisation nitrogen line is labelled without having to pass
+  a custom list.
 
 ## 1.1.8 — 2026-08-14
 
