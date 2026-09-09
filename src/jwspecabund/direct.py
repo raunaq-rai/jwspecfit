@@ -46,6 +46,19 @@ def _get_pyneb():
 #: lambda4363 path untouched at negligible cost in consistency.
 OIII_1666_COLL_FILE = "o_iii_coll_TZ17.dat"
 
+#: A_V above which the pure-UV oxygen tracer is preferred for C/O.
+#:
+#: C/O tiers 1 and 2 differ only in how O2+ is measured.  Tier 1 pairs
+#: C III] 1907,1909 with [O III] 5007, ~3500 A away, so the ratio carries
+#: the full reddening correction (~0.6-1.3 dex of C/O per magnitude of A_V)
+#: and the relative flux calibration between the gratings covering the UV
+#: and the optical.  Tier 2 pairs it with O III] 1661,1666, ~240 A away:
+#: ~0.04 dex/mag and no Hbeta needed, but a much weaker denominator and
+#: more sensitivity to the assumed Te and ne.  One magnitude is where the
+#: reddening term starts to exceed the ~0.1-0.2 dex a faint O III] 1666
+#: measurement typically costs.
+CO_UV_AV_THRESHOLD: float = 1.0
+
 _OIII_ATOMS: dict[str, Any] = {}
 
 
@@ -1933,8 +1946,13 @@ def compute_total_abundances(
     co_icf_method: str = "auto",
     co_logU: float | None = None,
     co_ne: float | None = None,
+    co_uv_ratio: float | None = None,
+    co_uv_note: str | None = None,
+    Av: float | None = None,
+    co_uv_Av_threshold: float = CO_UV_AV_THRESHOLD,
     ionic_upper_limits: dict[str, float] | None = None,
     _lock_NO_icf: str | None = None,
+    _lock_CO_tier: str | None = None,
 ) -> dict[str, float]:
     """Derive total element abundances from ionic abundances + ICFs.
 
@@ -1957,6 +1975,27 @@ def compute_total_abundances(
         (Topping+2024, Yanagisawa+2025, Cameron+2023).  Tiered fallback:
         Tier 1 (N⁺ + N²⁺ + N³⁺) / (O⁺ + O²⁺),
         Tier 2/3 (N²⁺ + N³⁺) / O²⁺, Tier 4 Izotov+06 optical fallback.
+    co_uv_ratio : float, optional
+        C²⁺/O²⁺ measured from the rest-UV lines alone, C III] 1907,1909
+        against O III] 1661,1666 (:func:`compute_CppOpp_uv`).  Passed in
+        rather than computed here because it needs the dust-corrected
+        fluxes and the zone T_e/n_e, none of which this function sees.
+        Enables C/O tier 2; without it the chain skips from tier 1 to
+        tier 3.
+    co_uv_note : str, optional
+        The provenance note returned alongside *co_uv_ratio*, recorded in
+        ``_icf_values["C/O"]["note"]`` when tier 2 is adopted.
+    Av : float, optional
+        Adopted V-band attenuation in magnitudes.  Used only to order C/O
+        tiers 1 and 2 (see *co_uv_Av_threshold*); ``None`` keeps the
+        optical tracer first.
+    co_uv_Av_threshold : float
+        A_V above which the pure-UV oxygen tracer (tier 2) is preferred
+        over [O III] 5007 (tier 1).  The optical pairing spans ~3500 Å and
+        carries ~0.6-1.3 dex of C/O per magnitude of A_V plus the relative
+        flux calibration between the UV and optical gratings; the pure-UV
+        pairing spans ~240 Å and carries ~0.04 dex/mag, but has a weaker
+        denominator.  Default :data:`CO_UV_AV_THRESHOLD`.
 
     Returns
     -------
@@ -1964,7 +2003,20 @@ def compute_total_abundances(
         Total abundance ratios: ``"O/H"``, ``"N/O"``, ``"S/O"``,
         ``"Ne/O"``, ``"Ar/O"``, ``"C/O"``, ``"N/O_UV"`` as available.
         When Martinez+25 is used, also includes ``"NO_icf_name"`` and
-        ``"icf_method"`` keys.
+        ``"icf_method"`` keys.  ``"CO_method"`` names the C/O tier that
+        was adopted: ``"martinez25"``, ``"martinez25_uv"``,
+        ``"direct_sum"`` or ``"garnett97_icf"``.  ``"CO_tracer_reason"``
+        is present only when *Av* promoted tier 2 above tier 1.
+
+    Notes
+    -----
+    ``_lock_CO_tier`` forces the C/O chain onto one named tier, the
+    counterpart of ``_lock_NO_icf`` for nitrogen.  Monte-Carlo and
+    posterior draws pass the tier the point estimate selected, so a
+    resampled A_V straddling *co_uv_Av_threshold* cannot flip individual
+    draws between the optical and UV oxygen tracers and turn the C/O
+    posterior into a silent mixture of two methods.  A draw that cannot
+    form the locked tier yields no C/O and drops out of the statistics.
     """
     from .icf import icf_argon, icf_carbon, icf_neon, icf_nitrogen, icf_sulfur
 
@@ -2310,44 +2362,95 @@ def compute_total_abundances(
         else:
             failures["Ar/O"] = "no O++ ion for Ar/O normalisation"
 
-        # C/O:
-        #   Martinez (in prep.) ICF × (C2+ / O2+) when logU+Z available
-        #   (co_icf_method 'auto'/'martinez25'), otherwise the legacy tiered
-        #   approach:
-        #     1. Direct sum (C+ + C2+ + C3+) / (O+ + O2+) when C+ detected
-        #     2. Garnett+1997 ICF × (C2+ + C3+) / O2+ when C+ not detected
-        #     3. Raw (C2+ + C3+) / O2+ when O+ also missing (ICF=1)
+        # C/O — five tiers, ordered by the quality of the oxygen tracer and
+        # then of the ionisation correction:
+        #   1. Martinez (in prep.) ICF × C2+/O2+, O2+ from [OIII] 5007,4959
+        #   2. Martinez (in prep.) ICF × C2+/O2+, O2+ from O III] 1661,1666
+        #   3. Direct sum (C+ + C2+ + C3+) / (O+ + O2+) when C+ detected
+        #   4. Garnett+1997 ICF × (C2+ + C3+) / O2+ when C+ not detected
+        #   5. Raw (C2+ + C3+) / O2+ when O+ also missing (ICF = 1)
+        #
+        # Tiers 1 and 2 apply the same ICF and differ only in how O2+ is
+        # measured, so tier 2 needs log(U) and Z just as tier 1 does; without
+        # them it is skipped and the chain drops straight to tier 3.
         C_p = ionic.get("C+/H+", 0.0)
         C_pp = ionic.get("C++/H+", 0.0)
         C_ppp = ionic.get("C+++/H+", 0.0)
         C_uv = C_pp + C_ppp
-        co_done = False
-        if use_martinez_co and C_pp > 0 and O_pp > 0:
+
+        # The C2+/O2+ -> C/O correction shared by tiers 1 and 2.
+        martinez_co_icf: float | None = None
+        if use_martinez_co:
             from .martinez25_icf import icf_CppOpp
             ne_icf = _co_ne if _co_ne is not None else NE_DEFAULT
-            icf_c = icf_CppOpp(_co_logU, Z_Zsun, ne_icf)
-            if np.isfinite(icf_c):
-                raw_co = C_pp / O_pp
-                totals["C/O"] = icf_c * raw_co
-                totals["CO_method"] = "martinez25"
-                totals["CO_icf_value"] = icf_c
-                icf_dict["C/O"] = {
-                    "icf": icf_c, "method": "Martinez (in prep.)",
-                    "raw": np.log10(raw_co) if raw_co > 0 else None,
-                    "corrected": np.log10(totals["C/O"]) if totals["C/O"] > 0 else None,
-                }
-                co_done = True
+            _icf_try = icf_CppOpp(_co_logU, Z_Zsun, ne_icf)
+            if np.isfinite(_icf_try):
+                martinez_co_icf = float(_icf_try)
+
+        # Which of the two Martinez tiers can actually be formed.
+        co_ratios: dict[str, float] = {}
+        if martinez_co_icf is not None:
+            if C_pp > 0 and O_pp > 0:
+                co_ratios["martinez25"] = C_pp / O_pp
+            if (co_uv_ratio is not None and np.isfinite(co_uv_ratio)
+                    and co_uv_ratio > 0):
+                co_ratios["martinez25_uv"] = float(co_uv_ratio)
+
+        # Order tiers 1 and 2.  The optical pairing sets C III] 1907,1909
+        # against [OIII] 5007, ~3500 A apart, so it carries the full
+        # reddening correction and the relative flux calibration between the
+        # gratings covering the UV and the optical: ~0.6-1.3 dex of C/O per
+        # magnitude of A_V.  The pure-UV pairing spans ~240 A and carries
+        # ~0.04 dex/mag, at the cost of a much weaker denominator and more
+        # sensitivity to the assumed Te and ne.  Below the threshold the S/N
+        # of [OIII] 5007 wins; above it the reddening leverage dominates and
+        # the UV oxygen is the better tracer.
+        co_order = ["martinez25", "martinez25_uv"]
+        if (Av is not None and np.isfinite(Av) and Av > co_uv_Av_threshold
+                and "martinez25_uv" in co_ratios):
+            co_order = ["martinez25_uv", "martinez25"]
+            totals["CO_tracer_reason"] = (
+                f"A_V = {Av:.2f} mag > {co_uv_Av_threshold:.2f}, so the "
+                f"pure-UV oxygen tracer is preferred over [OIII] 5007"
+            )
+
+        co_done = False
+        for tier in co_order:
+            if _lock_CO_tier is not None and tier != _lock_CO_tier:
+                continue
+            if tier not in co_ratios:
+                continue
+            raw_co = co_ratios[tier]
+            totals["C/O"] = martinez_co_icf * raw_co
+            totals["CO_method"] = tier
+            totals["CO_icf_value"] = martinez_co_icf
+            icf_dict["C/O"] = {
+                "icf": martinez_co_icf, "method": "Martinez (in prep.)",
+                "oxygen": ("O III] 1661,1666" if tier == "martinez25_uv"
+                           else "[OIII] 5007,4959"),
+                "raw": np.log10(raw_co) if raw_co > 0 else None,
+                "corrected": np.log10(totals["C/O"]) if totals["C/O"] > 0 else None,
+            }
+            if tier == "martinez25_uv" and co_uv_note:
+                icf_dict["C/O"]["note"] = co_uv_note
+            co_done = True
+            break
+
         if not co_done:
             if co_icf_method == "martinez25" and use_martinez_co:
                 logger.warning(
                     "Martinez C/O ICF unavailable (needs C2+ and O2+ within "
                     "calibration validity); falling back to Garnett+97."
                 )
-            if C_p > 0 and C_uv > 0 and OH > 0:
+
+            def _co_tier_allowed(name: str) -> bool:
+                return _lock_CO_tier is None or _lock_CO_tier == name
+
+            if _co_tier_allowed("direct_sum") and C_p > 0 and C_uv > 0 and OH > 0:
                 # Direct sum — all C ions detected, use total O
                 totals["C/O"] = (C_p + C_uv) / OH
                 totals["CO_method"] = "direct_sum"
-            elif C_uv > 0 and O_pp > 0:
+            elif _co_tier_allowed("garnett97_icf") and C_uv > 0 and O_pp > 0:
                 # Apply Garnett+1997 ICF to correct for missing C+
                 icf_c = icf_carbon(O_plus, O_pp)
                 raw_co = C_uv / O_pp
@@ -2359,6 +2462,11 @@ def compute_total_abundances(
                     "raw": np.log10(raw_co) if raw_co > 0 else None,
                     "corrected": np.log10(totals["C/O"]) if totals["C/O"] > 0 else None,
                 }
+            elif _lock_CO_tier is not None:
+                failures["C/O"] = (
+                    f"C/O tier {_lock_CO_tier!r}, locked to the one the point "
+                    "estimate selected, could not be formed here"
+                )
             elif C_uv <= 0 and C_p <= 0:
                 failures["C/O"] = "no carbon ions detected (CII]/CIII]/CIV missing)"
             else:

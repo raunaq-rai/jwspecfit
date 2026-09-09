@@ -879,6 +879,42 @@ def _compute_CO_uv(
     the zone choice (0.126 dex on a real stack) rather than by the thing
     being compared, the oxygen tracer (0.031 dex).
     """
+    return _apply_co_uv_icf(
+        _compute_CppOpp_uv_raw(fluxes, Te, ne, Te_C=Te_C, ne_C=ne_C), icf,
+    )
+
+
+def _compute_CppOpp_uv_raw(
+    fluxes: dict[str, float],
+    Te: float,
+    ne: float,
+    Te_C: float | None = None,
+    ne_C: float | None = None,
+) -> tuple[float, str] | None:
+    """Raw C2+/O2+ from the UV lines alone, or ``None`` if unavailable.
+
+    The un-logged, un-ICF-corrected ionic ratio behind
+    :func:`_compute_CO_uv`, split out because it is needed twice: once as
+    C/O tier 2 (``co_uv_ratio`` in
+    :func:`~jwspecabund.direct.compute_total_abundances`) and once for the
+    pure-UV C/O reported alongside the adopted value.  Sharing it keeps the
+    four PyNEB emissivity evaluations to one per draw.
+
+    Parameters
+    ----------
+    fluxes : dict
+        Dust-corrected fluxes; needs C III] 1907/1909 and O III] 1661/1666.
+    Te, ne : float
+        Conditions for the O2+ zone.
+    Te_C, ne_C : float or None
+        Conditions for C2+; ``None`` places it in the O2+ zone.
+
+    Returns
+    -------
+    tuple or None
+        ``(C2+/O2+, note)``, or ``None`` when the lines are missing or the
+        emissivities cannot be evaluated.
+    """
     from .direct import compute_CppOpp_uv
 
     try:
@@ -892,10 +928,27 @@ def _compute_CO_uv(
         return None
     if cpp_opp <= 0:
         return None
+    return float(cpp_opp), note
 
+
+def _apply_co_uv_icf(
+    raw: tuple[float, str] | None,
+    icf: float | None,
+) -> tuple[float, str] | None:
+    """Turn a raw UV C2+/O2+ into log(C/O), applying *icf* when usable."""
+    if raw is None:
+        return None
+    cpp_opp, note = raw
     if icf is None or not np.isfinite(icf) or icf <= 0:
         return float(np.log10(cpp_opp)), note + "; raw C2+/O2+, no ICF applied"
     return float(np.log10(icf * cpp_opp)), note + f"; ICF = {icf:.4f}"
+
+
+#: C/O tiers whose ``CO_icf_value`` is the Martinez (in prep.) C2+/O2+
+#: correction.  The two differ only in how O2+ is measured -- optical
+#: [O III] 5007,4959 or pure-UV O III] 1661,1666 -- and share one ICF, so
+#: both supply the correction applied to the reported pure-UV C/O.
+_MARTINEZ_CO_TIERS: tuple[str, ...] = ("martinez25", "martinez25_uv")
 
 
 #: Minimum fraction of posterior draws that must yield a genuine curve
@@ -1630,6 +1683,7 @@ def _build_diagnostics(
     te_high_diag: str | None = None,
     z: float = 0.0,
     sc: Any = None,
+    Z_Zsun: float | None = None,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -1667,6 +1721,12 @@ def _build_diagnostics(
     """
     totals = totals or {}
     diag: dict[str, str] = {}
+
+    from .martinez25_icf import (
+        _Z_ZSUN_PUBLISHED,
+        LOG_OH_SOLAR,
+        is_Z_extrapolated,
+    )
 
     # Te(high) — solved at the O²⁺-zone density ne_Opp.
     _ne_OIII = ne_Opp if ne_Opp is not None else (
@@ -1852,6 +1912,22 @@ def _build_diagnostics(
     else:
         diag["log(U)"] = "not available (N43 and O32 diagnostics both unavailable)"
 
+    # Flag a metallicity taken from the extrapolated strip below the
+    # published Martinez+2025 grid, so the result records the extrapolation
+    # rather than implying the object was calibrated.
+    if is_Z_extrapolated(Z_Zsun):
+        diag["Martinez calibration range"] = (
+            f"Z/Zsun = {Z_Zsun:.3f} (12+log(O/H) = "
+            f"{LOG_OH_SOLAR + np.log10(Z_Zsun):.3f}) is below the published "
+            f"grid floor of {_Z_ZSUN_PUBLISHED[0]:.2f} "
+            f"({LOG_OH_SOLAR + np.log10(_Z_ZSUN_PUBLISHED[0]):.3f}), so the "
+            "log(U) and ICF surfaces are extrapolated. The surfaces are "
+            "polynomials in linear Z/Zsun and flatten towards a constant as "
+            "Z -> 0, so the cost is small: <= 0.05 dex on log(U) and "
+            "<= 0.01 dex on N/O. Rejecting the object instead would bias it "
+            "far harder, by truncating the metallicity posterior"
+        )
+
     # N/O ICF
     if NO_icf_name is not None:
         diag["N/O ICF"] = _ICF_DESCRIPTIONS.get(
@@ -1862,6 +1938,7 @@ def _build_diagnostics(
 
     # C/O method
     co_method = totals.get("CO_method")
+    _co_reason = totals.get("CO_tracer_reason")
     if co_method == "martinez25":
         icf_val = totals.get("CO_icf_value", 1.0)
         diag["C/O"] = (
@@ -1870,6 +1947,18 @@ def _build_diagnostics(
             "ratio spans the UV-to-optical baseline and carries the full "
             "reddening and cross-grating calibration (~0.6-1.3 dex/mag). "
             "See alt_results['CO_uv'] for the pure-UV alternative"
+        )
+    elif co_method == "martinez25_uv":
+        icf_val = totals.get("CO_icf_value", 1.0)
+        diag["C/O"] = (
+            f"Martinez (in prep.) ICF x C²⁺/O²⁺ — ICF = {icf_val:.3f}; "
+            "C²⁺ from CIII] 1907,1909 and O²⁺ from O III] 1661,1666, a "
+            "~240 Å baseline, so the ratio is nearly reddening-free "
+            "(~0.04 dex/mag) and needs neither Hβ nor the relative flux "
+            "calibration between the UV and optical gratings"
+            + (f". Preferred over [OIII] 5007 because {_co_reason}"
+               if _co_reason else
+               " (adopted because the optical O²⁺ route was unavailable)")
         )
     elif co_method == "direct_sum":
         diag["C/O"] = "direct sum (C⁺ + C²⁺ + C³⁺) / (O⁺ + O²⁺) — CII] detected"
@@ -1911,6 +2000,7 @@ def _run_direct(
     self_consistent_OIII: bool = False,
     snr_auroral: float = 3.0,
     oiii_coll_file: str | None = None,
+    Av: float | None = None,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
 
@@ -2044,11 +2134,23 @@ def _run_direct(
         ne_Opp=ne_Opp, Te_int=Te_int,
     )
 
+    # C/O tier 2 needs the pure-UV C2+/O2+, which depends on the fluxes and
+    # the zone conditions rather than on the ionic abundances, so it is
+    # measured here and handed to compute_total_abundances.
+    _co_uv_raw = _compute_CppOpp_uv_raw(
+        fluxes, Te_high, ne_Opp,
+        Te_C=(Te_int if Te_int is not None else Te_high),
+        ne_C=(ne_mid if ne_mid is not None else ne_Opp),
+    ) if np.isfinite(Te_high) else None
+
     totals = compute_total_abundances(
         ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
         icf_method=icf_method,
         co_icf_method=co_icf_method,
         co_logU=logU_co, co_ne=ne_mid,
+        co_uv_ratio=_co_uv_raw[0] if _co_uv_raw else None,
+        co_uv_note=_co_uv_raw[1] if _co_uv_raw else None,
+        Av=Av,
         ionic_upper_limits=ionic_upper_limits,
         _lock_NO_icf=icf_tier,
     )
@@ -2082,7 +2184,7 @@ def _run_direct(
         logU, logU_diag, icf_method, NO_icf_name, NE_DEFAULT,
         totals=totals, niv_rejected=niv_rejected,
         ne_Opp=ne_Opp, Te_int=Te_int, te_high_diag=_Te_diagnostic, z=z,
-        sc=_sc,
+        sc=_sc, Z_Zsun=Z_Zsun,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -2098,8 +2200,9 @@ def _run_direct(
     CO_uv_mc: list[float] = []
     logU_mc_arr = []
     _oiii_uv_chk = _oiii_uv_doublet_check(fluxes, errors)
+    _co_tier_pt = totals.get("CO_method")
     _co_icf_pt = (
-        totals.get("CO_icf_value") if totals.get("CO_method") == "martinez25" else None
+        totals.get("CO_icf_value") if _co_tier_pt in _MARTINEZ_CO_TIERS else None
     )
     # Collect per-tier N/O posteriors for uncertainty on each method.
     _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
@@ -2137,9 +2240,14 @@ def _run_direct(
                 mc_fluxes, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
                 Te_int=Te_i, ne_Opp=ne_Opp_i,
             )
-            _cu = _compute_CO_uv(mc_fluxes, Te_h, ne_Opp_i, _co_icf_pt,
-                                 Te_C=(Te_i if Te_i is not None else Te_h),
-                                 ne_C=(ne_mid if ne_mid is not None else ne_Opp_i))
+            # One evaluation, two uses: C/O tier 2 below, and the pure-UV
+            # C/O reported alongside the adopted value.
+            _cu_raw = _compute_CppOpp_uv_raw(
+                mc_fluxes, Te_h, ne_Opp_i,
+                Te_C=(Te_i if Te_i is not None else Te_h),
+                ne_C=(ne_mid if ne_mid is not None else ne_Opp_i),
+            )
+            _cu = _apply_co_uv_icf(_cu_raw, _co_icf_pt)
             CO_uv_mc.append(_cu[0] if _cu is not None else np.nan)
 
             # Compute Z_Zsun for this MC iteration.
@@ -2206,7 +2314,10 @@ def _run_direct(
                 icf_method=icf_method,
                 co_icf_method=co_icf_method,
                 co_logU=logU_co_icf, co_ne=ne_mid,
+                co_uv_ratio=_cu_raw[0] if _cu_raw else None,
+                Av=Av,
                 _lock_NO_icf=NO_icf_name,
+                _lock_CO_tier=_co_tier_pt,
             )
 
             oh_mc = totals_mc.get("O/H", np.nan)
@@ -2328,7 +2439,10 @@ def _run_direct(
     diagnostics.update(_alt_diag)
 
     # --- Pure-UV C/O, reported alongside the adopted C/O ---
-    _co_icf = totals.get("CO_icf_value") if totals.get("CO_method") == "martinez25" else None
+    _co_icf = (
+        totals.get("CO_icf_value")
+        if totals.get("CO_method") in _MARTINEZ_CO_TIERS else None
+    )
     _co_uv = _compute_CO_uv(fluxes, Te_high, ne_Opp, _co_icf,
                             Te_C=(Te_int if Te_int is not None else Te_high),
                             ne_C=(ne_mid if ne_mid is not None else ne_Opp))
@@ -2661,11 +2775,23 @@ def _run_direct_mcmc(
             ne_Opp=ne_Opp, Te_int=Te_int_pt,
         )
 
+    # C/O tier 2 needs the pure-UV C2+/O2+, which depends on the fluxes and
+    # the zone conditions rather than on the ionic abundances, so it is
+    # measured here and handed to compute_total_abundances.
+    _co_uv_raw_pt = _compute_CppOpp_uv_raw(
+        med_fluxes, Te_high_pt, ne_Opp,
+        Te_C=(Te_int_pt if Te_int_pt is not None else Te_high_pt),
+        ne_C=(ne_mid if ne_mid is not None else ne_Opp),
+    ) if np.isfinite(Te_high_pt) else None
+
     totals_pt = compute_total_abundances(
         ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
         icf_method=icf_method,
         co_icf_method=co_icf_method,
         co_logU=logU_co_pt, co_ne=ne_mid,
+        co_uv_ratio=_co_uv_raw_pt[0] if _co_uv_raw_pt else None,
+        co_uv_note=_co_uv_raw_pt[1] if _co_uv_raw_pt else None,
+        Av=Av,
         ionic_upper_limits=ionic_upper_limits,
         _lock_NO_icf=icf_tier,
     ) if ionic_pt else {}
@@ -2681,9 +2807,10 @@ def _run_direct_mcmc(
     NO_tier_post: dict[str, list[float]] = {k: [] for k in _tier_keys}
 
     _oiii_uv_chk = _oiii_uv_doublet_check(med_fluxes, med_errors)
+    _co_tier_pt = totals_pt.get("CO_method")
     _co_icf_pt = (
         totals_pt.get("CO_icf_value")
-        if totals_pt.get("CO_method") == "martinez25" else None
+        if _co_tier_pt in _MARTINEZ_CO_TIERS else None
     )
 
     n_collected = 0  # scanned draws counted toward n_samples (in-bounds N/O
@@ -2713,9 +2840,14 @@ def _run_direct_mcmc(
                 sample, Te_h, Te_l, ne_low, ne_mid=ne_mid, ne_high=ne_high,
                 Te_int=Te_i, ne_Opp=ne_Opp_i,
             )
-            _cu = _compute_CO_uv(sample, Te_h, ne_Opp_i, _co_icf_pt,
-                                 Te_C=(Te_i if Te_i is not None else Te_h),
-                                 ne_C=(ne_mid if ne_mid is not None else ne_Opp_i))
+            # One evaluation, two uses: C/O tier 2 below, and the pure-UV
+            # C/O reported alongside the adopted value.
+            _cu_raw = _compute_CppOpp_uv_raw(
+                sample, Te_h, ne_Opp_i,
+                Te_C=(Te_i if Te_i is not None else Te_h),
+                ne_C=(ne_mid if ne_mid is not None else ne_Opp_i),
+            )
+            _cu = _apply_co_uv_icf(_cu_raw, _co_icf_pt)
             CO_uv_post.append(_cu[0] if _cu is not None else np.nan)
 
             # Z_Zsun for this sample.
@@ -2777,7 +2909,12 @@ def _run_direct_mcmc(
                 icf_method=icf_method,
                 co_icf_method=co_icf_method,
                 co_logU=logU_co_icf, co_ne=ne_mid,
+                co_uv_ratio=_cu_raw[0] if _cu_raw else None,
+                # The point estimate's A_V, not this draw's: the tier is
+                # locked below, so a resampled A_V must not re-order tiers.
+                Av=Av,
                 _lock_NO_icf=NO_icf_name,
+                _lock_CO_tier=_co_tier_pt,
             )
 
             oh = totals_i.get("O/H", np.nan)
@@ -2999,6 +3136,7 @@ def _run_direct_mcmc(
                 totals=totals_pt, niv_rejected=niv_rejected,
                 ne_Opp=ne_Opp, Te_int=_Te_mid_final,
                 te_high_diag=_Te_diagnostic, z=z, sc=_sc,
+                Z_Zsun=Z_Zsun_pt,
             ),
             **_diag_extra,
         },
@@ -3760,6 +3898,7 @@ def compute_abundances(
                     self_consistent_OIII=_self_consistent,
                     snr_auroral=snr_auroral,
                     oiii_coll_file=oiii_coll_file,
+                    Av=Av_derived,
                 )
 
             primary_result = AbundanceResult(
@@ -3962,6 +4101,7 @@ def compute_abundances(
                             self_consistent_OIII=_self_consistent,
                             snr_auroral=snr_auroral,
                             oiii_coll_file=oiii_coll_file,
+                            Av=Av_derived,
                         )
                     alt["direct"] = AbundanceResult(
                         method="direct",
