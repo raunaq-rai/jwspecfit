@@ -34,9 +34,40 @@ _LOG_NE_GRID = np.array([2.0, 3.0, 4.0, 5.0, 6.0])
 
 # Validity ranges (Martinez+2025 Section 4).
 _LOG_U_VALID = (-3.5, -1.0)
-_Z_ZSUN_VALID = (0.05, 0.40)
 _LOG_O32_VALID = (-1.0, 2.5)
 _LOG_N43_VALID = (-3.0, 0.5)
+
+#: Metallicity range the Martinez+2025 Cloudy grid actually spans,
+#: 0.05 <= Z/Zsun <= 0.40 (12+log(O/H) = 7.389 to 8.292).
+_Z_ZSUN_PUBLISHED = (0.05, 0.40)
+
+#: Metallicity range this package *enforces*.  The lower edge is extended
+#: below the published grid to 0.02 Z/Zsun (12+log(O/H) = 6.99) by
+#: extrapolation; the upper edge is the published one.
+#:
+#: The extrapolation is safe in this direction and in this direction only.
+#: Every surface here is a polynomial in *linear* Z/Zsun, so stepping from
+#: y = 0.05 to y = 0.02 is a step of just 0.03 in the fitted variable, and
+#: at those values the higher-order terms are already negligible
+#: (y^2 = 4e-4, y^3 = 8e-6).  The surfaces therefore flatten towards a
+#: constant as y -> 0 rather than diverging: continuing log_U_from_O32 all
+#: the way to Z = 0 moves log(U) by only 0.055 dex below its value at the
+#: grid edge.  Measured at 12+log(O/H) = 7.226 (0.034 Z/Zsun), extrapolating
+#: rather than clamping to the floor shifts log(U) by 0.009-0.049 dex
+#: (largest at high O32 and low density) and, once propagated through the
+#: N/O ICFs, shifts N/O by <= 0.004 dex -- an order of magnitude below the
+#: scatter of the fits themselves.
+#:
+#: Rejecting these objects instead is the more damaging option: because
+#: Z/Zsun is recomputed per Monte-Carlo draw, an object at
+#: 7.226 +/- 0.129 keeps only ~10% of its draws, and those survivors are
+#: the metal-richest tail (median 12+log(O/H) = 7.436, a +0.21 dex
+#: truncation bias) with an artificially shrunken error bar.
+#:
+#: The same latitude is *not* extended to log(O32), log(N43) or log(U):
+#: those are the cubic axes, where the surfaces genuinely run away, and
+#: they stay hard-rejected.
+_Z_ZSUN_VALID = (0.02, _Z_ZSUN_PUBLISHED[1])
 
 # C/O ICF validity (Martinez, in prep.): 12+log(O/H) in [6.95, 8.55],
 # i.e. a wider metallicity range than the N/O ICFs.  Same log(U) grid.
@@ -242,6 +273,39 @@ def _warn_and_reject(
     return float(value)
 
 
+def is_Z_extrapolated(Z_Zsun: float | None) -> bool:
+    """Is *Z_Zsun* accepted only by extrapolating below the published grid?
+
+    ``True`` for a metallicity inside :data:`_Z_ZSUN_VALID` but below the
+    Martinez+2025 grid floor :data:`_Z_ZSUN_PUBLISHED` -- i.e. the value is
+    used, but the surfaces are being evaluated outside the range the models
+    were computed for.  Callers use this to flag the result rather than to
+    change it; see :data:`_Z_ZSUN_VALID` for why the extrapolation is small.
+
+    Parameters
+    ----------
+    Z_Zsun : float or None
+        Gas-phase metallicity in solar units.
+
+    Returns
+    -------
+    bool
+        ``True`` if ``_Z_ZSUN_VALID[0] <= Z_Zsun < _Z_ZSUN_PUBLISHED[0]``.
+
+    Examples
+    --------
+    >>> is_Z_extrapolated(0.10)      # inside the published grid
+    False
+    >>> is_Z_extrapolated(0.034)     # object at 12+log(O/H) = 7.226
+    True
+    >>> is_Z_extrapolated(0.005)     # rejected outright, not extrapolated
+    False
+    """
+    if Z_Zsun is None or not np.isfinite(Z_Zsun):
+        return False
+    return bool(_Z_ZSUN_VALID[0] <= Z_Zsun < _Z_ZSUN_PUBLISHED[0])
+
+
 # =========================================================================
 # Ionisation parameter diagnostics
 # =========================================================================
@@ -269,7 +333,10 @@ def log_U_from_O32(
 
     Notes
     -----
-    Valid for 0.05 <= Z/Zsun <= 0.4, -1.0 <= log(O32) <= 2.5.
+    Valid for 0.02 <= Z/Zsun <= 0.4, -1.0 <= log(O32) <= 2.5.  The
+    published grid stops at 0.05; below that the surface is being
+    extrapolated (see :data:`_Z_ZSUN_VALID`, and
+    :func:`is_Z_extrapolated` to test for it).
     O32 is density-sensitive; prefer N43 when available.
     Martinez+2025 Table 3 (upper).
     """
@@ -301,7 +368,10 @@ def log_U_from_N43(
 
     Notes
     -----
-    Valid for 0.05 <= Z/Zsun <= 0.4, -3.0 <= log(N43) <= 0.5.
+    Valid for 0.02 <= Z/Zsun <= 0.4, -3.0 <= log(N43) <= 0.5.  The
+    published grid stops at 0.05; below that the surface is being
+    extrapolated (see :data:`_Z_ZSUN_VALID`, and
+    :func:`is_Z_extrapolated` to test for it).
     N43 is density-insensitive — **recommended** over O32 when
     NIV] and NIII] are available (Martinez+2025 Section 4.2).
     Martinez+2025 Table 3 (lower).

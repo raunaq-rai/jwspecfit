@@ -6,6 +6,12 @@ extrapolated.  NaN propagates so the offending value/draw is excluded
 from the result, while Monte-Carlo / posterior sample arrays keep their
 full length (n_mc / n_posterior); the rejected draws simply drop out of
 the nanmedian/nanstd statistics.
+
+The one exception is the *lower* metallicity edge, which is extended
+from the published 0.05 Z/Zsun down to 0.02 by extrapolation — see
+:data:`~jwspecabund.martinez25_icf._Z_ZSUN_VALID`.  Tests for that live
+in ``test_martinez25_low_Z_extrapolation.py``; here it only means the
+value used for "Z too low" must sit below 0.02.
 """
 
 import numpy as np
@@ -33,7 +39,7 @@ def test_log_U_from_O32_rejects_out_of_range_O32():
 def test_log_U_from_O32_rejects_out_of_range_Z():
     """Z/Zsun below the lower bound is rejected (NaN)."""
     log_o32 = 1.0  # in range
-    assert np.isnan(log_U_from_O32(log_o32, 0.027))  # user's reported value
+    assert np.isnan(log_U_from_O32(log_o32, 0.005))
 
 
 def test_log_U_from_N43_rejects_out_of_range():
@@ -80,7 +86,7 @@ def test_warning_emitted_on_rejection(caplog):
     import logging
 
     with caplog.at_level(logging.WARNING, logger="jwspecabund.martinez25_icf"):
-        log_U_from_O32(3.02, 0.027)
+        log_U_from_O32(3.02, 0.005)
     msgs = " ".join(r.getMessage() for r in caplog.records)
     assert "log(O32)" in msgs and "rejected" in msgs
     assert "Z/Zsun" in msgs

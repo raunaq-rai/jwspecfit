@@ -63,6 +63,7 @@ from .direct import (
 )
 from .martinez25_icf import (
     compute_NO_martinez25,
+    is_Z_extrapolated,
     log_U_from_N43,
     log_U_from_O32,
 )
@@ -121,6 +122,7 @@ __all__ = [
     "icf_neon",
     "icf_nitrogen",
     "icf_sulfur",
+    "is_Z_extrapolated",
     "log_U_from_N43",
     "log_U_from_O32",
     "salim_attenuation",
