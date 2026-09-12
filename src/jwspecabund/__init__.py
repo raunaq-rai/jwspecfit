@@ -36,7 +36,7 @@ try:  # jwspecabund ships as part of the jwspecfit distribution
 except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
-from ._core import compute_abundances
+from ._core import VALID_LOGU_DIAGNOSTICS, compute_abundances
 from .forward import forward_model, hbeta_emissivity_aller84
 from .direct import (
     SelfConsistentOIII,
@@ -115,6 +115,7 @@ __all__ = [
     "compute_Te_OIII_1666",
     "SelfConsistentOIII",
     "compute_total_abundances",
+    "VALID_LOGU_DIAGNOSTICS",
     "dust_correct_fluxes",
     "forward_model",
     "hbeta_emissivity_aller84",

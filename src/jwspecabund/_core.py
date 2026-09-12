@@ -1238,6 +1238,16 @@ def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
     return exclude
 
 
+#: Ionisation-parameter diagnostics that ``logU_diagnostic`` may name.
+#:
+#: ``"N43"`` (N IV] 1486 / N III] 1750) is density-*insensitive* and is what
+#: Martinez+2025 recommend; ``"O32"`` ([O III] 5007 / [O II] 3727) is
+#: evaluated at ``ne_high``, so a poorly-constrained high-zone density
+#: propagates straight into log(U) and from there into the N/O and C/O ICFs.
+#: Left unset, the automatic tree prefers N43 and falls back to O32.
+VALID_LOGU_DIAGNOSTICS: tuple[str, ...] = ("N43", "O32")
+
+
 def _compute_logU(
     fluxes: dict[str, float],
     Z_Zsun: float,
@@ -1684,6 +1694,7 @@ def _build_diagnostics(
     z: float = 0.0,
     sc: Any = None,
     Z_Zsun: float | None = None,
+    logU_diagnostic: str | None = None,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -1900,15 +1911,29 @@ def _build_diagnostics(
         diag["ne(high)"] = f"clamped to {ne_high:.0f} cm^-3 (exceeded ne_high_max)"
 
     # log(U)
+    _forced = (
+        f", forced by logU_diagnostic={logU_diagnostic!r} (no fallback)"
+        if logU_diagnostic is not None else ""
+    )
     if logU is not None:
         if logU_diag == "N43":
             diag["log(U)"] = (
                 f"N43 diagnostic (NIV] 1486 / NIII] 1750) -> log(U) = {logU:.2f}"
+                + _forced
             )
         elif logU_diag == "O32":
             diag["log(U)"] = (
                 f"O32 diagnostic ([OIII] 5007 / [OII] 3727) -> log(U) = {logU:.2f}"
+                + _forced
+                + ("; O32 is density-sensitive and was evaluated at ne(high)"
+                   if logU_diagnostic == "O32" else "")
             )
+    elif logU_diagnostic is not None:
+        diag["log(U)"] = (
+            f"not available ({logU_diagnostic} was forced via logU_diagnostic "
+            "and is unavailable or outside its calibration range; no fallback "
+            "to the other diagnostic was attempted)"
+        )
     else:
         diag["log(U)"] = "not available (N43 and O32 diagnostics both unavailable)"
 
@@ -1991,6 +2016,7 @@ def _run_direct(
     co_icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
+    logU_diagnostic: str | None = None,
     continuum_rms_limits: dict[str, float] | None = None,
     niv_rejected: bool = False,
     ne_low_override: float | None = None,
@@ -2110,6 +2136,7 @@ def _run_direct(
     if Z_Zsun is not None:
         logU, logU_diag = _compute_logU(
             fluxes, Z_Zsun, ne_high, errors=errors, snr_logU=snr_logU,
+            lock_diag=logU_diagnostic,
         )
         # C/O ICF: recompute log U at the intermediate (C2+) zone density.
         # Only the density-sensitive O32 diagnostic changes; N43 is
@@ -2184,7 +2211,7 @@ def _run_direct(
         logU, logU_diag, icf_method, NO_icf_name, NE_DEFAULT,
         totals=totals, niv_rejected=niv_rejected,
         ne_Opp=ne_Opp, Te_int=Te_int, te_high_diag=_Te_diagnostic, z=z,
-        sc=_sc, Z_Zsun=Z_Zsun,
+        sc=_sc, Z_Zsun=Z_Zsun, logU_diagnostic=logU_diagnostic,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -2578,6 +2605,7 @@ def _run_direct_mcmc(
     co_icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
+    logU_diagnostic: str | None = None,
     continuum_rms_limits: dict[str, float] | None = None,
     niv_rejected: bool = False,
     ne_low_override: float | None = None,
@@ -2751,7 +2779,7 @@ def _run_direct_mcmc(
     if Z_Zsun_pt is not None:
         logU_pt, logU_diag = _compute_logU(
             med_fluxes, Z_Zsun_pt, ne_high, errors=med_errors,
-            snr_logU=snr_logU,
+            snr_logU=snr_logU, lock_diag=logU_diagnostic,
         )
         # C/O ICF: log U at the intermediate (C2+) zone density.
         logU_co_pt = logU_pt
@@ -3136,7 +3164,7 @@ def _run_direct_mcmc(
                 totals=totals_pt, niv_rejected=niv_rejected,
                 ne_Opp=ne_Opp, Te_int=_Te_mid_final,
                 te_high_diag=_Te_diagnostic, z=z, sc=_sc,
-                Z_Zsun=Z_Zsun_pt,
+                Z_Zsun=Z_Zsun_pt, logU_diagnostic=logU_diagnostic,
             ),
             **_diag_extra,
         },
@@ -3275,6 +3303,7 @@ def compute_abundances(
     co_icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
+    logU_diagnostic: str | None = None,
     # Electron density overrides (bypass diagnostic computation)
     ne_low_override: float | None = None,
     ne_mid_override: float | None = None,
@@ -3509,6 +3538,36 @@ def compute_abundances(
         fallback to other tiers occurs; if the required ions are
         missing, N/O is reported as failed.  Any other string raises
         ``ValueError``.  Default ``None`` (automatic cascade).
+    logU_diagnostic : str or None
+        Force the ionisation-parameter diagnostic instead of the
+        automatic N43 -> O32 priority tree.  ``"N43"`` (N IV] 1486 /
+        N III] 1750) or ``"O32"`` ([O III] 5007 / [O II] 3727); any
+        other string raises ``ValueError``.  Default ``None``
+        (automatic).
+
+        When forced, there is no fallback: if the named diagnostic
+        cannot be formed from the available lines, log(U) is reported as
+        unavailable rather than quietly switching to the other one, and
+        Monte-Carlo draws that cannot form it drop out -- so the log(U)
+        posterior stays a single-diagnostic distribution rather than a
+        silent mixture.
+
+        The two branches differ on *out-of-range* values, and forcing
+        does not change that.  N43 is discarded when the resulting
+        log(U) falls outside ``_LOG_U_VALID`` (-3.5 to -1.0); O32
+        returns its value regardless, and the ICF surfaces reject it
+        downstream.  So a forced ``"O32"`` on a low-ionisation object
+        can report a log(U) of, say, -3.51 while N/O and C/O come back
+        unavailable.  Check the reported log(U) against that range
+        before reading anything into a missing ICF.
+
+        Prefer the default unless you have a reason.  Martinez+2025
+        recommend N43 because it is density-*insensitive*, whereas O32
+        is evaluated at ``ne_high``, so forcing ``"O32"`` pushes any
+        error in the high-zone density straight into log(U) and from
+        there into the N/O and C/O ICFs.  The usual legitimate reason to
+        force it is sample homogeneity -- keeping every object on one
+        diagnostic when most of them lack N IV] and N III].
     ne_low_override : float or None
         If set, use this value (cm^-3) for the low-ionisation zone
         density instead of deriving it from [SII] or [OII].
@@ -3574,6 +3633,8 @@ def compute_abundances(
     }
     if icf_tier is not None:
         _choices["icf_tier"] = (icf_tier, VALID_NO_ICF_TIERS)
+    if logU_diagnostic is not None:
+        _choices["logU_diagnostic"] = (logU_diagnostic, VALID_LOGU_DIAGNOSTICS)
     for _name, (_value, _valid) in _choices.items():
         if _value not in _valid:
             raise ValueError(
@@ -3870,6 +3931,7 @@ def compute_abundances(
                     progress=progress, ne_high_max=ne_high_max,
                     snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                     icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                    logU_diagnostic=logU_diagnostic,
                     continuum_rms_limits=continuum_rms_limits,
                     niv_rejected=_niv_rejected,
                     ne_low_override=ne_low_override,
@@ -3889,6 +3951,7 @@ def compute_abundances(
                     progress=progress, ne_high_max=ne_high_max,
                     snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                     icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                    logU_diagnostic=logU_diagnostic,
                     continuum_rms_limits=continuum_rms_limits,
                     niv_rejected=_niv_rejected,
                     ne_low_override=ne_low_override,
@@ -4075,6 +4138,7 @@ def compute_abundances(
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                             icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                    logU_diagnostic=logU_diagnostic,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
@@ -4093,6 +4157,7 @@ def compute_abundances(
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                             icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                    logU_diagnostic=logU_diagnostic,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
