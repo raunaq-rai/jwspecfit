@@ -1734,9 +1734,13 @@ def _build_diagnostics(
     diag: dict[str, str] = {}
 
     from .martinez25_icf import (
+        _LOG_U_VALID,
         _Z_ZSUN_PUBLISHED,
         LOG_OH_SOLAR,
+        LOG_U_EXTRAP_MARGIN,
+        is_logU_extrapolated,
         is_Z_extrapolated,
+        logU_extrapolation_report,
     )
 
     # Te(high) — solved at the O²⁺-zone density ne_Opp.
@@ -1936,6 +1940,29 @@ def _build_diagnostics(
         )
     else:
         diag["log(U)"] = "not available (N43 and O32 diagnostics both unavailable)"
+
+    # Flag a log(U) that sits just past a calibration edge, and say what
+    # the extrapolation actually costs on each ICF surface -- the only
+    # thing that decides whether the result is usable.
+    if is_logU_extrapolated(logU) and Z_Zsun is not None:
+        _rep = logU_extrapolation_report(
+            logU, Z_Zsun, ne_high if ne_high else ne_default,
+        )
+        _per_surface = ", ".join(
+            f"{k} {v:+.3f}" for k, v in _rep["surfaces"].items()
+            if np.isfinite(v)
+        )
+        diag["log(U) extrapolation"] = (
+            f"log(U) = {_rep['logU']:.3f} is {_rep['overshoot']:.3f} dex past "
+            f"the {_rep['edge']:+.1f} calibration edge "
+            f"[{_LOG_U_VALID[0]:+.1f}, {_LOG_U_VALID[1]:+.1f}], within the "
+            f"{LOG_U_EXTRAP_MARGIN:.2f} dex margin, so the ICF surfaces were "
+            f"extrapolated rather than rejected. Cost, ICF(log U) vs "
+            f"ICF(edge): {_per_surface} dex. Worst {_rep['worst']:.3f} dex "
+            f"on {_rep['worst_surface']}. log(U) is the cubic axis of these "
+            f"fits, so this grows fast -- treat anything past ~0.05 dex of "
+            f"overshoot as uncalibrated"
+        )
 
     # Flag a metallicity taken from the extrapolated strip below the
     # published Martinez+2025 grid, so the result records the extrapolation

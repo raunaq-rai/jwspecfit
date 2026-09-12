@@ -69,6 +69,48 @@ _Z_ZSUN_PUBLISHED = (0.05, 0.40)
 #: they stay hard-rejected.
 _Z_ZSUN_VALID = (0.02, _Z_ZSUN_PUBLISHED[1])
 
+#: How far past a log(U) edge the ICF surfaces may be extrapolated, in dex.
+#:
+#: log(U) is the *cubic* axis of these surfaces, so unlike the metallicity
+#: axis (see :data:`_Z_ZSUN_VALID`) it genuinely runs away -- but only
+#: eventually.  Measured over every surface, every density node and the
+#: whole metallicity range, the worst |ICF(edge ± m) − ICF(edge)| is:
+#:
+#: ===========  ==================  ====================
+#: margin m     worst, all surfaces  worst, N/O surfaces
+#: ===========  ==================  ====================
+#: 0.01 dex     0.050 dex            0.015 dex
+#: 0.02 dex     0.106 dex            0.029 dex
+#: 0.05 dex     0.348 dex            0.074 dex
+#: 0.10 dex     surface goes < 0     0.13 dex
+#: ===========  ==================  ====================
+#:
+#: The N/O surfaces are docile throughout.  The hazard is the C/O surface,
+#: which at log(ne) = 5 and Z/Zsun = 0.40 already sits at ICF = 0.124 and
+#: crosses zero just 0.09 dex below the lower edge, so log10 of it is
+#: violently sensitive on the approach.  That is why the default is small
+#: and why :func:`icf_CppOpp` rejects a non-positive extrapolated value
+#: outright rather than returning a negative ICF.
+#:
+#: Set to 0.0 to restore strict rejection at the edges.  This is the single
+#: source of truth -- the ICF entry points read it directly rather than
+#: taking a per-call override, so changing it changes every surface at once.
+LOG_U_EXTRAP_MARGIN: float = 0.05
+
+#: Labels already warned about this process, so a Monte-Carlo run reports
+#: an extrapolation once rather than once per surface per draw.  Cleared by
+#: :func:`reset_extrapolation_warnings`.
+_EXTRAP_WARNED: set[str] = set()
+
+
+def reset_extrapolation_warnings() -> None:
+    """Re-arm the once-per-process extrapolation warnings.
+
+    Useful when looping over many objects and you want the warning to fire
+    again for each one rather than only for the first.
+    """
+    _EXTRAP_WARNED.clear()
+
 # C/O ICF validity (Martinez, in prep.): 12+log(O/H) in [6.95, 8.55],
 # i.e. a wider metallicity range than the N/O ICFs.  Same log(U) grid.
 _Z_ZSUN_VALID_CO = (10 ** (6.95 - LOG_OH_SOLAR), 10 ** (8.55 - LOG_OH_SOLAR))
@@ -236,6 +278,7 @@ def _warn_and_reject(
     value: float,
     valid: tuple[float, float],
     label: str,
+    margin: float = 0.0,
 ) -> float:
     """Return *value* if it lies within *valid* = ``(lo, hi)``, else NaN.
 
@@ -257,20 +300,157 @@ def _warn_and_reject(
         ``(lo, hi)`` validity bounds.
     label : str
         Human-readable name used in the warning message.
+    margin : float
+        How far past either bound *value* may stray and still be accepted,
+        by extrapolation, with a warning.  ``0.0`` (the default) keeps the
+        strict reject-everything-outside behaviour.
 
     Returns
     -------
     float
-        *value* unchanged if in range, otherwise ``nan``.
+        *value* unchanged if in range or within *margin* of it, otherwise
+        ``nan``.
     """
     lo, hi = valid
     if value < lo or value > hi:
+        if margin > 0.0 and lo - margin <= value <= hi + margin:
+            edge = lo if value < lo else hi
+            # An MC run evaluates several surfaces per draw, so an
+            # unsuppressed warning here would fire thousands of times for
+            # one object.  Announce it once per process and drop the rest
+            # to debug; the per-object cost is reported in the result's
+            # diagnostics via logU_extrapolation_report().
+            if label not in _EXTRAP_WARNED:
+                _EXTRAP_WARNED.add(label)
+                logger.warning(
+                    "%s=%.4g is %.4g dex outside [%g, %g]; extrapolating "
+                    "(margin %.3g dex). The surfaces are fits, not models, "
+                    "beyond the edge -- check the edge-vs-extrapolated "
+                    "difference reported in the result before using it. "
+                    "Further %s extrapolations this session are logged at "
+                    "DEBUG only.",
+                    label, value, abs(value - edge), lo, hi, margin, label,
+                )
+            else:
+                logger.debug(
+                    "%s=%.4g is %.4g dex outside [%g, %g]; extrapolating.",
+                    label, value, abs(value - edge), lo, hi,
+                )
+            return float(value)
         logger.warning(
             "%s=%.3g outside validity range [%g, %g]; rejected (set NaN).",
             label, value, lo, hi,
         )
         return float("nan")
     return float(value)
+
+
+def is_logU_extrapolated(logU: float | None) -> bool:
+    """Is *logU* accepted only by extrapolating past a calibration edge?
+
+    ``True`` when *logU* lies outside :data:`_LOG_U_VALID` but within
+    :data:`LOG_U_EXTRAP_MARGIN` of it -- the band where the ICF surfaces
+    are still evaluated, but outside the range they were fitted over.
+
+    Parameters
+    ----------
+    logU : float or None
+        Ionisation parameter log(U).
+
+    Returns
+    -------
+    bool
+        ``True`` if *logU* is in the extrapolated band.
+
+    Examples
+    --------
+    >>> is_logU_extrapolated(-2.0)     # well inside
+    False
+    >>> is_logU_extrapolated(-3.507)   # 0.007 dex below the lower edge
+    True
+    >>> is_logU_extrapolated(-4.0)     # rejected outright, not extrapolated
+    False
+    """
+    if logU is None or not np.isfinite(logU):
+        return False
+    lo, hi = _LOG_U_VALID
+    m = LOG_U_EXTRAP_MARGIN
+    return bool((lo - m <= logU < lo) or (hi < logU <= hi + m))
+
+
+def logU_extrapolation_report(
+    logU: float,
+    Z_Zsun: float,
+    ne: float = 100.0,
+) -> dict[str, Any]:
+    """Cost of extrapolating past a log(U) edge, surface by surface.
+
+    Answers the only question that matters once a value is outside the
+    calibration: *how much does it change the answer?*  For each ICF
+    surface this evaluates the ICF at the edge and at *logU*, and reports
+    the difference in dex.  A small difference means the extrapolation is
+    immaterial; a large one means the result rests on the fit's behaviour
+    outside its own domain and should not be trusted.
+
+    Parameters
+    ----------
+    logU : float
+        Ionisation parameter, expected to be in the extrapolated band
+        (see :func:`is_logU_extrapolated`).
+    Z_Zsun : float
+        Gas-phase metallicity in solar units.
+    ne : float
+        Electron density in cm^-3.
+
+    Returns
+    -------
+    dict
+        ``{"logU", "edge", "overshoot", "surfaces", "worst", "worst_surface"}``.
+        *surfaces* maps each ICF name to the signed
+        ``log10(ICF(logU) / ICF(edge))`` in dex (``nan`` where the
+        extrapolated surface is non-positive, i.e. unusable).  *worst* is
+        the largest absolute finite difference.
+
+    Examples
+    --------
+    >>> r = logU_extrapolation_report(-3.507, 0.10, 1e3)
+    >>> round(r["overshoot"], 3)
+    0.007
+    >>> r["worst"] < 0.02
+    True
+    """
+    lo, hi = _LOG_U_VALID
+    edge = lo if logU < lo else hi
+    surfaces: dict[str, float] = {}
+    for name, table, returns_log in (
+        ("N+/O+", _COEFF_ICF_NpOp, False),
+        ("N2+/O2+", _COEFF_ICF_NppOpp, False),
+        ("N3+/O2+", _COEFF_ICF_NpppOpp, True),
+        ("(N+ + N2+)/(O+ + O2+)", _COEFF_ICF_NpNpp_OpOpp, False),
+        ("(N2+ + N3+)/O2+", _COEFF_ICF_NppNppp_Opp, False),
+        ("C2+/O2+", _COEFF_ICF_CppOpp, False),
+    ):
+        at_edge = _interp_ne(ne, table, edge, Z_Zsun)
+        at_value = _interp_ne(ne, table, logU, Z_Zsun)
+        if returns_log:
+            # These surfaces already return log(ICF).
+            diff = at_value - at_edge
+        elif at_edge > 0 and at_value > 0:
+            diff = float(np.log10(at_value / at_edge))
+        else:
+            diff = float("nan")
+        surfaces[name] = float(diff)
+
+    finite = {k: abs(v) for k, v in surfaces.items() if np.isfinite(v)}
+    worst_surface = max(finite, key=finite.get) if finite else None
+    return {
+        "logU": float(logU),
+        "edge": float(edge),
+        "overshoot": float(abs(logU - edge)),
+        "surfaces": surfaces,
+        "worst": float(finite[worst_surface]) if worst_surface else float("nan"),
+        "worst_surface": worst_surface,
+    }
 
 
 def is_Z_extrapolated(Z_Zsun: float | None) -> bool:
@@ -399,7 +579,9 @@ def _reject_icf_inputs(logU: float, Z_Zsun: float) -> tuple[float, float]:
     tuple of float
         ``(logU, Z_Zsun)`` with any out-of-range component set to ``nan``.
     """
-    logU = _warn_and_reject(logU, _LOG_U_VALID, "log(U)")
+    logU = _warn_and_reject(
+        logU, _LOG_U_VALID, "log(U)", margin=LOG_U_EXTRAP_MARGIN,
+    )
     Z_Zsun = _warn_and_reject(Z_Zsun, _Z_ZSUN_VALID, "Z/Zsun")
     return logU, Z_Zsun
 
@@ -491,9 +673,23 @@ def icf_CppOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     Martinez (in prep.).  The metallicity validity is wider than the
     N/O ICFs (:data:`_Z_ZSUN_VALID_CO` vs :data:`_Z_ZSUN_VALID`).
     """
-    logU = _warn_and_reject(logU, _LOG_U_VALID, "log(U)")
+    logU = _warn_and_reject(
+        logU, _LOG_U_VALID, "log(U)", margin=LOG_U_EXTRAP_MARGIN,
+    )
     Z_Zsun = _warn_and_reject(Z_Zsun, _Z_ZSUN_VALID_CO, "Z/Zsun (C/O)")
-    return _interp_ne(ne, _COEFF_ICF_CppOpp, logU, Z_Zsun)
+    icf = _interp_ne(ne, _COEFF_ICF_CppOpp, logU, Z_Zsun)
+    # This surface crosses zero only ~0.09 dex below the lower log(U) edge
+    # (at log ne = 5, Z/Zsun = 0.40), so an extrapolated evaluation can come
+    # back non-positive.  A negative ICF is not a small error, it is a
+    # meaningless C/O, so reject rather than propagate it.
+    if np.isfinite(icf) and icf <= 0.0:
+        logger.warning(
+            "C/O ICF extrapolated to a non-positive value (%.4g) at "
+            "log(U)=%.4g, Z/Zsun=%.4g, ne=%.3g; rejected (set NaN).",
+            icf, logU, Z_Zsun, ne,
+        )
+        return float("nan")
+    return icf
 
 
 def icf_NpppOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
