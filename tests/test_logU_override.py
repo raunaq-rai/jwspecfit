@@ -108,28 +108,40 @@ class TestDrawSampler:
         assert d.std() == pytest.approx(0.2, abs=0.01)
 
     def test_asymmetric_is_skewed_the_right_way(self):
-        """A long lower tail must pull the mean below the mode."""
+        """A long lower tail pulls the mean below the median."""
         rng = np.random.default_rng(2)
-        d = np.array([_draw_logU(rng, -2.3, (0.4, 0.1)) for _ in range(20000)])
-        assert d.mean() < -2.3
-        assert np.median(d) < -2.3
-
-    def test_asymmetric_sides_have_the_right_widths(self):
-        rng = np.random.default_rng(3)
         d = np.array([_draw_logU(rng, -2.3, (0.4, 0.1)) for _ in range(40000)])
-        lo, hi = d[d < -2.3], d[d > -2.3]
-        assert (-2.3 - np.percentile(lo, 32)) == pytest.approx(0.4, abs=0.03)
-        assert (np.percentile(hi, 68) + 2.3) == pytest.approx(0.1, abs=0.03)
+        assert d.mean() < -2.3
 
-    def test_two_piece_weighting_not_fifty_fifty(self):
-        """The wide side must carry more mass, or the density jumps."""
+    def test_asymmetric_reproduces_the_quoted_interval(self):
+        """The whole point: percentiles must come back as supplied.
+
+        An SED fit quotes log(U) as a median with 16th/84th half-widths.
+        Feeding those in must return them, or the uncertainty being
+        propagated is not the one that was measured.
+        """
+        rng = np.random.default_rng(3)
+        d = np.array([_draw_logU(rng, -2.45, (0.42, 0.18)) for _ in range(200000)])
+        p16, p50, p84 = np.percentile(d, [16, 50, 84])
+        assert p50 == pytest.approx(-2.45, abs=0.01)
+        assert (p50 - p16) == pytest.approx(0.42, abs=0.015)
+        assert (p84 - p50) == pytest.approx(0.18, abs=0.015)
+
+    def test_symmetric_tuple_matches_the_scalar_form(self):
         rng = np.random.default_rng(4)
-        d = np.array([_draw_logU(rng, -2.3, (0.4, 0.1)) for _ in range(20000)])
-        frac_low = float(np.mean(d < -2.3))
-        assert frac_low == pytest.approx(0.4 / 0.5, abs=0.02)
+        a = np.array([_draw_logU(rng, -2.3, (0.2, 0.2)) for _ in range(20000)])
+        rng = np.random.default_rng(4)
+        b = np.array([_draw_logU(rng, -2.3, 0.2) for _ in range(20000)])
+        assert a.std() == pytest.approx(b.std(), abs=0.01)
+
+    def test_sides_are_equally_weighted(self):
+        """Equal weighting is what puts the percentiles where quoted."""
+        rng = np.random.default_rng(5)
+        d = np.array([_draw_logU(rng, -2.3, (0.4, 0.1)) for _ in range(40000)])
+        assert float(np.mean(d < -2.3)) == pytest.approx(0.5, abs=0.02)
 
     def test_one_sided_error(self):
-        rng = np.random.default_rng(5)
+        rng = np.random.default_rng(6)
         d = np.array([_draw_logU(rng, -2.3, (0.0, 0.2)) for _ in range(2000)])
         assert (d >= -2.3).all()
 

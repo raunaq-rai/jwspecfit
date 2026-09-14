@@ -1272,10 +1272,12 @@ def _draw_logU(
         Central log(U).
     logU_err : float, tuple or None
         Symmetric 1-sigma uncertainty, an asymmetric ``(lower, upper)``
-        pair, or ``None`` for no uncertainty.  The tuple form matches
-        what :class:`~jwspecabund.result.AbundanceResult` reports in
-        ``logU_err``, so a value measured by one run can be fed to
-        another unchanged.
+        pair, or ``None`` for no uncertainty.  The tuple is read as
+        **percentile half-widths** -- ``(median - 16th, 84th - median)``
+        -- which is how SED and photoionisation fits quote an asymmetric
+        log(U), and what :class:`~jwspecabund.result.AbundanceResult`
+        reports in ``logU_err``, so a value measured by one run can be
+        fed to another unchanged.
 
     Returns
     -------
@@ -1286,12 +1288,20 @@ def _draw_logU(
 
     Notes
     -----
-    Asymmetric errors are drawn from a two-piece (split) normal: the side
-    is chosen with probability ``sigma / (sigma_lo + sigma_hi)`` and a
-    half-normal of that width is drawn on it, which keeps the density
-    continuous at the mode.  Sampling each side with equal probability
-    instead would put half the mass on the narrow side and distort the
-    distribution.
+    Asymmetric errors use a split normal: each side is chosen with
+    probability one half, then a half-normal of that side's width is
+    drawn.  Because ``P(|N(0,1)| > 1) = 0.3173``, the equal weighting
+    puts the 16th and 84th percentiles at exactly ``logU - sigma_lo`` and
+    ``logU + sigma_hi``, and the median at ``logU`` -- so the quoted
+    interval is reproduced as given.
+
+    The price is a density discontinuous at the mode, by the ratio of the
+    two widths.  Weighting the sides by ``sigma / (sigma_lo + sigma_hi)``
+    instead would make it continuous, but then the percentiles no longer
+    match what was supplied: for ``-2.45 (+0.18 -0.42)`` that variant
+    returns a median of ``-2.60`` with an interval of ``(+0.27 -0.35)``.
+    Reproducing the quoted numbers is worth more here than a smooth
+    density, because the numbers are what the user measured.
     """
     if logU_err is None:
         return float(logU)
@@ -1312,7 +1322,7 @@ def _draw_logU(
     if sig_hi <= 0.0:
         return float(logU) - abs(rng.normal(0.0, sig_lo))
 
-    if rng.random() < sig_lo / (sig_lo + sig_hi):
+    if rng.random() < 0.5:
         return float(logU) - abs(rng.normal(0.0, sig_lo))
     return float(logU) + abs(rng.normal(0.0, sig_hi))
 
@@ -3907,10 +3917,12 @@ def compute_abundances(
         (derive it).
     logU_override_err : float, tuple or None
         Uncertainty on *logU_override*: a symmetric 1-sigma float, or an
-        asymmetric ``(lower, upper)`` pair.  The tuple form is what
-        ``AbundanceResult.logU_err`` reports, so a value from one run can
-        be fed to another unchanged.  Asymmetric errors are drawn from a
-        two-piece normal.
+        asymmetric ``(lower, upper)`` pair, read as percentile
+        half-widths -- ``(median - 16th, 84th - median)``, the way SED
+        fits quote them and the way ``AbundanceResult.logU_err`` reports
+        them, so a value from one run can be fed to another unchanged.
+        Asymmetric errors are drawn from a split normal that reproduces
+        the quoted median and interval exactly.
 
         Each Monte-Carlo draw samples log(U) from this distribution in
         place of re-deriving it, so ``marginalize_logU`` keeps its usual
