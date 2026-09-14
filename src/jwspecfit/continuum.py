@@ -30,7 +30,8 @@ def fit_continuum(
     line_mask_nsigma: float = 6.0,
     moving_average: bool | int = False,
     lya_break: bool = False,
-) -> np.ndarray:
+    return_err: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Fit a continuum with emission-line masking.
 
     Two modes are available:
@@ -71,11 +72,31 @@ def fit_continuum(
         If ``False`` (default), use the polynomial continuum.  If ``True``,
         use a median filter with a default window of
         {default_win} pixels.  If an ``int``, use that as the window size.
+    return_err : bool
+        If ``True``, also return the 1σ uncertainty on the continuum.
+        Needed for an equivalent-width error, where the continuum term
+        is often larger than the line-flux term.  Default ``False``, so
+        existing callers are unaffected.
 
     Returns
     -------
-    np.ndarray
-        Continuum evaluated at each pixel (µJy).
+    np.ndarray or tuple of np.ndarray
+        Continuum evaluated at each pixel (µJy).  With *return_err*, the
+        pair ``(continuum, continuum_err)``.
+
+    Notes
+    -----
+    The uncertainty comes from the polynomial coefficient covariance,
+    propagated as ``sigma(lambda)^2 = v C v.T`` with *v* the Vandermonde
+    row.  It uses numpy's **scaled** covariance, which multiplies by the
+    reduced chi-square: a low-order polynomial is an approximation to a
+    real continuum rather than the truth, and the scaling lets a poor fit
+    widen the error instead of hiding behind the formal one.
+
+    The median-filter path (*moving_average*) has no parametric
+    covariance, so its uncertainty is returned as NaN -- "unavailable",
+    not zero.  The same applies when there are too few unmasked pixels to
+    estimate a covariance at all (numpy needs more than ``deg + 2``).
     """.format(default_win=_DEFAULT_MOVING_AVERAGE_WINDOW)
     wave_A = wave_um * 1e4
     valid = np.isfinite(flux_ujy) & np.isfinite(err_ujy) & (err_ujy > 0)
@@ -120,7 +141,8 @@ def fit_continuum(
                 "Too few valid pixels (%d) for median filter; returning zeros.",
                 n_valid,
             )
-            return np.zeros_like(flux_ujy)
+            zeros = np.zeros_like(flux_ujy)
+            return (zeros, np.full_like(flux_ujy, np.nan)) if return_err else zeros
 
         # Ensure window is odd and does not exceed the number of valid pixels.
         win = min(_ma_window, n_valid)
@@ -158,6 +180,11 @@ def fit_continuum(
 
         if lya_break:
             continuum = _apply_lya_break(wave_A, continuum, lya_obs_A)
+        if return_err:
+            # A median filter has no parametric covariance, so there is no
+            # honest uncertainty to hand back.  NaN says "unavailable"
+            # rather than implying zero error.
+            return continuum, np.full_like(continuum, np.nan)
         return continuum
 
     # ---- Polynomial path (default) ----
@@ -177,7 +204,8 @@ def fit_continuum(
     use = valid & ~line_mask
     if np.sum(use) < deg + 1:
         logger.warning("Too few continuum pixels (%d); returning zeros.", np.sum(use))
-        return np.zeros_like(flux_ujy)
+        zeros = np.zeros_like(flux_ujy)
+        return (zeros, np.full_like(flux_ujy, np.nan)) if return_err else zeros
 
     # Normalise wavelength for numerical stability.
     w_norm = (wave_um - wave_um[use].mean()) / wave_um[use].std()
@@ -197,14 +225,43 @@ def fit_continuum(
         norm_resid = np.where(err_ujy > 0, resid / err_ujy, 0.0)
         mask = use & (norm_resid < clip_sigma)
 
-    # Final fit on clipped pixels.
+    # Final fit on clipped pixels.  ``cov=True`` also returns the
+    # coefficient covariance, which is the only route to a continuum
+    # uncertainty -- and hence to an equivalent-width uncertainty that
+    # is not just the line-flux term.  numpy needs more than deg + 2
+    # points to estimate it.
+    cov = None
     if np.sum(mask) >= deg + 1:
-        coeffs = np.polyfit(w_norm[mask], flux_ujy[mask], deg, w=weights[mask])
+        if return_err and np.sum(mask) > deg + 2:
+            coeffs, cov = np.polyfit(
+                w_norm[mask], flux_ujy[mask], deg, w=weights[mask], cov=True,
+            )
+        else:
+            coeffs = np.polyfit(w_norm[mask], flux_ujy[mask], deg, w=weights[mask])
 
     continuum = np.polyval(coeffs, w_norm)
     if lya_break:
         continuum = _apply_lya_break(wave_A, continuum, lya_obs_A)
-    return continuum
+    if not return_err:
+        return continuum
+
+    if cov is None:
+        logger.warning(
+            "Continuum covariance needs more than deg + 2 = %d points, have "
+            "%d; continuum uncertainty unavailable.", deg + 2, int(np.sum(mask)),
+        )
+        return continuum, np.full_like(continuum, np.nan)
+
+    # sigma(lambda)^2 = v(lambda) C v(lambda)^T, with v the Vandermonde row
+    # in the same descending-power order np.polyval expects.
+    vander = np.vander(w_norm, deg + 1)
+    var = np.einsum("ij,jk,ik->i", vander, cov, vander)
+    cont_err = np.sqrt(np.clip(var, 0.0, None))
+    if lya_break:
+        # The continuum is forced to zero blueward of the break, so its
+        # uncertainty goes with it.
+        cont_err = np.where(wave_A < lya_obs_A, 0.0, cont_err)
+    return continuum, cont_err
 
 
 def _apply_lya_break(

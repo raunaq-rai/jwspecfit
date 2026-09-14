@@ -59,6 +59,16 @@ class MCMCLineResult:
         Full flux posterior samples.
     ew_A : float
         Median rest-frame equivalent width (Angstrom).
+    ew_err : tuple of float or None
+        (lower, upper) 68% CI half-widths on the equivalent width.
+        ``None`` when no posterior could be formed -- no continuum, or a
+        continuum consistent with zero.
+    ew_posterior : np.ndarray or None
+        Full rest-frame equivalent-width posterior samples.  Carries both
+        the line-flux and the continuum uncertainty; see
+        :func:`jwspecmcmc._engine._ew_posterior` for how the continuum
+        term enters, and why these samples must not be combined across
+        lines.
     snr : float
         Signal-to-noise ratio (flux / mean of flux_err tuple).
     """
@@ -76,6 +86,8 @@ class MCMCLineResult:
     flux_posterior: np.ndarray
     ew_A: float
     snr: float
+    ew_err: tuple[float, float] | None = None
+    ew_posterior: np.ndarray | None = None
 
 
 @dataclass

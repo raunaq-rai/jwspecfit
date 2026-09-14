@@ -29,8 +29,97 @@ from .result import MCMCBroadFitResult, MCMCLineResult, MCMCResult
 from .samplers import run_emcee, run_nautilus, run_nuts
 
 logger = logging.getLogger(__name__)
+#: Seed for the continuum draws that turn a flux posterior into an EW
+#: posterior.  Fixed so the same fit gives the same EW error twice.
+_EW_CONT_SEED: int = 20260914
 
 _SQRT2PI = sqrt(2.0 * pi)
+
+
+def _ew_posterior(
+    flux_samples: np.ndarray,
+    cont_at_line: float,
+    cont_err_at_line: float,
+    z: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Build an equivalent-width posterior from flux and continuum.
+
+    Parameters
+    ----------
+    flux_samples : np.ndarray
+        Per-sample line flux posterior.
+    cont_at_line : float
+        Continuum flux density at the line, same units as the flux
+        divided by Angstrom.
+    cont_err_at_line : float
+        1-sigma uncertainty on it.  NaN when the continuum model cannot
+        supply one (the median-filter path), in which case only the
+        line-flux term is propagated.
+    z : float
+        Redshift, to put the equivalent width in the rest frame.
+    rng : np.random.Generator
+        Random number generator for the continuum draws.
+
+    Returns
+    -------
+    np.ndarray
+        Rest-frame equivalent-width samples (Angstrom), NaN where the
+        drawn continuum was non-positive.
+
+    Notes
+    -----
+    EW = F_line / F_cont, so the continuum uncertainty enters as a ratio
+    and is frequently the *larger* of the two terms: a faint high-z
+    continuum carries a big fractional error even when the line is well
+    measured.  Propagating only the flux term would understate the EW
+    error, sometimes by a lot.
+
+    The continuum is not a free parameter of the chain, so it is drawn
+    independently per sample rather than taken from the posterior.  That
+    is right for one line -- emission lines are masked out of the
+    continuum fit, so the two measurements are near enough independent --
+    but the draws for *different* lines are independent too, while their
+    true continuum errors share polynomial coefficients and are
+    correlated.  Do not difference or ratio two of these posteriors and
+    expect the continuum error to cancel.
+    """
+    if not np.isfinite(cont_at_line) or cont_at_line <= 0:
+        return np.full_like(flux_samples, np.nan, dtype=float)
+
+    if np.isfinite(cont_err_at_line) and cont_err_at_line > 0:
+        cont_draws = rng.normal(cont_at_line, cont_err_at_line, size=flux_samples.shape)
+    else:
+        cont_draws = np.full_like(flux_samples, cont_at_line, dtype=float)
+
+    # A continuum draw at or below zero makes the ratio meaningless; drop
+    # those samples rather than letting them blow the posterior up.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ew = np.where(cont_draws > 0, flux_samples / cont_draws / (1.0 + z), np.nan)
+    return ew
+
+
+def _ew_summary(ew_samples: np.ndarray) -> tuple[float, tuple[float, float]]:
+    """Median and 68 % credible half-widths of an EW posterior.
+
+    Parameters
+    ----------
+    ew_samples : np.ndarray
+        Equivalent-width samples, possibly containing NaN.
+
+    Returns
+    -------
+    tuple
+        ``(median, (lower, upper))``, or ``(nan, (nan, nan))`` when too
+        few samples survived to summarise.
+    """
+    finite = ew_samples[np.isfinite(ew_samples)]
+    if finite.size < 10:
+        return float("nan"), (float("nan"), float("nan"))
+    med = float(np.median(finite))
+    lo = med - float(np.percentile(finite, 16))
+    hi = float(np.percentile(finite, 84)) - med
+    return med, (lo, hi)
 
 
 def _fit_lines_mcmc(
@@ -221,11 +310,12 @@ def _fit_lines_mcmc(
     _lya_in_lines = "Lya" in line_names
     _lya_break = _lya_in_lines
 
-    continuum = fit_continuum(
+    continuum, continuum_err = fit_continuum(
         spec.wave_um, spec.flux_ujy, spec.err_ujy, z, line_names,
         grating=grating, R=R, deg=deg, clip_sigma=clip_sigma,
         moving_average=moving_average,
         lya_break=_lya_break,
+        return_err=True,
     )
     flux_sub = spec.flux_ujy - continuum
 
@@ -695,6 +785,10 @@ def _fit_lines_mcmc(
     # 10. Per-line MCMCLineResult
     # ------------------------------------------------------------------
     cont_flam = _ujy_to_flam(continuum, spec.wave_um)
+    cont_flam_err = _ujy_to_flam(continuum_err, spec.wave_um)
+    # One stream for every line's continuum draws, seeded off the fit so a
+    # rerun reproduces the same EW posteriors.
+    _ew_rng = np.random.default_rng(_EW_CONT_SEED)
     line_results: dict[str, MCMCLineResult] = {}
 
     for i, name in enumerate(line_names):
@@ -732,7 +826,15 @@ def _fit_lines_mcmc(
                     np.array([max(local_median_ujy, 0.0)]),
                     np.array([spec.wave_um[idx_cont]]),
                 )[0]
-        ew_rest = flux_med / cont_at_line / (1.0 + z) if cont_at_line > 0 else np.nan
+        cont_err_at_line = cont_flam_err[idx_cont]
+        ew_samples = _ew_posterior(
+            amp_samples, cont_at_line, cont_err_at_line, z, _ew_rng,
+        )
+        ew_rest, ew_err = _ew_summary(ew_samples)
+        if not np.isfinite(ew_rest):
+            # Fall back to the point-estimate EW so the field keeps its
+            # old meaning when the posterior could not be formed.
+            ew_rest = flux_med / cont_at_line / (1.0 + z) if cont_at_line > 0 else np.nan
 
         # SNR from mean of asymmetric errors.
         mean_err = 0.5 * (flux_lo + flux_hi)
@@ -751,6 +853,8 @@ def _fit_lines_mcmc(
             flux_err=(flux_lo, flux_hi),
             flux_posterior=amp_samples,
             ew_A=ew_rest,
+            ew_err=ew_err,
+            ew_posterior=ew_samples,
             snr=snr,
         )
 
@@ -791,7 +895,12 @@ def _fit_lines_mcmc(
 
         idx_cont_lya = np.argmin(np.abs(spec.wave_A - mu_med))
         cont_at_lya = cont_flam[idx_cont_lya]
-        ew_lya = flux_med / cont_at_lya / (1.0 + z) if cont_at_lya > 0 else np.nan
+        ew_lya_samples = _ew_posterior(
+            flux_samples, cont_at_lya, cont_flam_err[idx_cont_lya], z, _ew_rng,
+        )
+        ew_lya, ew_lya_err = _ew_summary(ew_lya_samples)
+        if not np.isfinite(ew_lya):
+            ew_lya = flux_med / cont_at_lya / (1.0 + z) if cont_at_lya > 0 else np.nan
 
         line_results["Lya"] = MCMCLineResult(
             name="Lya",
@@ -809,6 +918,8 @@ def _fit_lines_mcmc(
             flux_err=(flux_lo, flux_hi),
             flux_posterior=flux_samples,
             ew_A=ew_lya,
+            ew_err=ew_lya_err,
+            ew_posterior=ew_lya_samples,
             snr=snr_lya,
         )
         line_names = ["Lya"] + line_names

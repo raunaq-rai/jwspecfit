@@ -88,9 +88,12 @@ def save_mcmc_result(
             "flux": lr.flux,
             "flux_err": list(lr.flux_err),
             "ew_A": lr.ew_A,
+            "ew_err": list(lr.ew_err) if lr.ew_err is not None else None,
             "snr": lr.snr,
         }
         flux_posteriors[f"flux_post_{name}"] = lr.flux_posterior
+        if lr.ew_posterior is not None:
+            flux_posteriors[f"ew_post_{name}"] = lr.ew_posterior
 
     # --- Serialise constraints ---
     if mcmc.constraints is not None:
@@ -187,6 +190,7 @@ def load_mcmc_result(
     for name, ld in lines_data.items():
         flux_post_key = f"flux_post_{name}"
         flux_posterior = data[flux_post_key] if flux_post_key in data else np.array([])
+        ew_post_key = f"ew_post_{name}"
         lines[name] = MCMCLineResult(
             name=name,
             rest_wave_A=ld["rest_wave_A"],
@@ -200,6 +204,8 @@ def load_mcmc_result(
             flux_err=tuple(ld["flux_err"]),
             flux_posterior=flux_posterior,
             ew_A=ld["ew_A"],
+            ew_err=(tuple(ld["ew_err"]) if ld.get("ew_err") is not None else None),
+            ew_posterior=(data[ew_post_key] if ew_post_key in data else None),
             snr=ld["snr"],
         )
 
