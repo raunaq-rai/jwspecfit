@@ -1255,6 +1255,7 @@ def _compute_logU(
     errors: dict[str, float] | None = None,
     snr_logU: float = 3.0,
     lock_diag: str | None = None,
+    logU_ne: float | None = None,
 ) -> tuple[float | None, str | None]:
     """Compute ionisation parameter (Berg+2025 step 5).
 
@@ -1270,7 +1271,9 @@ def _compute_logU(
     ([OIII]/[OII]) is only a fallback: it is density-*sensitive* and, per
     Martinez+2025 (recommendation 5), is evaluated with the measured
     high-ionisation-zone density *ne_high*; it is unreliable when that
-    density is high or unknown, which is why N43 is preferred.
+    density is high or unknown, which is why N43 is preferred.  When the
+    measured density is not trustworthy, *logU_ne* pins the density the
+    conversion is read off instead.
 
     Parameters
     ----------
@@ -1280,7 +1283,8 @@ def _compute_logU(
         Gas-phase metallicity in solar units.
     ne_high : float
         High-ionisation zone electron density in cm^-3.  Used for both
-        the N43 and (fallback) O32 diagnostics.
+        the N43 and (fallback) O32 diagnostics, unless *logU_ne*
+        overrides it.
     errors : dict, optional
         Flux errors.  When provided, the **total doublet** SNR
         (summed flux / quadrature-summed error) must be >= *snr_logU*
@@ -1296,6 +1300,19 @@ def _compute_logU(
         estimate, so the log(U) posterior is not a silent mixture of
         N43- and O32-based draws.  ``None`` (default) uses the full
         priority tree.
+    logU_ne : float, optional
+        Pin the density at which the ratio is converted to log(U),
+        overriding *ne_high*.  Martinez+2025 tabulate their calibration
+        surfaces on a log n_e = 2..6 grid and
+        :func:`~jwspecabund.martinez25_icf._interp_ne` interpolates
+        between them, so this chooses which grid the conversion is read
+        off, nothing more.  Useful when the measured high-zone density
+        is unreliable -- O32 is density-sensitive, so a [O II] or
+        [Ar IV] ratio scattered to the high-density limit drags log(U)
+        down with it and from there into the ICFs.  Has no effect on
+        N43, which is density-insensitive by construction, and none on
+        the ICF surfaces, which keep the measured zone densities.
+        ``None`` (default) uses *ne_high*.
 
     Returns
     -------
@@ -1308,6 +1325,10 @@ def _compute_logU(
         LOG_OH_SOLAR, _LOG_N43_VALID, _LOG_U_VALID,
         log_U_from_N43, log_U_from_O32,
     )
+
+    # The density the ratio -> log(U) conversion is read off.  Pinned by
+    # *logU_ne* when given, otherwise the measured high-zone density.
+    ne_U = float(logU_ne) if logU_ne is not None else ne_high
 
     def _doublet_ok(name_a: str, name_b: str) -> tuple[bool, float]:
         """Check both members present and total doublet SNR above cut.
@@ -1359,7 +1380,7 @@ def _compute_logU(
                 )
                 log_N43 = _LOG_N43_VALID[1]
             if _LOG_N43_VALID[0] <= log_N43 <= _LOG_N43_VALID[1]:
-                logU = log_U_from_N43(log_N43, Z_Zsun, ne_high)
+                logU = log_U_from_N43(log_N43, Z_Zsun, ne_U)
                 if _LOG_U_VALID[0] <= logU <= _LOG_U_VALID[1]:
                     logger.info("log(U) from N43 = %.2f (N43=%.3f).", logU, N43)
                     return logU, "N43"
@@ -1396,9 +1417,12 @@ def _compute_logU(
             # evaluate it with the measured high-ionisation-zone density
             # (ne_high).  It is only a fallback and is unreliable when
             # ne_high is high/unknown.
-            logU = log_U_from_O32(np.log10(O32), Z_Zsun, ne_high)
-            logger.info("log(U) from O32 = %.2f (O32=%.3f, ne=%.0f cm^-3).",
-                        logU, O32, ne_high)
+            logU = log_U_from_O32(np.log10(O32), Z_Zsun, ne_U)
+            logger.info(
+                "log(U) from O32 = %.2f (O32=%.3f, ne=%.0f cm^-3%s).",
+                logU, O32, ne_U,
+                " (pinned)" if logU_ne is not None else "",
+            )
             return logU, "O32"
 
     return None, None
@@ -1695,6 +1719,7 @@ def _build_diagnostics(
     sc: Any = None,
     Z_Zsun: float | None = None,
     logU_diagnostic: str | None = None,
+    logU_ne: float | None = None,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -1724,6 +1749,11 @@ def _build_diagnostics(
         Default electron density in cm^-3.
     totals : dict, optional
         Total abundance dict from ``compute_total_abundances()``.
+    logU_ne : float, optional
+        Density (cm^-3) the log(U) conversion was pinned to, if any.
+        Adds a ``"log(U) density"`` entry naming it, the measured
+        density it replaced, and the difference between the two log(U)
+        values.
 
     Returns
     -------
@@ -1926,11 +1956,12 @@ def _build_diagnostics(
                 + _forced
             )
         elif logU_diag == "O32":
+            _where = "the pinned logU_ne" if logU_ne is not None else "ne(high)"
             diag["log(U)"] = (
                 f"O32 diagnostic ([OIII] 5007 / [OII] 3727) -> log(U) = {logU:.2f}"
                 + _forced
-                + ("; O32 is density-sensitive and was evaluated at ne(high)"
-                   if logU_diagnostic == "O32" else "")
+                + (f"; O32 is density-sensitive and was evaluated at {_where}"
+                   if logU_diagnostic == "O32" or logU_ne is not None else "")
             )
     elif logU_diagnostic is not None:
         diag["log(U)"] = (
@@ -1940,6 +1971,27 @@ def _build_diagnostics(
         )
     else:
         diag["log(U)"] = "not available (N43 and O32 diagnostics both unavailable)"
+
+    # A pinned conversion density silently changes log(U), so say which
+    # grid was used, what measured density was set aside, and what that
+    # density would have given.  O32 is density-sensitive; the difference
+    # is the whole reason for pinning, and is worth seeing.
+    if logU_ne is not None:
+        _ne_meas = ne_high if ne_high else ne_default
+        _txt = (
+            f"log(U) read off the n_e = {logU_ne:.0f} cm^-3 calibration grid "
+            f"(logU_ne), not the measured ne(high) = {_ne_meas:.0f} cm^-3"
+        )
+        if logU is not None and logU_diag is not None and Z_Zsun is not None:
+            _logU_meas, _ = _compute_logU(
+                fluxes, Z_Zsun, _ne_meas, lock_diag=logU_diag,
+            )
+            if _logU_meas is not None and np.isfinite(_logU_meas):
+                _txt += (
+                    f"; at the measured density {logU_diag} gives "
+                    f"{_logU_meas:.2f}, a shift of {logU - _logU_meas:+.2f} dex"
+                )
+        diag["log(U) density"] = _txt
 
     # Flag a log(U) that sits just past a calibration edge, and say what
     # the extrapolation actually costs on each ICF surface -- the only
@@ -2044,6 +2096,7 @@ def _run_direct(
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
     logU_diagnostic: str | None = None,
+    logU_ne: float | None = None,
     continuum_rms_limits: dict[str, float] | None = None,
     niv_rejected: bool = False,
     ne_low_override: float | None = None,
@@ -2085,6 +2138,9 @@ def _run_direct(
         Minimum total-line SNR for each nitrogen ion when using
         ``icf_method="direct_sum"`` (default 1.5).  Ions whose
         contributing lines fall below this are excluded from the sum.
+    logU_ne : float or None
+        Pin the density (cm^-3) at which log(U) is derived, instead of
+        the measured ``ne_high``.  See :func:`compute_abundances`.
 
     Returns
     -------
@@ -2163,13 +2219,15 @@ def _run_direct(
     if Z_Zsun is not None:
         logU, logU_diag = _compute_logU(
             fluxes, Z_Zsun, ne_high, errors=errors, snr_logU=snr_logU,
-            lock_diag=logU_diagnostic,
+            lock_diag=logU_diagnostic, logU_ne=logU_ne,
         )
         # C/O ICF: recompute log U at the intermediate (C2+) zone density.
         # Only the density-sensitive O32 diagnostic changes; N43 is
-        # density-insensitive so this is a no-op there.
+        # density-insensitive so this is a no-op there.  A pinned
+        # logU_ne makes it a no-op for both, so skip it and let the one
+        # log(U) serve both zones.
         logU_co = logU
-        if logU_diag is not None and ne_mid is not None:
+        if logU_diag is not None and ne_mid is not None and logU_ne is None:
             logU_co, _ = _compute_logU(
                 fluxes, Z_Zsun, ne_mid, errors=errors, snr_logU=snr_logU,
                 lock_diag=logU_diag,
@@ -2239,6 +2297,7 @@ def _run_direct(
         totals=totals, niv_rejected=niv_rejected,
         ne_Opp=ne_Opp, Te_int=Te_int, te_high_diag=_Te_diagnostic, z=z,
         sc=_sc, Z_Zsun=Z_Zsun, logU_diagnostic=logU_diagnostic,
+        logU_ne=logU_ne,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -2331,7 +2390,7 @@ def _run_direct(
             if z_zsun_mc is not None and logU_diag is not None:
                 logU_mc_val, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_high, errors=errors,
-                    snr_logU=snr_logU, lock_diag=logU_diag,
+                    snr_logU=snr_logU, lock_diag=logU_diag, logU_ne=logU_ne,
                 )
                 if (logU_mc_val is not None and np.isfinite(logU_mc_val)
                         and _LOG_U_VALID[0] <= logU_mc_val <= _LOG_U_VALID[1]):
@@ -2346,7 +2405,8 @@ def _run_direct(
             # C/O log U at the intermediate (C2+) zone density.
             logU_co_sample = logU_co
             if (marginalize_logU and z_zsun_mc is not None
-                    and logU_diag is not None and ne_mid is not None):
+                    and logU_diag is not None and ne_mid is not None
+                    and logU_ne is None):
                 logU_co_mc, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_mid, errors=errors,
                     snr_logU=snr_logU, lock_diag=logU_diag,
@@ -2633,6 +2693,7 @@ def _run_direct_mcmc(
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
     logU_diagnostic: str | None = None,
+    logU_ne: float | None = None,
     continuum_rms_limits: dict[str, float] | None = None,
     niv_rejected: bool = False,
     ne_low_override: float | None = None,
@@ -2682,6 +2743,9 @@ def _run_direct_mcmc(
     snr_NO : float
         Minimum total-line SNR for each nitrogen ion when using
         ``icf_method="direct_sum"`` (default 2.0).
+    logU_ne : float or None
+        Pin the density (cm^-3) at which log(U) is derived, instead of
+        the measured ``ne_high``.  See :func:`compute_abundances`.
     Av : float or None
         Central A_V value for per-draw resampling.
     Av_err : float or None
@@ -2806,11 +2870,12 @@ def _run_direct_mcmc(
     if Z_Zsun_pt is not None:
         logU_pt, logU_diag = _compute_logU(
             med_fluxes, Z_Zsun_pt, ne_high, errors=med_errors,
-            snr_logU=snr_logU, lock_diag=logU_diagnostic,
+            snr_logU=snr_logU, lock_diag=logU_diagnostic, logU_ne=logU_ne,
         )
-        # C/O ICF: log U at the intermediate (C2+) zone density.
+        # C/O ICF: log U at the intermediate (C2+) zone density.  A
+        # pinned logU_ne makes this a no-op, so skip it.
         logU_co_pt = logU_pt
-        if logU_diag is not None and ne_mid is not None:
+        if logU_diag is not None and ne_mid is not None and logU_ne is None:
             logU_co_pt, _ = _compute_logU(
                 med_fluxes, Z_Zsun_pt, ne_mid, errors=med_errors,
                 snr_logU=snr_logU, lock_diag=logU_diag,
@@ -2929,7 +2994,7 @@ def _run_direct_mcmc(
             if z_zsun_i is not None and logU_diag is not None:
                 logU_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_high, errors=med_errors,
-                    snr_logU=snr_logU, lock_diag=logU_diag,
+                    snr_logU=snr_logU, lock_diag=logU_diag, logU_ne=logU_ne,
                 )
                 if (logU_val is not None and np.isfinite(logU_val)
                         and _LOG_U_VALID[0] <= logU_val <= _LOG_U_VALID[1]):
@@ -2942,7 +3007,8 @@ def _run_direct_mcmc(
             # C/O log U at the intermediate (C2+) zone density.
             logU_co_sample = logU_co_pt
             if (marginalize_logU and z_zsun_i is not None
-                    and logU_diag is not None and ne_mid is not None):
+                    and logU_diag is not None and ne_mid is not None
+                    and logU_ne is None):
                 logU_co_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_mid, errors=med_errors,
                     snr_logU=snr_logU, lock_diag=logU_diag,
@@ -3192,6 +3258,7 @@ def _run_direct_mcmc(
                 ne_Opp=ne_Opp, Te_int=_Te_mid_final,
                 te_high_diag=_Te_diagnostic, z=z, sc=_sc,
                 Z_Zsun=Z_Zsun_pt, logU_diagnostic=logU_diagnostic,
+                logU_ne=logU_ne,
             ),
             **_diag_extra,
         },
@@ -3331,6 +3398,7 @@ def compute_abundances(
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
     logU_diagnostic: str | None = None,
+    logU_ne: float | None = None,
     # Electron density overrides (bypass diagnostic computation)
     ne_low_override: float | None = None,
     ne_mid_override: float | None = None,
@@ -3595,6 +3663,38 @@ def compute_abundances(
         there into the N/O and C/O ICFs.  The usual legitimate reason to
         force it is sample homogeneity -- keeping every object on one
         diagnostic when most of them lack N IV] and N III].
+    logU_ne : float or None
+        Pin the electron density (cm^-3) at which log(U) is derived,
+        instead of the measured high-ionisation-zone density.
+        Martinez+2025 give their O32 and N43 calibrations on a
+        log n_e = 2..6 grid, interpolated in between, so this only
+        chooses which grid the ratio-to-log(U) conversion is read off.
+
+        It does **not** touch anything else: the ionic abundances, the
+        zone temperatures and the ICF surfaces all keep the measured
+        densities.  Nor does it change which diagnostic is used -- that
+        is ``logU_diagnostic``.
+
+        The reason to set it is that O32 is density-sensitive.  A [O II]
+        or [Ar IV] ratio scattered to the high-density limit inflates
+        ``ne_high``, which drags log(U) down and from there into the
+        N/O and C/O ICFs, and none of that is visible in the O/H you
+        trust.  Pinning to a defensible density (10^2-10^3 cm^-3 for
+        most H II regions) puts the conversion on a grid you can
+        justify.  N43 is density-insensitive, so pinning barely moves
+        it.
+
+        When set, the C/O log(U) is no longer re-derived at the
+        intermediate-zone density -- one pinned density gives one
+        log(U), used for both the N/O and C/O ICFs.  The
+        ``"log(U) density"`` diagnostics entry records what was pinned,
+        what measured density was set aside, and how far apart the two
+        log(U) values are.
+
+        Must be positive and finite; anything else raises ``ValueError``.
+        Values outside the tabulated 10^2-10^6 cm^-3 grid are clipped to
+        the nearest edge, with a warning.  Default ``None`` (use
+        ``ne_high``).
     ne_low_override : float or None
         If set, use this value (cm^-3) for the low-ionisation zone
         density instead of deriving it from [SII] or [OII].
@@ -3662,6 +3762,22 @@ def compute_abundances(
         _choices["icf_tier"] = (icf_tier, VALID_NO_ICF_TIERS)
     if logU_diagnostic is not None:
         _choices["logU_diagnostic"] = (logU_diagnostic, VALID_LOGU_DIAGNOSTICS)
+    if logU_ne is not None:
+        if not (np.isfinite(logU_ne) and logU_ne > 0):
+            raise ValueError(
+                f"logU_ne must be a positive, finite electron density in cm^-3, "
+                f"got {logU_ne!r}."
+            )
+        # Outside the tabulated grid _interp_ne clips silently, so the
+        # log(U) would not be the one that was asked for.  Say so here
+        # rather than per Monte-Carlo draw.
+        if not 1.0e2 <= logU_ne <= 1.0e6:
+            logger.warning(
+                "logU_ne = %.3g cm^-3 is outside the Martinez+2025 grid "
+                "(10^2 to 10^6 cm^-3); log(U) will be read off the nearest "
+                "edge (%.0g cm^-3), not the density requested.",
+                logU_ne, 1.0e2 if logU_ne < 1.0e2 else 1.0e6,
+            )
     for _name, (_value, _valid) in _choices.items():
         if _value not in _valid:
             raise ValueError(
@@ -3959,6 +4075,7 @@ def compute_abundances(
                     snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                     icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                     logU_diagnostic=logU_diagnostic,
+                    logU_ne=logU_ne,
                     continuum_rms_limits=continuum_rms_limits,
                     niv_rejected=_niv_rejected,
                     ne_low_override=ne_low_override,
@@ -3979,6 +4096,7 @@ def compute_abundances(
                     snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                     icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                     logU_diagnostic=logU_diagnostic,
+                    logU_ne=logU_ne,
                     continuum_rms_limits=continuum_rms_limits,
                     niv_rejected=_niv_rejected,
                     ne_low_override=ne_low_override,
@@ -4165,7 +4283,8 @@ def compute_abundances(
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                             icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
-                    logU_diagnostic=logU_diagnostic,
+                            logU_diagnostic=logU_diagnostic,
+                            logU_ne=logU_ne,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
@@ -4184,7 +4303,8 @@ def compute_abundances(
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
                             icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
-                    logU_diagnostic=logU_diagnostic,
+                            logU_diagnostic=logU_diagnostic,
+                            logU_ne=logU_ne,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
