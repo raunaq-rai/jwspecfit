@@ -1247,6 +1247,117 @@ def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
 #: Left unset, the automatic tree prefers N43 and falls back to O32.
 VALID_LOGU_DIAGNOSTICS: tuple[str, ...] = ("N43", "O32")
 
+#: Internal marker for a log(U) handed in via ``logU_override`` rather
+#: than derived from a line ratio.  Never a valid ``logU_diagnostic``.
+_LOGU_SUPPLIED: str = "supplied"
+
+#: Sentinel for "no log(U) draw was attempted", distinct from a draw
+#: that was attempted and came back ``None``.  Only the latter is a
+#: rejection.
+_NO_DRAW = object()
+
+
+def _draw_logU(
+    rng: np.random.Generator,
+    logU: float,
+    logU_err: float | tuple[float, float] | None,
+) -> float:
+    """Draw a single log(U) sample from a supplied value and uncertainty.
+
+    Parameters
+    ----------
+    rng : np.random.Generator
+        Random number generator.
+    logU : float
+        Central log(U).
+    logU_err : float, tuple or None
+        Symmetric 1-sigma uncertainty, an asymmetric ``(lower, upper)``
+        pair, or ``None`` for no uncertainty.  The tuple form matches
+        what :class:`~jwspecabund.result.AbundanceResult` reports in
+        ``logU_err``, so a value measured by one run can be fed to
+        another unchanged.
+
+    Returns
+    -------
+    float
+        A draw from the supplied distribution.  With no uncertainty this
+        is *logU* itself, so every draw is identical and the log(U)
+        posterior collapses to a point.
+
+    Notes
+    -----
+    Asymmetric errors are drawn from a two-piece (split) normal: the side
+    is chosen with probability ``sigma / (sigma_lo + sigma_hi)`` and a
+    half-normal of that width is drawn on it, which keeps the density
+    continuous at the mode.  Sampling each side with equal probability
+    instead would put half the mass on the narrow side and distort the
+    distribution.
+    """
+    if logU_err is None:
+        return float(logU)
+
+    if isinstance(logU_err, tuple):
+        sig_lo, sig_hi = (float(logU_err[0]), float(logU_err[1]))
+    else:
+        sig_lo = sig_hi = float(logU_err)
+
+    if not (np.isfinite(sig_lo) and np.isfinite(sig_hi)):
+        return float(logU)
+    sig_lo = max(sig_lo, 0.0)
+    sig_hi = max(sig_hi, 0.0)
+    if sig_lo <= 0.0 and sig_hi <= 0.0:
+        return float(logU)
+    if sig_lo <= 0.0:
+        return float(logU) + abs(rng.normal(0.0, sig_hi))
+    if sig_hi <= 0.0:
+        return float(logU) - abs(rng.normal(0.0, sig_lo))
+
+    if rng.random() < sig_lo / (sig_lo + sig_hi):
+        return float(logU) - abs(rng.normal(0.0, sig_lo))
+    return float(logU) + abs(rng.normal(0.0, sig_hi))
+
+
+def _logU_rejection_note(n_rejected: int, n_attempts: int, logU_diag: str | None) -> str:
+    """Describe log(U) draws thrown out for falling off the ICF surfaces.
+
+    Parameters
+    ----------
+    n_rejected : int
+        Draws discarded because log(U) fell outside the Martinez+2025
+        calibration range.
+    n_attempts : int
+        Draws attempted in total.
+    logU_diag : str or None
+        How log(U) was obtained, so the note can name the fix.
+
+    Returns
+    -------
+    str
+        A diagnostics string quoting the rejected fraction and what it
+        does to the result.
+    """
+    from .martinez25_icf import _LOG_U_VALID
+
+    frac = 100.0 * n_rejected / n_attempts
+    note = (
+        f"{n_rejected} of {n_attempts} draws ({frac:.0f}%) fell outside the "
+        f"log(U) calibration range [{_LOG_U_VALID[0]:+.1f}, "
+        f"{_LOG_U_VALID[1]:+.1f}] and were re-drawn rather than kept"
+    )
+    if frac >= 5.0:
+        note += (
+            ". Re-drawing truncates the log(U) distribution at the edge, so "
+            "the ICF-based ratios (N/O, C/O) are biased towards the "
+            "in-range side and their error bars are too small"
+        )
+    if logU_diag == _LOGU_SUPPLIED and frac >= 5.0:
+        note += (
+            "; the supplied uncertainty straddles a calibration edge. Narrow "
+            "it, move the central value inside, or set marginalize_logU=False "
+            "to hold log(U) fixed in the ICFs"
+        )
+    return note
+
 
 def _compute_logU(
     fluxes: dict[str, float],
@@ -1720,6 +1831,7 @@ def _build_diagnostics(
     Z_Zsun: float | None = None,
     logU_diagnostic: str | None = None,
     logU_ne: float | None = None,
+    logU_override_err: float | tuple[float, float] | None = None,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -1950,7 +2062,21 @@ def _build_diagnostics(
         if logU_diagnostic is not None else ""
     )
     if logU is not None:
-        if logU_diag == "N43":
+        if logU_diag == _LOGU_SUPPLIED:
+            _err = ""
+            if isinstance(logU_override_err, tuple):
+                _err = f" (+{logU_override_err[1]:.2f} -{logU_override_err[0]:.2f})"
+            elif logU_override_err is not None:
+                _err = f" +/- {logU_override_err:.2f}"
+            diag["log(U)"] = (
+                f"supplied via logU_override -> log(U) = {logU:.2f}{_err}"
+                "; no emission-line ratio was used, and the one value serves "
+                "both the N/O (high) and C/O (intermediate) zones"
+                + ("" if logU_override_err is not None else
+                   "; no uncertainty given, so every draw uses this value and "
+                   "the reported log(U) error is zero")
+            )
+        elif logU_diag == "N43":
             diag["log(U)"] = (
                 f"N43 diagnostic (NIV] 1486 / NIII] 1750) -> log(U) = {logU:.2f}"
                 + _forced
@@ -2097,6 +2223,8 @@ def _run_direct(
     icf_tier: str | None = None,
     logU_diagnostic: str | None = None,
     logU_ne: float | None = None,
+    logU_override: float | None = None,
+    logU_override_err: float | tuple[float, float] | None = None,
     continuum_rms_limits: dict[str, float] | None = None,
     niv_rejected: bool = False,
     ne_low_override: float | None = None,
@@ -2141,6 +2269,11 @@ def _run_direct(
     logU_ne : float or None
         Pin the density (cm^-3) at which log(U) is derived, instead of
         the measured ``ne_high``.  See :func:`compute_abundances`.
+    logU_override : float or None
+        Supply log(U) directly instead of deriving it from a line ratio.
+        See :func:`compute_abundances`.
+    logU_override_err : float, tuple or None
+        Uncertainty on it; each draw samples from this distribution.
 
     Returns
     -------
@@ -2216,7 +2349,14 @@ def _run_direct(
     logU = None
     logU_diag = None
     logU_co = None
-    if Z_Zsun is not None:
+    if logU_override is not None:
+        # Supplied from outside (an SED or photoionisation fit): no
+        # emission-line ratio is consulted at all, and the one value
+        # serves both the high (N/O) and intermediate (C/O) zones.
+        logU = float(logU_override)
+        logU_co = logU
+        logU_diag = _LOGU_SUPPLIED
+    elif Z_Zsun is not None:
         logU, logU_diag = _compute_logU(
             fluxes, Z_Zsun, ne_high, errors=errors, snr_logU=snr_logU,
             lock_diag=logU_diagnostic, logU_ne=logU_ne,
@@ -2297,11 +2437,15 @@ def _run_direct(
         totals=totals, niv_rejected=niv_rejected,
         ne_Opp=ne_Opp, Te_int=Te_int, te_high_diag=_Te_diagnostic, z=z,
         sc=_sc, Z_Zsun=Z_Zsun, logU_diagnostic=logU_diagnostic,
-        logU_ne=logU_ne,
+        logU_ne=logU_ne, logU_override_err=logU_override_err,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
     rng = np.random.default_rng(seed)
+    # A supplied log(U) is drawn from its own stream so that giving it an
+    # uncertainty cannot perturb the flux draws, and hence cannot move O/H
+    # or T_e -- neither of which depends on log(U) in the first place.
+    rng_logU = np.random.default_rng(seed + 1)
     OH_mc = []
     NO_mc = []
     CO_mc = []
@@ -2329,6 +2473,7 @@ def _run_direct(
     max_attempts = n_mc * _RESAMPLE_MAX_ATTEMPT_FACTOR
     attempts = 0
     n_collected = 0  # draws counted toward n_mc (in-bounds N/O or solver fail)
+    n_logU_rejected = 0  # draws thrown away for an out-of-range log(U)
     _pbar = tqdm(total=n_mc, desc="Direct Te (MC)", disable=not progress)
     while n_collected < n_mc and attempts < max_attempts:
         attempts += 1
@@ -2387,11 +2532,16 @@ def _run_direct(
             # N/O — but logU still gets a reported error bar.
             logU_sample = logU
             no_in_bounds = True
-            if z_zsun_mc is not None and logU_diag is not None:
+            if logU_override is not None:
+                logU_mc_val = _draw_logU(rng_logU, logU_override, logU_override_err)
+            elif z_zsun_mc is not None and logU_diag is not None:
                 logU_mc_val, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_high, errors=errors,
                     snr_logU=snr_logU, lock_diag=logU_diag, logU_ne=logU_ne,
                 )
+            else:
+                logU_mc_val = _NO_DRAW
+            if logU_mc_val is not _NO_DRAW:
                 if (logU_mc_val is not None and np.isfinite(logU_mc_val)
                         and _LOG_U_VALID[0] <= logU_mc_val <= _LOG_U_VALID[1]):
                     logU_sample = float(logU_mc_val)
@@ -2400,11 +2550,15 @@ def _run_direct(
                     # this out-of-range draw (O/H etc. still kept).
                     logU_sample = np.nan
                     no_in_bounds = False
+                    n_logU_rejected += 1
             logU_icf = logU_sample if marginalize_logU else logU
 
             # C/O log U at the intermediate (C2+) zone density.
             logU_co_sample = logU_co
-            if (marginalize_logU and z_zsun_mc is not None
+            if logU_override is not None:
+                # One supplied value serves both zones, draw included.
+                logU_co_sample = logU_sample
+            elif (marginalize_logU and z_zsun_mc is not None
                     and logU_diag is not None and ne_mid is not None
                     and logU_ne is None):
                 logU_co_mc, _ = _compute_logU(
@@ -2544,6 +2698,15 @@ def _run_direct(
                 med = float(np.nanmedian(arr))
                 NO_tiers[k] = med
                 NO_tiers[f"_err_{k}"] = float(np.nanstd(arr))
+
+    # Out-of-range draws are silently *re-drawn*, which truncates the log(U)
+    # distribution and biases every ICF ratio that depends on it.  With a
+    # supplied error bar straddling a calibration edge that can be most of
+    # the posterior, so say how much was thrown away.
+    if n_logU_rejected > 0 and attempts > 0:
+        diagnostics["log(U) draws rejected"] = _logU_rejection_note(
+            n_logU_rejected, attempts, logU_diag,
+        )
 
     # --- Single-ratio T_e diagnostics, reported alongside the adopted one ---
     _alt_single, _alt_diag = _single_ratio_alternatives(
@@ -2694,6 +2857,8 @@ def _run_direct_mcmc(
     icf_tier: str | None = None,
     logU_diagnostic: str | None = None,
     logU_ne: float | None = None,
+    logU_override: float | None = None,
+    logU_override_err: float | tuple[float, float] | None = None,
     continuum_rms_limits: dict[str, float] | None = None,
     niv_rejected: bool = False,
     ne_low_override: float | None = None,
@@ -2746,6 +2911,11 @@ def _run_direct_mcmc(
     logU_ne : float or None
         Pin the density (cm^-3) at which log(U) is derived, instead of
         the measured ``ne_high``.  See :func:`compute_abundances`.
+    logU_override : float or None
+        Supply log(U) directly instead of deriving it from a line ratio.
+        See :func:`compute_abundances`.
+    logU_override_err : float, tuple or None
+        Uncertainty on it; each draw samples from this distribution.
     Av : float or None
         Central A_V value for per-draw resampling.
     Av_err : float or None
@@ -2784,6 +2954,9 @@ def _run_direct_mcmc(
     # >= n_samples finite draws while N/O holds n_samples in-bounds draws.
     n_total = min(len(v) for v in posteriors.values())
     rng = np.random.default_rng(seed)
+    # Own stream, so a supplied log(U) uncertainty cannot shift the
+    # posterior scan order or the per-draw dust resampling.
+    rng_logU = np.random.default_rng(seed + 1)
     n_samples = n_posterior if (n_posterior > 0 and n_total > n_posterior) else n_total
     scan_order = rng.permutation(n_total)
     max_scan = n_samples * _RESAMPLE_MAX_ATTEMPT_FACTOR
@@ -2867,7 +3040,11 @@ def _run_direct_mcmc(
     logU_pt = None
     logU_diag = None
     logU_co_pt = None
-    if Z_Zsun_pt is not None:
+    if logU_override is not None:
+        logU_pt = float(logU_override)
+        logU_co_pt = logU_pt
+        logU_diag = _LOGU_SUPPLIED
+    elif Z_Zsun_pt is not None:
         logU_pt, logU_diag = _compute_logU(
             med_fluxes, Z_Zsun_pt, ne_high, errors=med_errors,
             snr_logU=snr_logU, lock_diag=logU_diagnostic, logU_ne=logU_ne,
@@ -2935,6 +3112,7 @@ def _run_direct_mcmc(
 
     n_collected = 0  # scanned draws counted toward n_samples (in-bounds N/O
     #                  or solver failure); out-of-bounds draws keep O/H etc.
+    n_logU_rejected = 0  # draws thrown away for an out-of-range log(U)
     scanned = 0
     _pbar = tqdm(total=n_samples, desc="Direct Te (posterior)", disable=not progress)
     for src_i in scan_order:
@@ -2991,22 +3169,30 @@ def _run_direct_mcmc(
             # logU still gets a reported error bar.
             logU_sample = logU_pt
             no_in_bounds = True
-            if z_zsun_i is not None and logU_diag is not None:
+            if logU_override is not None:
+                logU_val = _draw_logU(rng_logU, logU_override, logU_override_err)
+            elif z_zsun_i is not None and logU_diag is not None:
                 logU_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_high, errors=med_errors,
                     snr_logU=snr_logU, lock_diag=logU_diag, logU_ne=logU_ne,
                 )
+            else:
+                logU_val = _NO_DRAW
+            if logU_val is not _NO_DRAW:
                 if (logU_val is not None and np.isfinite(logU_val)
                         and _LOG_U_VALID[0] <= logU_val <= _LOG_U_VALID[1]):
                     logU_sample = float(logU_val)
                 elif marginalize_logU:
                     logU_sample = np.nan
                     no_in_bounds = False
+                    n_logU_rejected += 1
             logU_icf = logU_sample if marginalize_logU else logU_pt
 
             # C/O log U at the intermediate (C2+) zone density.
             logU_co_sample = logU_co_pt
-            if (marginalize_logU and z_zsun_i is not None
+            if logU_override is not None:
+                logU_co_sample = logU_sample
+            elif (marginalize_logU and z_zsun_i is not None
                     and logU_diag is not None and ne_mid is not None
                     and logU_ne is None):
                 logU_co_val, _ = _compute_logU(
@@ -3188,6 +3374,10 @@ def _run_direct_mcmc(
         _diag_extra["O III] 1661/1666"] = _oiii_uv_chk["message"] + (
             " — fixed branching ratio, so a departure is a measurement problem"
         )
+    if n_logU_rejected > 0 and scanned > 0:
+        _diag_extra["log(U) draws rejected"] = _logU_rejection_note(
+            n_logU_rejected, scanned, logU_diag,
+        )
 
     # Intermediate-zone temperature (deterministic function of T_e(high)).
     _Te_high_final = (
@@ -3258,7 +3448,7 @@ def _run_direct_mcmc(
                 ne_Opp=ne_Opp, Te_int=_Te_mid_final,
                 te_high_diag=_Te_diagnostic, z=z, sc=_sc,
                 Z_Zsun=Z_Zsun_pt, logU_diagnostic=logU_diagnostic,
-                logU_ne=logU_ne,
+                logU_ne=logU_ne, logU_override_err=logU_override_err,
             ),
             **_diag_extra,
         },
@@ -3399,6 +3589,8 @@ def compute_abundances(
     icf_tier: str | None = None,
     logU_diagnostic: str | None = None,
     logU_ne: float | None = None,
+    logU_override: float | None = None,
+    logU_override_err: float | tuple[float, float] | None = None,
     # Electron density overrides (bypass diagnostic computation)
     ne_low_override: float | None = None,
     ne_mid_override: float | None = None,
@@ -3695,6 +3887,46 @@ def compute_abundances(
         Values outside the tabulated 10^2-10^6 cm^-3 grid are clipped to
         the nearest edge, with a warning.  Default ``None`` (use
         ``ne_high``).
+    logU_override : float or None
+        Supply log(U) directly instead of deriving it from a line ratio
+        -- from an SED or photoionisation fit, say.  No emission-line
+        diagnostic is consulted, and the one value serves both the N/O
+        (high) and C/O (intermediate) zones.
+
+        Because it replaces the derivation entirely, passing
+        ``logU_diagnostic`` or ``logU_ne`` alongside it raises
+        ``ValueError``: those steer a derivation that no longer happens.
+        Everything downstream is unchanged -- the value goes into the
+        Martinez+2025 ICF surfaces exactly as a derived one would, and
+        O/H, T_e and n_e never depend on log(U) at all.
+
+        A value outside the ICF calibration range (-3.5 to -1.0, plus the
+        :data:`~jwspecabund.martinez25_icf.LOG_U_EXTRAP_MARGIN` dex
+        margin) warns: the surfaces will reject it and N/O and C/O come
+        back unavailable, while O/H is unaffected.  Default ``None``
+        (derive it).
+    logU_override_err : float, tuple or None
+        Uncertainty on *logU_override*: a symmetric 1-sigma float, or an
+        asymmetric ``(lower, upper)`` pair.  The tuple form is what
+        ``AbundanceResult.logU_err`` reports, so a value from one run can
+        be fed to another unchanged.  Asymmetric errors are drawn from a
+        two-piece normal.
+
+        Each Monte-Carlo draw samples log(U) from this distribution in
+        place of re-deriving it, so ``marginalize_logU`` keeps its usual
+        meaning: ``True`` propagates the scatter into N/O and C/O,
+        ``False`` holds the central value in the ICFs while still
+        reporting the error bar.
+
+        Watch the ``"log(U) draws rejected"`` diagnostics entry.  Draws
+        landing outside the calibration range are **re-drawn**, so an
+        uncertainty straddling an edge truncates the distribution and
+        biases N/O and C/O towards the in-range side.  The entry appears
+        whenever that happens and quotes the fraction.
+
+        Without it every draw uses the same log(U) and the reported
+        log(U) error is zero.  Requires *logU_override*.  Default
+        ``None``.
     ne_low_override : float or None
         If set, use this value (cm^-3) for the low-ionisation zone
         density instead of deriving it from [SII] or [OII].
@@ -3777,6 +4009,51 @@ def compute_abundances(
                 "(10^2 to 10^6 cm^-3); log(U) will be read off the nearest "
                 "edge (%.0g cm^-3), not the density requested.",
                 logU_ne, 1.0e2 if logU_ne < 1.0e2 else 1.0e6,
+            )
+    if logU_override is not None:
+        if not np.isfinite(logU_override):
+            raise ValueError(
+                f"logU_override must be a finite log10 ionisation parameter, "
+                f"got {logU_override!r}."
+            )
+        # Supplying log(U) bypasses the line-ratio derivation entirely, so
+        # arguments that steer that derivation can only mislead.
+        _dead = [
+            _n for _n, _v in (("logU_diagnostic", logU_diagnostic),
+                              ("logU_ne", logU_ne)) if _v is not None
+        ]
+        if _dead:
+            raise ValueError(
+                f"logU_override supplies log(U) directly, so "
+                f"{' and '.join(_dead)} would have no effect; pass "
+                f"logU_override alone."
+            )
+        from .martinez25_icf import _LOG_U_VALID, LOG_U_EXTRAP_MARGIN
+
+        if not (_LOG_U_VALID[0] - LOG_U_EXTRAP_MARGIN
+                <= logU_override
+                <= _LOG_U_VALID[1] + LOG_U_EXTRAP_MARGIN):
+            logger.warning(
+                "logU_override = %.2f is outside the Martinez+2025 ICF range "
+                "[%.1f, %.1f] (plus the %.2f dex extrapolation margin); the "
+                "ICF surfaces will reject it and N/O and C/O will be "
+                "unavailable. O/H and T_e are unaffected.",
+                logU_override, *_LOG_U_VALID, LOG_U_EXTRAP_MARGIN,
+            )
+    if logU_override_err is not None:
+        if logU_override is None:
+            raise ValueError(
+                "logU_override_err was given without logU_override; there is "
+                "no value for it to be the uncertainty on."
+            )
+        _errs = (logU_override_err if isinstance(logU_override_err, tuple)
+                 else (logU_override_err,))
+        if len(_errs) not in (1, 2) or not all(
+            np.isfinite(_e) and _e >= 0 for _e in _errs
+        ):
+            raise ValueError(
+                f"logU_override_err must be a non-negative finite float or a "
+                f"(lower, upper) pair of them, got {logU_override_err!r}."
             )
     for _name, (_value, _valid) in _choices.items():
         if _value not in _valid:
@@ -4076,6 +4353,8 @@ def compute_abundances(
                     icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                     logU_diagnostic=logU_diagnostic,
                     logU_ne=logU_ne,
+                    logU_override=logU_override,
+                    logU_override_err=logU_override_err,
                     continuum_rms_limits=continuum_rms_limits,
                     niv_rejected=_niv_rejected,
                     ne_low_override=ne_low_override,
@@ -4097,6 +4376,8 @@ def compute_abundances(
                     icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                     logU_diagnostic=logU_diagnostic,
                     logU_ne=logU_ne,
+                    logU_override=logU_override,
+                    logU_override_err=logU_override_err,
                     continuum_rms_limits=continuum_rms_limits,
                     niv_rejected=_niv_rejected,
                     ne_low_override=ne_low_override,
@@ -4285,6 +4566,8 @@ def compute_abundances(
                             icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             logU_diagnostic=logU_diagnostic,
                             logU_ne=logU_ne,
+                    logU_override=logU_override,
+                    logU_override_err=logU_override_err,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
@@ -4305,6 +4588,8 @@ def compute_abundances(
                             icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
                             logU_diagnostic=logU_diagnostic,
                             logU_ne=logU_ne,
+                    logU_override=logU_override,
+                    logU_override_err=logU_override_err,
                             niv_rejected=_niv_rejected,
                             ne_low_override=ne_low_override,
                             ne_mid_override=ne_mid_override,
