@@ -443,7 +443,10 @@ class AbundanceResult:
                 ul_method = info.get("method", "fit_error")
                 if flux_ul is not None:
                     if ul_method == "continuum_rms":
-                        method_desc = f"{n_sig:.0f}σ × RMS_cont × σ_inst × √(2π)"
+                        method_desc = (
+                            f"{n_sig:.0f}σ, matched filter on the local "
+                            "continuum noise at the assumed line width"
+                        )
                     else:
                         method_desc = f"{n_sig:.0f}σ × sqrt(Σ err²)"
                     lines.append(

@@ -71,6 +71,16 @@ class MCMCLineResult:
         lines.
     snr : float
         Signal-to-noise ratio (flux / mean of flux_err tuple).
+    flux_err_cont : float or None
+        1σ flux uncertainty for a line of *assumed* width at this
+        position, measured from the local continuum noise.  This is
+        what :meth:`upper_limit` quotes; see :mod:`jwspecfit.limits`.
+        For a weak line the posterior is prior-dominated, so its width
+        is no more usable than a least-squares fit's.
+    sigma_assumed_A : float or None
+        The assumed Gaussian σ (Angstrom) behind ``flux_err_cont``.
+    ul_method : str or None
+        ``"matched_filter"`` or ``"matched_filter_analytic"``.
     """
 
     name: str
@@ -88,6 +98,30 @@ class MCMCLineResult:
     snr: float
     ew_err: tuple[float, float] | None = None
     ew_posterior: np.ndarray | None = None
+    flux_err_cont: float | None = None
+    sigma_assumed_A: float | None = None
+    ul_method: str | None = None
+
+    def upper_limit(self, n_sigma: float = 3.0) -> float:
+        """Return the n-sigma flux upper limit.
+
+        Uses the local continuum noise filtered through a line of
+        assumed width, falling back to the mean of the posterior
+        credible interval only when that could not be measured.
+
+        Parameters
+        ----------
+        n_sigma : float
+            Number of sigma for the limit (default 3).
+
+        Returns
+        -------
+        float
+            Integrated flux upper limit, in f_lam × Angstrom.
+        """
+        if self.flux_err_cont is not None and self.flux_err_cont > 0:
+            return n_sigma * self.flux_err_cont
+        return n_sigma * 0.5 * (self.flux_err[0] + self.flux_err[1])
 
 
 @dataclass
@@ -188,6 +222,9 @@ class MCMCResult:
                 snr_int_cont=0.0,
                 snr_peak_err=0.0,
                 snr_peak_cont=0.0,
+                flux_err_cont=mlr.flux_err_cont,
+                sigma_assumed_A=mlr.sigma_assumed_A,
+                ul_method=mlr.ul_method,
             )
 
         return FitResult(
@@ -266,14 +303,17 @@ class MCMCResult:
         self,
         line_name: str,
         n_sigma: float = 3.0,
+        sigma_v_kms: float | None = None,
     ) -> float | None:
-        """Compute a noise-based flux upper limit for a line.
+        """Noise-based flux upper limit for a line.
 
-        Uses the local RMS of the continuum-and-model-subtracted
-        residuals near the line, multiplied by the line width and
-        *n_sigma*.  This is the standard approach for non-detections
-        and is independent of the posterior (which may be prior-
-        dominated for weak lines).
+        The line is assumed to have the instrumental width at its
+        expected position broadened by the galaxy's intrinsic velocity
+        width, measured from the detected lines; that profile is slid
+        across the line-free residuals and the scatter of the fluxes it
+        recovers is the 1σ uncertainty.  Independent of the posterior,
+        which is prior-dominated for weak lines — in both its flux and
+        its width.
 
         Parameters
         ----------
@@ -281,47 +321,57 @@ class MCMCResult:
             Line name.
         n_sigma : float
             Number of sigma for the upper limit (default 3).
+        sigma_v_kms : float, optional
+            Override the intrinsic velocity width (km/s).  When
+            ``None`` the value cached at fit time is used.
 
         Returns
         -------
         float or None
             Integrated flux upper limit in f_lam units, or ``None``
             if there are insufficient pixels near the line.
+
+        See Also
+        --------
+        jwspecfit.limits : How the assumed width and the noise are set.
         """
         if line_name not in self.lines:
             raise KeyError(f"Line '{line_name}' not found in result.")
 
         lr = self.lines[line_name]
-        spec = self.spectrum
+        if sigma_v_kms is None:
+            if lr.flux_err_cont is None:
+                return None
+            return n_sigma * lr.flux_err_cont
 
-        # Residuals in f_lam: data - continuum - model.
         from jwspecfit.io import _ujy_to_flam
-        data_flam = _ujy_to_flam(spec.flux_ujy, spec.wave_um)
-        cont_flam = _ujy_to_flam(self.continuum, spec.wave_um)
-        model_flam = _ujy_to_flam(self.model_flux, spec.wave_um)
-        resid = data_flam - cont_flam - model_flam
-        valid = np.isfinite(resid)
+        from jwspecfit.limits import (
+            assumed_sigma_A,
+            flux_upper_limit,
+            resolution_of,
+        )
 
-        wave_A = spec.wave_A
-        lam_obs = lr.centroid_A
-        sig_line = lr.sigma_A
-
-        # Window: ±5σ around line, excluding central ±2σ.
-        near = np.abs(wave_A - lam_obs)
-        window = valid & (near < 5.0 * sig_line) & (near > 2.0 * sig_line)
-        if int(np.sum(window)) < 3:
-            window = valid & (near < 10.0 * sig_line)
-        if int(np.sum(window)) < 3:
-            return None
-
-        rms = float(np.sqrt(np.nanmean(resid[window] ** 2)))
-        return n_sigma * rms * sig_line * _SQRT2PI
+        spec = self.spectrum
+        resid = (
+            _ujy_to_flam(spec.flux_ujy, spec.wave_um)
+            - _ujy_to_flam(self.continuum, spec.wave_um)
+            - _ujy_to_flam(self.model_flux, spec.wave_um)
+        )
+        grating, R = resolution_of(spec)
+        _z = getattr(spec, "z", None)
+        lam_obs = lr.rest_wave_A * (1.0 + _z) if _z is not None else lr.centroid_A
+        sig_A = assumed_sigma_A(lam_obs, sigma_v_kms, grating=grating, R=R)
+        return flux_upper_limit(
+            spec.wave_A, resid, np.isfinite(resid), lam_obs, sig_A,
+            n_sigma=n_sigma,
+        )
 
     def flux_upper_limits(
         self,
         line_names: list[str] | None = None,
         n_sigma: float = 3.0,
         snr_threshold: float = 3.0,
+        sigma_v_kms: float | None = None,
     ) -> dict[str, float]:
         """Compute noise-based upper limits for low-SNR lines.
 
@@ -334,6 +384,8 @@ class MCMCResult:
         snr_threshold : float
             Only compute upper limits for lines with SNR below this
             (default 3.0).  Lines above this threshold are detections.
+        sigma_v_kms : float, optional
+            Override the assumed intrinsic velocity width (km/s).
 
         Returns
         -------
@@ -348,7 +400,9 @@ class MCMCResult:
                 continue
             if self.lines[name].snr >= snr_threshold:
                 continue
-            ul = self.flux_upper_limit(name, n_sigma=n_sigma)
+            ul = self.flux_upper_limit(
+                name, n_sigma=n_sigma, sigma_v_kms=sigma_v_kms,
+            )
             if ul is not None:
                 uls[name] = ul
         return uls
@@ -546,16 +600,22 @@ class MCMCBroadFitResult:
         """
         return self.mcmc_result.doublet_snr(line_a, line_b)
 
-    def flux_upper_limit(self, line_name: str, n_sigma: float = 3.0) -> float | None:
+    def flux_upper_limit(
+        self, line_name: str, n_sigma: float = 3.0,
+        sigma_v_kms: float | None = None,
+    ) -> float | None:
         """Noise-based flux upper limit for a line.
 
         Delegates to :meth:`MCMCResult.flux_upper_limit`.
         """
-        return self.mcmc_result.flux_upper_limit(line_name, n_sigma=n_sigma)
+        return self.mcmc_result.flux_upper_limit(
+            line_name, n_sigma=n_sigma, sigma_v_kms=sigma_v_kms,
+        )
 
     def flux_upper_limits(
         self, line_names: list[str] | None = None,
         n_sigma: float = 3.0, snr_threshold: float = 3.0,
+        sigma_v_kms: float | None = None,
     ) -> dict[str, float]:
         """Noise-based upper limits for low-SNR lines.
 
@@ -563,6 +623,7 @@ class MCMCBroadFitResult:
         """
         return self.mcmc_result.flux_upper_limits(
             line_names=line_names, n_sigma=n_sigma, snr_threshold=snr_threshold,
+            sigma_v_kms=sigma_v_kms,
         )
 
     def flux_ratio_posterior(self, line_a: str, line_b: str) -> np.ndarray:

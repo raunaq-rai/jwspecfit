@@ -539,6 +539,9 @@ def save_result(result: "FitResult", path: str | Path) -> None:
             "snr_int_cont": lr.snr_int_cont,
             "snr_peak_err": lr.snr_peak_err,
             "snr_peak_cont": lr.snr_peak_cont,
+            "flux_err_cont": lr.flux_err_cont,
+            "sigma_assumed_A": lr.sigma_assumed_A,
+            "ul_method": lr.ul_method,
         }
 
     np.savez_compressed(
@@ -610,6 +613,9 @@ def load_result(path: str | Path) -> "FitResult":
             snr_int_cont=ld.get("snr_int_cont", 0.0),
             snr_peak_err=ld.get("snr_peak_err", 0.0),
             snr_peak_cont=ld.get("snr_peak_cont", 0.0),
+            flux_err_cont=ld.get("flux_err_cont"),
+            sigma_assumed_A=ld.get("sigma_assumed_A"),
+            ul_method=ld.get("ul_method"),
         )
 
     line_names = list(data["line_names"])

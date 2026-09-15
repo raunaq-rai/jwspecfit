@@ -81,12 +81,48 @@ Each `LineResult` contains:
 | `centroid_A` | Observed centroid wavelength (Å)                    |
 | `sigma_A`    | Gaussian sigma (Å, incl. instrumental broadening)   |
 
-Upper limits for undetected lines:
+### Upper limits for undetected lines
+
+A line that is not detected has no usable fitted flux *and no usable
+fitted width* — the optimiser lands wherever the noise and the bounds
+push it.  Limits are therefore built from the data instead:
+
+1. The line is **assumed** to have the instrumental width at its
+   expected position, broadened by the galaxy's intrinsic velocity
+   width measured from the lines that *are* detected.
+2. That profile is slid across the line-free residuals either side of
+   the line, and the scatter of the fluxes it recovers is the 1σ flux
+   uncertainty.
 
 ```python
-ul = result.flux_upper_limit("OIII_4363", n_sigma=3.0)
+ul  = result.flux_upper_limit("OIII_4363", n_sigma=3.0)
 uls = result.flux_upper_limits(n_sigma=3.0)
+
+# Or straight off the line, which is the same number:
+lr = result.lines["OIII_4363"]
+lr.upper_limit(3.0)     # 3 x lr.flux_err_cont
+lr.sigma_assumed_A      # the width it assumed, in Angstrom
+lr.ul_method            # "matched_filter" or "matched_filter_analytic"
 ```
+
+Step 2 is an empirical matched filter.  For white noise it reduces to
+`rms x sqrt(2 sqrt(pi) sigma dlam)`, which is what "integrate the error
+spectrum in quadrature over the line profile" evaluates to.  Measuring
+the scatter rather than evaluating the formula matters because NIRSpec's
+1D pixels are correlated by the 2D extraction and resampling: on a PRISM
+spectrum the measured noise runs ~1.7x the white-noise value, so the
+closed form would be optimistic by that factor.
+
+Override the assumed velocity width when you have a better one — for
+instance if the galaxy's broad component has been fitted separately:
+
+```python
+ul = result.flux_upper_limit("OIII_4363", sigma_v_kms=80.0)
+```
+
+A measured width above 500 km/s is warned about but **not** capped:
+narrowing the assumed profile would make every limit tighter, which is
+the one direction an upper limit must not be wrong in.
 
 ## Broad Balmer components
 

@@ -4,6 +4,47 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### Upper limits are built from an assumed width and the local noise
+
+- **`LineResult.upper_limit()` no longer returns `3 × flux_err`.** A line
+  that is not detected has no meaningful fitted flux, so quoting three
+  times its bootstrap error reported the degeneracies of the fit rather
+  than the sensitivity of the spectrum. It now returns `n_sigma ×
+  flux_err_cont`, measured from the local continuum noise. The old
+  behaviour survives only as a fallback for hand-built `LineResult`s.
+- **`FitResult.flux_upper_limit()` and `MCMCResult.flux_upper_limit()` no
+  longer use the fitted width either.** They did measure the local
+  residual RMS, but multiplied it by `lr.sigma_A` — the fitted σ of the
+  undetected line, which is as unconstrained as its flux. On a synthetic
+  non-detection the optimiser put [O III] 4363 at σ = 4.3 Å against an
+  instrumental 13.0 Å, so the limit came out a factor of three too small.
+- **The assumed width** is `σ² = σ_inst(λ)² + (σ_v/c × λ_obs)²`, with σ_v
+  the intrinsic velocity width measured from the lines that *are*
+  detected — so an undetected line inherits the width of the galaxy's
+  real ones. Override with `sigma_v_kms=`. A measured width above
+  500 km/s is warned about, never capped: narrowing the assumption
+  tightens every limit, the one direction an upper limit must not err in.
+- **The noise is measured, not evaluated.** The assumed profile is slid
+  across the line-free residuals either side of the line and the scatter
+  of the fluxes it recovers is the 1σ uncertainty. For white noise this
+  reduces to `rms × √(2√π σ Δλ)` — the textbook amplitude error, and what
+  "integrate the error spectrum over the line profile" evaluates to. The
+  previous `rms × σ × √(2π)` assumed the noise was fully coherent across
+  the line, ignoring pixel-to-pixel averaging.
+- **Why measure it:** NIRSpec's 1D pixels are correlated by the 2D
+  extraction and resampling, which no closed form captures. On the PRISM
+  spectra tested the measured noise runs ~1.7× the white-noise value, on
+  the medium gratings ~1.0×. Net effect on the limits themselves: ~0.7×
+  the old values on the gratings, unchanged to within 5% on PRISM.
+- New module `jwspecfit.limits`. `LineResult` and `MCMCLineResult` gain
+  `flux_err_cont`, `sigma_assumed_A` and `ul_method`, all serialised and
+  all optional, so old `.npz` files still load.
+- `jwspecabund` reuses the limits cached by the fit rather than
+  recomputing them with the instrumental width alone, so the three
+  packages now agree on what a non-detection means.
+
 ## 1.1.9 — 2026-09-04
 
 ### `jwspecabund` — flag a low-ionisation density that cannot be measured

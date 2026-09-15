@@ -21,6 +21,12 @@ from .fitter import fit_lines as _fit_lines_narrow
 from .io import (
     Spectrum, export_lines_txt, load_result, read_dict, read_fits, read_npz, save_result,
 )
+from .limits import (
+    assumed_sigma_A,
+    flux_upper_limit,
+    intrinsic_sigma_kms,
+    matched_filter_flux_error,
+)
 from .lines import REST_LINES_A, get_line_list, observable_lines, show_lines
 from .lyman_alpha import igm_transmission, lya_model
 from .plotting import (
@@ -44,10 +50,14 @@ __all__ = [
     "R_prism",
     "RedshiftResult",
     "Spectrum",
+    "assumed_sigma_A",
     "compute_D_Lya",
     "fit_NHI",
     "fit_lines",
     "fit_redshift",
+    "flux_upper_limit",
+    "intrinsic_sigma_kms",
+    "matched_filter_flux_error",
     "tau_DLA",
     "tau_IGM_DW",
     "fit_with_broad",

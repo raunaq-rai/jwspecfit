@@ -313,18 +313,31 @@ MC iterations, preventing tier switching across iterations.
 When an ion is not detected (ionic abundance = 0 after SNR gating), a 3σ
 upper limit is computed from the local continuum noise:
 
-1. **Flux upper limit (continuum RMS method):**
-   For each non-detected line, the RMS of the fit residuals is measured in
-   a window around the expected line position (±5σ, excluding the central
-   ±2σ).  The flux upper limit is:
+1. **Flux upper limit (continuum noise method):**
+   The line is assumed to have width
+   `σ² = σ_inst(λ)² + (σ_v/c × λ_obs)²`, where σ_inst = λ / (R × 2.3548)
+   is the instrumental Gaussian width and σ_v is the intrinsic velocity
+   width measured from the *detected* lines of the same fit.  That
+   profile is then slid across the line-free residuals either side of the
+   expected position (an annulus of 4–12σ), and the scatter of the fluxes
+   it recovers is taken as the 1σ flux uncertainty:
 
    ```
-   flux_ul = 3 × RMS_continuum × σ_inst × √(2π)
+   flux_ul = 3 × RMS[ Σ G(λ - λᵢ) r(λ) / Σ G(λ - λᵢ)² ]_{λᵢ ∈ annulus}
    ```
 
-   where σ_inst = λ / (R × 2.3548) is the instrumental Gaussian width.
-   This is independent of the bootstrap/MCMC error estimation and asks
-   "given the noise here, what is the brightest line I could have missed?"
+   This is an empirical matched filter, implemented in `jwspecfit.limits`.
+   It is independent of the bootstrap/MCMC error estimation — asking
+   "given the noise here, what is the brightest line I could have
+   missed?" — and it uses neither the fitted flux nor the fitted width of
+   the undetected line, both of which are unconstrained.
+
+   For white noise it reduces to `rms × √(2√π σ Δλ)`.  The scatter is
+   measured rather than evaluated because NIRSpec's 1D pixels are
+   correlated by the 2D extraction and resampling, which the white-noise
+   form does not capture: on PRISM the measured value runs ~1.7× higher.
+
+   Limits already cached on the fit result by `fit_lines()` are reused.
 
    For doublets, the individual member limits are added in quadrature
    (independent noise): `flux_ul_total = √(Σ flux_ul_i²)`.

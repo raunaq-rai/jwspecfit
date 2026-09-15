@@ -18,6 +18,7 @@ from jwspecfit.constraints import ConstraintSet
 from jwspecfit.continuum import fit_continuum
 from jwspecfit.fitter import _grating_bounds
 from jwspecfit.io import Spectrum, _flam_to_ujy, _ujy_to_flam
+from jwspecfit.limits import flux_noise_for_lines, resolution_of
 from jwspecfit.lines import REST_LINES_A, get_line_list, observable_lines
 from jwspecfit.models import asymmetric_gaussian, build_model, pixel_weight
 from jwspecfit.resolution import resolve_R, sigma_inst_A
@@ -931,6 +932,28 @@ def _fit_lines_mcmc(
             float(np.median(alpha_samples)),
             flux_med, flux_hi, flux_lo,
         )
+
+    # ------------------------------------------------------------------
+    # 10c. Assumed-width continuum-noise limits for non-detections
+    # ------------------------------------------------------------------
+    # The posterior width of a weak line is prior-dominated, so the
+    # limit is built from an assumed profile and the local noise
+    # instead; see jwspecfit.limits.
+    _resid_flam = flam - model_flam_median
+    _noises, _sigma_v = flux_noise_for_lines(
+        line_results, spec.wave_A, _resid_flam, valid, z,
+        *resolution_of(spec),
+    )
+    for _name, _noise in _noises.items():
+        _lr = line_results[_name]
+        _lr.flux_err_cont = _noise.sigma_flux
+        _lr.sigma_assumed_A = _noise.sigma_A
+        _lr.ul_method = _noise.method
+    logger.info(
+        "Continuum-noise flux limits for %d/%d lines "
+        "(assumed σ_v = %.0f km/s).",
+        len(_noises), len(line_results), _sigma_v,
+    )
 
     # ------------------------------------------------------------------
     # 11. Convergence diagnostics (emcee + NUTS; nautilus has no chains)

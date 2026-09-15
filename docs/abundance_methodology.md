@@ -1065,33 +1065,73 @@ and convert this to an ionic abundance upper limit.  This is essential
 for constraining N/O and C/O when UV lines (e.g. N III], N IV], C IV)
 fall below the detection threshold.
 
-### 12.1 Continuum-RMS flux upper limits
+### 12.1 Continuum-noise flux upper limits
 
-The flux upper limit is derived from the noise in the continuum around
-the expected line position, independent of the emission-line fit:
+**Source:** `jwspecfit.limits`
+
+The flux upper limit is derived from the noise around the expected line
+position, independent of the emission-line fit.  An undetected line has
+no usable fitted flux *and no usable fitted width*, so both are assumed
+rather than read off the fit.
+
+**Assumed profile.** The line is taken to be a Gaussian of width
 
 ```
-F_ul = n_sigma × RMS_cont × sigma_inst × sqrt(2π)
+sigma^2 = sigma_inst(lambda_obs)^2 + (sigma_v / c x lambda_obs)^2
 ```
 
-where:
-
-- **RMS_cont:** root-mean-square of the fit residuals (data minus
-  model) in a window of ±5σ around the expected line centre, excluding
-  the central ±2σ where the line would sit.  If fewer than 3 pixels
-  fall in this annulus, the window is expanded to ±10σ with ±3σ
-  exclusion.
 - **sigma_inst:** the instrumental line width (in Angstrom), computed
   from the grating resolving power R as σ = λ_obs / (2.355 × R).
   When grating metadata is unavailable (e.g. spectra loaded from npz
   files), R is estimated from the pixel sampling via
   `R_from_pixels(wave_um)`.
+- **sigma_v:** the intrinsic velocity width of the galaxy, taken as the
+  median of `c x sqrt(sigma_fit^2 - sigma_inst^2) / lambda_obs` over
+  every line detected at SNR ≥ 5 (broad components and Lyα excluded).
+  Lines fitted narrower than the instrument contribute zero rather than
+  an imaginary width.  With fewer than two such lines the instrumental
+  width alone is used — with nothing detected there is no evidence for
+  anything broader.  A measured width above 500 km/s is warned about but
+  never capped: narrowing the assumed profile would tighten every limit,
+  which is the one direction an upper limit must not err in.
+
+**Measured noise.** That profile, normalised to unit area, is placed at
+each pixel λᵢ in an annulus 4–12σ either side of the expected position
+and fitted for its amplitude against the residuals r:
+
+```
+A(lambda_i) = sum_j G(lambda_j - lambda_i) r_j / sum_j G(lambda_j - lambda_i)^2
+F_ul        = n_sigma x RMS[ A(lambda_i) ]
+```
+
+The residuals already have the continuum and every fitted line
+subtracted, so the recovered amplitudes scatter about zero and their RMS
+is the 1σ flux uncertainty.  When fewer than 8 positions are usable
+(a spectrum edge, a masked stretch), the white-noise equivalent
+`RMS_cont / sqrt(sum_j G_j^2)` is used instead and recorded as
+`matched_filter_analytic`.
+
 - **n_sigma:** detection threshold, default 3.
+
+For white noise this reduces exactly to
+`RMS_cont x sqrt(2 sqrt(pi) sigma dlambda)`, the textbook 1σ error on the
+amplitude of a known-shape Gaussian, which is also what "integrate the
+error spectrum in quadrature over the line profile" evaluates to.  The
+scatter is measured rather than evaluated because NIRSpec's 1D pixels are
+correlated by the 2D extraction and resampling: on the PRISM spectra
+tested the measured noise runs ~1.7× the white-noise value, on the
+medium gratings ~1.0×.
 
 This method is preferred over using the fit error because it measures
 actual noise at the line position rather than relying on bootstrap or
 MCMC error estimates, which can be inflated by unconstrained parameters
 (particularly for faint UV secondary doublet members).
+
+Earlier versions used `n_sigma × RMS_cont × sigma_inst × sqrt(2π)`, which
+assumes the noise is fully coherent across the line and takes no account
+of pixel-to-pixel averaging.  On the medium-grating spectra tested the
+new limits are ~0.7× the old ones; on PRISM they are unchanged to within
+5%, the correlation inflation cancelling the coherence over-estimate.
 
 ### 12.2 Dust correction of upper limits
 

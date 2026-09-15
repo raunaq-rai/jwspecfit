@@ -90,6 +90,9 @@ def save_mcmc_result(
             "ew_A": lr.ew_A,
             "ew_err": list(lr.ew_err) if lr.ew_err is not None else None,
             "snr": lr.snr,
+            "flux_err_cont": lr.flux_err_cont,
+            "sigma_assumed_A": lr.sigma_assumed_A,
+            "ul_method": lr.ul_method,
         }
         flux_posteriors[f"flux_post_{name}"] = lr.flux_posterior
         if lr.ew_posterior is not None:
@@ -207,6 +210,9 @@ def load_mcmc_result(
             ew_err=(tuple(ld["ew_err"]) if ld.get("ew_err") is not None else None),
             ew_posterior=(data[ew_post_key] if ew_post_key in data else None),
             snr=ld["snr"],
+            flux_err_cont=ld.get("flux_err_cont"),
+            sigma_assumed_A=ld.get("sigma_assumed_A"),
+            ul_method=ld.get("ul_method"),
         )
 
     # --- Constraints ---

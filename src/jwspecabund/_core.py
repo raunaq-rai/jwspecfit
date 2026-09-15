@@ -224,15 +224,19 @@ def _compute_continuum_rms_limits(
     n_sigma: float = 3.0,
     **dust_kwargs,
 ) -> dict[str, float]:
-    """Compute flux upper limits from continuum RMS for all fitted lines.
+    """Compute flux upper limits from the local continuum noise.
 
-    For each line, measures the RMS of the fit residuals in a window
-    around the expected line position, then converts to an integrated
-    flux upper limit assuming a Gaussian profile with width set by the
-    instrumental resolution.
+    Each line is assumed to have the instrumental width at its expected
+    position broadened by the galaxy's intrinsic velocity width; that
+    profile is slid across the line-free residuals either side of the
+    line and the scatter of the fluxes it recovers is the 1σ flux
+    uncertainty.  Neither the fitted flux nor the fitted width of an
+    undetected line enters, both being unconstrained.
 
-    The limits are returned in dust-corrected units if ``Av`` is given,
-    matching the dust-corrected fluxes used downstream.
+    Limits cached on the fit result by :func:`jwspecfit.fit_lines` or
+    :func:`jwspecmcmc.fit_lines` are reused; anything missing is
+    measured here.  The limits are returned in dust-corrected units if
+    ``Av`` is given, matching the dust-corrected fluxes used downstream.
 
     Parameters
     ----------
@@ -251,10 +255,19 @@ def _compute_continuum_rms_limits(
     -------
     dict[str, float]
         ``{line_name: flux_upper_limit}`` in dust-corrected f_lam units.
+
+    See Also
+    --------
+    jwspecfit.limits : How the assumed width and the noise are set.
     """
     from jwspecfit.io import _ujy_to_flam
+    from jwspecfit.limits import (
+        SIGMA_V_FALLBACK_KMS,
+        flux_noise_for_lines,
+        intrinsic_sigma_kms,
+        resolution_of,
+    )
     from jwspecfit.lines import REST_LINES_A
-    from jwspecfit.resolution import R_from_pixels, sigma_inst_A
 
     if not hasattr(result, "spectrum") or result.spectrum is None:
         return {}
@@ -262,51 +275,59 @@ def _compute_continuum_rms_limits(
     if not hasattr(result, "residuals") or result.residuals is None:
         return {}
 
-    wave_A = spec.wave_A
-    # Residuals are in µJy; convert to f_lam.
-    resid_flam = _ujy_to_flam(result.residuals, spec.wave_um)
-    valid = np.isfinite(resid_flam)
+    lines = getattr(result, "lines", None) or {}
 
-    # Instrumental sigma at each wavelength.
-    grating = getattr(spec, "grating", None)
-    R = getattr(spec, "R", None)
-    if grating is None and R is None:
-        R = R_from_pixels(spec.wave_um)
-    sig_inst = sigma_inst_A(spec.wave_um, grating=grating, R=R)
+    # Reuse whatever the fit already measured; fill the gaps in one pass.
+    sigma_flux: dict[str, float] = {
+        name: lr.flux_err_cont
+        for name, lr in lines.items()
+        if getattr(lr, "flux_err_cont", None)
+    }
+    missing = [
+        n for n in result.line_names
+        if n not in sigma_flux and "_BROAD" not in n and n in REST_LINES_A
+    ]
+    if missing:
+        resid_flam = _ujy_to_flam(result.residuals, spec.wave_um)
+        grating, R = resolution_of(spec)
+        # Measure the velocity width from *every* line, not just the ones
+        # being filled in: those are the undetected ones by construction,
+        # and they carry no width information at all.
+        sigma_v = intrinsic_sigma_kms(lines, grating=grating, R=R)
+        noises, _ = flux_noise_for_lines(
+            {n: lines[n] for n in missing if n in lines},
+            spec.wave_A, resid_flam, np.isfinite(resid_flam), z,
+            grating=grating, R=R,
+            sigma_v_kms=SIGMA_V_FALLBACK_KMS if sigma_v is None else sigma_v,
+        )
+        sigma_flux.update({n: fn.sigma_flux for n, fn in noises.items()})
 
     limits: dict[str, float] = {}
     for name in result.line_names:
         if "_BROAD" in name:
             continue
         lam_rest = REST_LINES_A.get(name)
-        if lam_rest is None:
+        if lam_rest is None or name not in sigma_flux:
             continue
 
-        # Use instrumental sigma at the observed wavelength.
-        lam_obs = lam_rest * (1.0 + z)
-        idx = np.argmin(np.abs(wave_A - lam_obs))
-        sig_A = float(sig_inst[idx])
+        flux_ul = n_sigma * sigma_flux[name]
+        if flux_ul <= 0:
+            continue
 
-        flux_ul = _continuum_flux_upper_limit(
-            wave_A, resid_flam, valid, lam_rest, z, sig_A,
-            n_sigma=n_sigma,
-        )
-        if flux_ul is not None and flux_ul > 0:
-            # Apply dust correction to match the corrected flux scale.
-            if Av is not None and Av > 0:
-                from .dust import cardelli_extinction, salim_attenuation
+        # Apply dust correction to match the corrected flux scale.
+        if Av is not None and Av > 0:
+            from .dust import cardelli_extinction, salim_attenuation
 
-                wave_arr = np.array([lam_rest])
-                if dust_law == "salim":
-                    A_lam = salim_attenuation(wave_arr, Av, **dust_kwargs)[0]
-                else:
-                    A_lam = cardelli_extinction(wave_arr, Av)[0]
-                flux_ul *= 10.0 ** (0.4 * A_lam)
+            wave_arr = np.array([lam_rest])
+            if dust_law == "salim":
+                A_lam = salim_attenuation(wave_arr, Av, **dust_kwargs)[0]
+            else:
+                A_lam = cardelli_extinction(wave_arr, Av)[0]
+            flux_ul *= 10.0 ** (0.4 * A_lam)
 
-            limits[name] = flux_ul
+        limits[name] = flux_ul
 
     return limits
-
 
 def _apply_dust_correction(
     fluxes: dict[str, float],
@@ -1641,59 +1662,6 @@ def _gate_nitrogen_ions(
             ionic[ion_key] = 0.0
     return ionic
 
-
-def _continuum_flux_upper_limit(
-    wave_A: np.ndarray,
-    residuals_flam: np.ndarray,
-    valid: np.ndarray,
-    line_wave_rest_A: float,
-    z: float,
-    sigma_line_A: float,
-    n_sigma: float = 3.0,
-) -> float | None:
-    """Compute a flux upper limit from the local continuum RMS.
-
-    Parameters
-    ----------
-    wave_A : np.ndarray
-        Observed wavelength array (Angstrom).
-    residuals_flam : np.ndarray
-        Continuum-and-model-subtracted residuals in f_lam units.
-    valid : np.ndarray
-        Boolean mask of valid pixels.
-    line_wave_rest_A : float
-        Rest-frame wavelength of the line (Angstrom).
-    z : float
-        Source redshift.
-    sigma_line_A : float
-        Expected Gaussian sigma of the line in Angstrom (from
-        instrumental resolution or a detected line).
-    n_sigma : float
-        Number of sigma for the upper limit (default 3).
-
-    Returns
-    -------
-    float or None
-        Integrated flux upper limit (f_lam × Angstrom), or None if
-        there are insufficient pixels.
-    """
-    lam_obs = line_wave_rest_A * (1.0 + z)
-    # Window of ±5σ around the expected line position, excluding the
-    # central ±2σ where the line itself would sit.
-    near = np.abs(wave_A - lam_obs)
-    window = valid & (near < 5.0 * sigma_line_A) & (near > 2.0 * sigma_line_A)
-    n_pix = int(np.sum(window))
-    if n_pix < 3:
-        # Fall back to wider window without central exclusion.
-        window = valid & (near < 10.0 * sigma_line_A)
-        n_pix = int(np.sum(window))
-    if n_pix < 3:
-        return None
-
-    rms = float(np.sqrt(np.nanmean(residuals_flam[window] ** 2)))
-    # Flux upper limit: n_sigma × RMS × line width (Gaussian integral).
-    _SQRT2PI = np.sqrt(2.0 * np.pi)
-    return n_sigma * rms * sigma_line_A * _SQRT2PI
 
 
 def _compute_ionic_upper_limits(

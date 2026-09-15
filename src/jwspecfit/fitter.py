@@ -21,6 +21,7 @@ from scipy.optimize import least_squares
 from .constraints import ConstraintSet
 from .continuum import fit_continuum
 from .io import Spectrum
+from .limits import flux_noise_for_lines, resolution_of
 from .lines import REST_LINES_A, get_line_list, observable_lines
 from .models import asymmetric_gaussian, build_model, gaussian_binned, pixel_weight
 from .resolution import resolve_R, sigma_inst_A
@@ -60,6 +61,22 @@ class LineResult:
         Peak SNR: model peak / uncertainty array at peak pixel.
     snr_peak_cont : float
         Peak SNR: model peak / local continuum RMS.
+    flux_err_cont : float or None
+        1σ flux uncertainty for a line of *assumed* width at this
+        position, measured from the local continuum noise by
+        :func:`jwspecfit.limits.matched_filter_flux_error`.  This, not
+        ``flux_err``, is what :meth:`upper_limit` quotes: for a
+        non-detection the fitted flux and width are unconstrained, so
+        their bootstrap error describes the fit rather than the
+        spectrum.  ``None`` when there were too few usable pixels.
+    sigma_assumed_A : float or None
+        The assumed Gaussian σ (Angstrom) behind ``flux_err_cont`` —
+        the instrumental width broadened by the galaxy's intrinsic
+        velocity width, measured from the detected lines.
+    ul_method : str or None
+        How ``flux_err_cont`` was obtained: ``"matched_filter"`` when
+        measured from the scatter of recovered fluxes, or
+        ``"matched_filter_analytic"`` for the white-noise fallback.
     """
 
     name: str
@@ -74,9 +91,34 @@ class LineResult:
     snr_int_cont: float
     snr_peak_err: float
     snr_peak_cont: float
+    flux_err_cont: float | None = None
+    sigma_assumed_A: float | None = None
+    ul_method: str | None = None
 
     def upper_limit(self, n_sigma: float = 3.0) -> float:
-        """Return n-sigma flux upper limit."""
+        """Return the n-sigma flux upper limit.
+
+        Uses the local continuum noise filtered through a line of
+        assumed width (``flux_err_cont``).  Falls back to the bootstrap
+        flux error only when that could not be measured — too few usable
+        pixels around the line, or a ``LineResult`` built by hand.
+
+        Parameters
+        ----------
+        n_sigma : float
+            Number of sigma for the limit (default 3).
+
+        Returns
+        -------
+        float
+            Integrated flux upper limit, in the flux units of the fit.
+        """
+        if self.flux_err_cont is not None and self.flux_err_cont > 0:
+            return n_sigma * self.flux_err_cont
+        logger.debug(
+            "%s: no continuum-noise limit available; falling back to the "
+            "bootstrap flux error.", self.name,
+        )
         return n_sigma * self.flux_err
 
     @property
@@ -129,11 +171,17 @@ class FitResult:
         self,
         line_name: str,
         n_sigma: float = 3.0,
+        sigma_v_kms: float | None = None,
     ) -> float | None:
-        """Compute a noise-based flux upper limit for a line.
+        """Noise-based flux upper limit for a line.
 
-        Uses the local RMS of the residuals near the line position,
-        multiplied by *n_sigma* and the line width.
+        The line is assumed to have the instrumental width at its
+        expected position broadened by the galaxy's intrinsic velocity
+        width; that profile is then slid across the line-free residuals
+        either side of the line and the scatter of the fluxes it
+        recovers is the 1σ uncertainty.  Neither the fitted flux nor the
+        fitted width enters, both being unconstrained for a line that is
+        not detected.
 
         Parameters
         ----------
@@ -141,43 +189,50 @@ class FitResult:
             Line name.
         n_sigma : float
             Number of sigma for the upper limit (default 3).
+        sigma_v_kms : float, optional
+            Override the intrinsic velocity width (km/s).  When
+            ``None`` the value cached at fit time is used, which was
+            measured from the detected lines.
 
         Returns
         -------
         float or None
             Integrated flux upper limit in f_lam units, or ``None``
             if there are insufficient pixels near the line.
+
+        See Also
+        --------
+        jwspecfit.limits : How the assumed width and the noise are set.
         """
         if line_name not in self.lines:
             raise KeyError(f"Line '{line_name}' not found in result.")
 
         lr = self.lines[line_name]
-        spec = self.spectrum
-        _SQRT2PI = np.sqrt(2.0 * np.pi)
+        if sigma_v_kms is None:
+            if lr.flux_err_cont is None:
+                return None
+            return n_sigma * lr.flux_err_cont
 
         from .io import _ujy_to_flam
+        from .limits import assumed_sigma_A, flux_upper_limit, resolution_of
+
+        spec = self.spectrum
         resid_flam = _ujy_to_flam(self.residuals, spec.wave_um)
-        valid = np.isfinite(resid_flam)
-
-        wave_A = spec.wave_A
-        lam_obs = lr.centroid_A
-        sig_line = lr.sigma_A
-
-        near = np.abs(wave_A - lam_obs)
-        window = valid & (near < 5.0 * sig_line) & (near > 2.0 * sig_line)
-        if int(np.sum(window)) < 3:
-            window = valid & (near < 10.0 * sig_line)
-        if int(np.sum(window)) < 3:
-            return None
-
-        rms = float(np.sqrt(np.nanmean(resid_flam[window] ** 2)))
-        return n_sigma * rms * sig_line * _SQRT2PI
+        grating, R = resolution_of(spec)
+        _z = getattr(spec, "z", None)
+        lam_obs = lr.rest_wave_A * (1.0 + _z) if _z is not None else lr.centroid_A
+        sig_A = assumed_sigma_A(lam_obs, sigma_v_kms, grating=grating, R=R)
+        return flux_upper_limit(
+            spec.wave_A, resid_flam, np.isfinite(resid_flam),
+            lam_obs, sig_A, n_sigma=n_sigma,
+        )
 
     def flux_upper_limits(
         self,
         line_names: list[str] | None = None,
         n_sigma: float = 3.0,
         snr_threshold: float = 3.0,
+        sigma_v_kms: float | None = None,
     ) -> dict[str, float]:
         """Compute noise-based upper limits for low-SNR lines.
 
@@ -190,6 +245,8 @@ class FitResult:
         snr_threshold : float
             Only compute upper limits for lines with SNR below this
             (default 3.0).
+        sigma_v_kms : float, optional
+            Override the assumed intrinsic velocity width (km/s).
 
         Returns
         -------
@@ -204,7 +261,9 @@ class FitResult:
                 continue
             if self.lines[name].snr_int_err >= snr_threshold:
                 continue
-            ul = self.flux_upper_limit(name, n_sigma=n_sigma)
+            ul = self.flux_upper_limit(
+                name, n_sigma=n_sigma, sigma_v_kms=sigma_v_kms,
+            )
             if ul is not None:
                 uls[name] = ul
         return uls
@@ -1038,6 +1097,25 @@ def fit_lines(
             "flux=%.3e",
             A_peak_lya, mu_lya, sig_lya, alpha_lya, flux_lya,
         )
+
+    # --- Assumed-width continuum-noise limits for non-detections ---
+    # Measured once for every line, detected or not, so that
+    # LineResult.upper_limit() never has to fall back on the bootstrap
+    # error of an unconstrained fit.
+    _noises, _sigma_v = flux_noise_for_lines(
+        line_results, spec.wave_A, resid_flam, valid, z,
+        *resolution_of(spec),
+    )
+    for _name, _noise in _noises.items():
+        _lr = line_results[_name]
+        _lr.flux_err_cont = _noise.sigma_flux
+        _lr.sigma_assumed_A = _noise.sigma_A
+        _lr.ul_method = _noise.method
+    logger.info(
+        "Continuum-noise flux limits for %d/%d lines "
+        "(assumed σ_v = %.0f km/s).",
+        len(_noises), len(line_results), _sigma_v,
+    )
 
     fit_result = FitResult(
         lines=line_results,
