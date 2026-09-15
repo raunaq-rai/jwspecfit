@@ -41,6 +41,13 @@ history on GitHub is the authoritative source.
 - New module `jwspecfit.limits`. `LineResult` and `MCMCLineResult` gain
   `flux_err_cont`, `sigma_assumed_A` and `ul_method`, all serialised and
   all optional, so old `.npz` files still load.
+- **Results saved before this change are measured on load.** They carry no
+  limits, so `upper_limit()` would have quietly fallen back to the
+  bootstrap error — the behaviour this replaces, and ~1.5× off in the
+  wrong direction. Everything needed (spectrum, model, continuum) is in
+  the file, so `load_result()` and `load_mcmc_result()` now measure the
+  limits rather than leave them absent. `jwspecfit.limits.backfill_flux_limits()`
+  does the same for a result you already hold in memory.
 - `jwspecabund` reuses the limits cached by the fit rather than
   recomputing them with the instrumental width alone, so the three
   packages now agree on what a non-detection means.

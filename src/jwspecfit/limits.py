@@ -412,7 +412,7 @@ def flux_noise_for_lines(
     wave_A: np.ndarray,
     residuals: np.ndarray,
     valid: np.ndarray,
-    z: float,
+    z: float | None,
     grating: str | None = None,
     R: float | Callable[[np.ndarray], np.ndarray] | None = None,
     sigma_v_kms: float | None = None,
@@ -439,8 +439,10 @@ def flux_noise_for_lines(
         Continuum- and model-subtracted residuals in f_lam units.
     valid : np.ndarray
         Boolean mask of usable pixels.
-    z : float
-        Source redshift, for the expected line positions.
+    z : float or None
+        Source redshift, for the expected line positions.  When
+        ``None`` the fitted centroid is used instead — second best, but
+        the only option when the spectrum carries no redshift.
     grating : str, optional
         Grating name.
     R : float or callable, optional
@@ -466,9 +468,10 @@ def flux_noise_for_lines(
     noises: dict[str, FluxNoise] = {}
     for name, lr in lines.items():
         lam_rest = float(getattr(lr, "rest_wave_A", 0.0))
-        lam_obs = lam_rest * (1.0 + z) if lam_rest > 0 else float(
-            getattr(lr, "centroid_A", 0.0)
-        )
+        if lam_rest > 0 and z is not None:
+            lam_obs = lam_rest * (1.0 + z)
+        else:
+            lam_obs = float(getattr(lr, "centroid_A", 0.0))
         if lam_obs <= 0:
             continue
         sig_A = assumed_sigma_A(lam_obs, sigma_v_used, grating=grating, R=R)
@@ -477,3 +480,83 @@ def flux_noise_for_lines(
             noises[name] = noise
 
     return noises, sigma_v_used
+
+
+def backfill_flux_limits(
+    result: Any,
+    sigma_v_kms: float | None = None,
+) -> int:
+    """Measure any continuum-noise limits a result is missing, in place.
+
+    Results saved before these fields existed carry no limits, so
+    :meth:`~jwspecfit.fitter.LineResult.upper_limit` would quietly fall
+    back to the bootstrap flux error — the very behaviour these limits
+    replace, and wrong by around 50% in the wrong direction.  Everything
+    needed to measure them properly (the spectrum, the model, the
+    continuum) is already in the file, so they are measured on load
+    rather than left absent.
+
+    Lines that already have a limit are left alone.
+
+    Parameters
+    ----------
+    result : FitResult or MCMCResult
+        Result to fill in.  Needs ``spectrum``, ``lines``, and either
+        ``residuals`` or both ``continuum`` and ``model_flux``.
+    sigma_v_kms : float, optional
+        Intrinsic velocity width to assume.  When ``None`` it is
+        measured from the detected lines.
+
+    Returns
+    -------
+    int
+        Number of lines filled in.
+    """
+    from .io import _ujy_to_flam
+
+    spec = getattr(result, "spectrum", None)
+    lines = getattr(result, "lines", None) or {}
+    if spec is None or not lines:
+        return 0
+
+    missing = {
+        name: lr for name, lr in lines.items()
+        if getattr(lr, "flux_err_cont", None) is None
+    }
+    if not missing:
+        return 0
+
+    resid_ujy = getattr(result, "residuals", None)
+    if resid_ujy is None:
+        cont = getattr(result, "continuum", None)
+        model = getattr(result, "model_flux", None)
+        if cont is None or model is None:
+            return 0
+        resid_ujy = spec.flux_ujy - cont - model
+
+    resid_flam = _ujy_to_flam(np.asarray(resid_ujy, dtype=float), spec.wave_um)
+    grating, R = resolution_of(spec)
+
+    # Measure the width from every line: the ones being filled in are
+    # the undetected ones, which carry no width information at all.
+    if sigma_v_kms is None:
+        measured = intrinsic_sigma_kms(lines, grating=grating, R=R)
+        sigma_v_kms = SIGMA_V_FALLBACK_KMS if measured is None else measured
+
+    noises, _ = flux_noise_for_lines(
+        missing, spec.wave_A, resid_flam, np.isfinite(resid_flam),
+        getattr(spec, "z", None), grating=grating, R=R,
+        sigma_v_kms=sigma_v_kms,
+    )
+    for name, noise in noises.items():
+        lr = lines[name]
+        lr.flux_err_cont = noise.sigma_flux
+        lr.sigma_assumed_A = noise.sigma_A
+        lr.ul_method = noise.method
+
+    if noises:
+        logger.info(
+            "Measured continuum-noise flux limits for %d line(s) that the "
+            "saved result predates.", len(noises),
+        )
+    return len(noises)

@@ -620,7 +620,7 @@ def load_result(path: str | Path) -> "FitResult":
 
     line_names = list(data["line_names"])
 
-    return FitResult(
+    result = FitResult(
         lines=lines,
         params=data["params"],
         model_flux=data["model_flux"],
@@ -631,6 +631,14 @@ def load_result(path: str | Path) -> "FitResult":
         line_names=line_names,
         success=bool(data["success"][0]),
     )
+
+    # Results saved before continuum-noise limits existed carry none, and
+    # upper_limit() would quietly fall back to the bootstrap flux error.
+    # The residuals are in the file, so measure them properly instead.
+    from .limits import backfill_flux_limits
+
+    backfill_flux_limits(result)
+    return result
 
 
 def export_lines_txt(result: "FitResult", path: str | Path, z: float | None = None) -> None:

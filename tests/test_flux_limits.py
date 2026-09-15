@@ -340,6 +340,67 @@ class TestFitIntegration:
             )
 
 
+class TestBackfill:
+    """Results saved before these fields existed must not go quiet."""
+
+    @staticmethod
+    def _strip(path_in, path_out):
+        """Rewrite a saved .npz without the limit fields, as old files are."""
+        import json
+
+        raw = dict(np.load(path_in, allow_pickle=False))
+        lines_data = json.loads(str(raw["lines_json"][0]))
+        for entry in lines_data.values():
+            for key in ("flux_err_cont", "sigma_assumed_A", "ul_method"):
+                entry.pop(key, None)
+        raw["lines_json"] = np.array([json.dumps(lines_data)])
+        np.savez_compressed(path_out, **raw)
+
+    @pytest.fixture
+    def legacy_result(self, synthetic_fit, tmp_path):
+        from jwspecfit.io import load_result, save_result
+
+        save_result(synthetic_fit, tmp_path / "new.npz")
+        self._strip(tmp_path / "new.npz", tmp_path / "old.npz")
+        return load_result(tmp_path / "old.npz")
+
+    def test_loading_an_old_file_measures_the_limits(
+        self, legacy_result, synthetic_fit,
+    ):
+        for name, lr in synthetic_fit.lines.items():
+            back = legacy_result.lines[name]
+            assert back.flux_err_cont is not None, name
+            assert back.upper_limit() == pytest.approx(
+                lr.upper_limit(), rel=1e-9, abs=0.0,
+            )
+
+    def test_old_file_no_longer_falls_back_to_the_bootstrap_error(
+        self, legacy_result,
+    ):
+        lr = legacy_result.lines["OIII_4363"]
+        assert abs(lr.upper_limit() - 3.0 * lr.flux_err) > 0.1 * lr.upper_limit()
+
+    def test_result_method_works_on_an_old_file(self, legacy_result):
+        assert legacy_result.flux_upper_limit("OIII_4363") is not None
+
+    def test_backfill_leaves_measured_lines_alone(self, synthetic_fit):
+        from jwspecfit.limits import backfill_flux_limits
+
+        before = {n: lr.flux_err_cont for n, lr in synthetic_fit.lines.items()}
+        assert backfill_flux_limits(synthetic_fit) == 0
+        for name, value in before.items():
+            assert synthetic_fit.lines[name].flux_err_cont == value
+
+    def test_backfill_without_a_spectrum_is_a_no_op(self):
+        from jwspecfit.limits import backfill_flux_limits
+
+        class _Bare:
+            spectrum = None
+            lines = {}
+
+        assert backfill_flux_limits(_Bare()) == 0
+
+
 class TestFluxNoiseForLines:
     """The per-fit driver."""
 

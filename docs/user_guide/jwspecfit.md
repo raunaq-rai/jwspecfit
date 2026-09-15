@@ -124,6 +124,14 @@ A measured width above 500 km/s is warned about but **not** capped:
 narrowing the assumed profile would make every limit tighter, which is
 the one direction an upper limit must not be wrong in.
 
+Fits saved before this existed are measured when you load them — the
+residuals are in the file, so there is nothing to re-run:
+
+```python
+result = load_result("old_fit.npz")   # limits measured on load
+result.lines["OIII_4363"].upper_limit()
+```
+
 ## Broad Balmer components
 
 Four nested models are tested and selected via BIC when `mode="auto"`:

@@ -258,6 +258,13 @@ def load_mcmc_result(
         lya_params=lya_params,
     )
 
+    # Results saved before continuum-noise limits existed carry none, and
+    # upper_limit() would quietly fall back to the posterior width.  The
+    # model and continuum are in the file, so measure them properly.
+    from jwspecfit.limits import backfill_flux_limits
+
+    backfill_flux_limits(mcmc)
+
     # --- MCMCBroadFitResult wrapper ---
     is_broad = bool(data["is_broad_fit"][0])
     if is_broad:
