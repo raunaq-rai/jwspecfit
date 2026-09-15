@@ -109,7 +109,8 @@ jwspecfit.plot_fit(fit_result)
 `jwspecmcmc.fit_lines` delegates BIC broad-Balmer model selection to
 `jwspecfit.fit_with_broad`, then MCMC-samples the winning model. Set
 `fit_balmer_broad=True` (and/or `fit_oiii_broad`, `fit_hei_broad`) to
-opt in; the default is narrow-only.
+opt in; the default is narrow-only. `balmer_broad_lines` (e.g. `["Ha"]`)
+limits which Balmer lines get the broad component.
 
 ## Full parameter reference
 
@@ -178,12 +179,13 @@ Required arguments have no default.
 
 | Argument | Default | What it does |
 |---|---|---|
-| `fit_balmer_broad` | `False` | Run BIC selection for a broad Balmer component (narrow / intermediate / very-broad / both), gated by Hα SNR. |
+| `fit_balmer_broad` | `False` | Run BIC selection for a broad Balmer component (narrow / intermediate / very-broad / both), gated by the SNR of the strongest line in `balmer_broad_lines`. |
+| `balmer_broad_lines` | `None` | Balmer lines that get the broad component, from `"Ha"`, `"HBETA"`, `"HDELTA"`, `"HGAMMA"`; e.g. `["Ha"]` tests a broad Hα alone. `None` uses all four. |
 | `fit_oiii_broad` | `False` | Independent BIC test for a broad [OIII] 4959/5007 component (outflow signature), gated by [OIII] 5007 SNR. |
 | `fit_hei_broad` | `False` | Independent BIC test for a broad He I component shared across all observable He I lines, gated by the best narrow He I SNR. |
 | `n_boot_bic` | `100` | Bootstrap iterations for BIC model selection; `0` uses a single-point BIC. Only used when a broad flag is set. |
 | `n_jobs` | `-1` | Parallel workers for the BIC bootstrap; `-1` uses all cores. |
-| `snr_threshold` | `5.0` | Minimum Hα SNR to attempt Balmer broad fitting. |
+| `snr_threshold` | `5.0` | Minimum SNR of the strongest requested Balmer line (Hα > Hβ > Hγ > Hδ) to attempt Balmer broad fitting. |
 | `oiii_snr_threshold` | `5.0` | Minimum [OIII] 5007 SNR to attempt [OIII] broad fitting. |
 | `hei_snr_threshold` | `5.0` | Minimum He I SNR (best narrow He I line) to attempt He I broad fitting. |
 | `bic_delta` | `6.0` | Minimum ΔBIC by which a more complex model must beat the simpler one to be selected. |

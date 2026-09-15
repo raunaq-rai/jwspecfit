@@ -43,7 +43,8 @@ BROAD2_SIGMA_V_HI = 2120.0   # km/s — upper bound (FWHM ~ 5000 km/s)
 # BIC threshold for accepting a more complex model.
 BIC_DELTA_THRESHOLD = 6.0
 
-# Broad line definitions — lines that get a broad component.
+# Broad line definitions — lines that get a broad component by default;
+# ``fit_with_broad(balmer_broad_lines=...)`` selects a subset.
 # NII_6549 and NII_6585 are included in the Ha complex so that the
 # BIC comparison accounts for the full blend and prevents broad Ha
 # from absorbing narrow NII flux.
@@ -207,12 +208,53 @@ def _compute_bic(
     return chi2 + n_free * np.log(N)
 
 
+def _resolve_balmer_broad_lines(
+    balmer_broad_lines: list[str] | None,
+) -> list[str]:
+    """Validate the Balmer lines that may carry a broad component.
+
+    Parameters
+    ----------
+    balmer_broad_lines : list of str or None
+        Requested subset of :data:`BROAD_CANDIDATES`.  ``None`` selects
+        all of them.
+
+    Returns
+    -------
+    list of str
+        The requested lines, de-duplicated and in
+        :data:`BROAD_CANDIDATES` order so the parameter vector does not
+        depend on how the caller ordered them.
+
+    Raises
+    ------
+    ValueError
+        If a line is outside :data:`BROAD_CANDIDATES` (only those have
+        their broad centroid tied to the narrow line) or none is given.
+    """
+    if balmer_broad_lines is None:
+        return list(BROAD_CANDIDATES)
+    unknown = [n for n in balmer_broad_lines if n not in BROAD_CANDIDATES]
+    if unknown:
+        raise ValueError(
+            f"balmer_broad_lines {unknown} not in {BROAD_CANDIDATES}; only "
+            "these have their broad centroid tied to the narrow line."
+        )
+    if not balmer_broad_lines:
+        raise ValueError(
+            "balmer_broad_lines is empty; pass fit_balmer_broad=False to "
+            "skip the Balmer broad test."
+        )
+    return [n for n in BROAD_CANDIDATES if n in balmer_broad_lines]
+
+
 def _balmer_pixel_mask(
     wave_um: np.ndarray,
     z: float,
     dv: float = _BALMER_MASK_DV,
+    lines: tuple[str, ...] | list[str] = ("Ha", "HBETA"),
 ) -> np.ndarray:
-    """Boolean mask selecting pixels within ±dv km/s of Hα and Hβ.
+    """Boolean mask selecting pixels within ±dv km/s of Balmer lines.
 
     Parameters
     ----------
@@ -222,6 +264,8 @@ def _balmer_pixel_mask(
         Source redshift.
     dv : float
         Velocity half-window in km/s (default 3000).
+    lines : sequence of str
+        Lines whose windows are selected (default Hα and Hβ).
 
     Returns
     -------
@@ -229,7 +273,7 @@ def _balmer_pixel_mask(
         Boolean mask (True for Balmer pixels).
     """
     mask = np.zeros(len(wave_um), dtype=bool)
-    for line_name in ("Ha", "HBETA"):
+    for line_name in lines:
         lam_rest_A = REST_LINES_A[line_name]
         lam_obs_um = lam_rest_A * (1.0 + z) * 1e-4  # Å → µm
         # ±dv km/s → wavelength window
@@ -304,6 +348,7 @@ def _bic_bootstrap_single(
     hei_baseline_oiii: str | None = None,
     hei_mask: np.ndarray | None = None,
     centroid_max_sigma: float = 1.0,
+    balmer_broad_lines: list[str] | None = None,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
 
@@ -335,6 +380,9 @@ def _bic_bootstrap_single(
         Per-line sigma bounds in Angstroms ``{name: (lo, hi)}``.
     niv_doublet_ratio : float, optional
         Fixed F(1483)/F(1486) ratio for the NIV] doublet.
+    balmer_broad_lines : list of str, optional
+        Balmer lines that receive the broad variants (default
+        :data:`BROAD_CANDIDATES`).
 
     Returns
     -------
@@ -364,6 +412,7 @@ def _bic_bootstrap_single(
                 centroid_overrides=centroid_overrides,
                 niv_doublet_ratio=niv_doublet_ratio,
                 ciii_doublet_ratio=ciii_doublet_ratio,
+                balmer_broad_lines=balmer_broad_lines,
             )
         except (ValueError, RuntimeError):
             results[variant] = np.nan
@@ -416,6 +465,7 @@ def _bic_bootstrap_single(
                     niv_doublet_ratio=niv_doublet_ratio,
                     ciii_doublet_ratio=ciii_doublet_ratio,
                     oiii_broad_type=oiii_type,
+                    balmer_broad_lines=balmer_broad_lines,
                 )
             except (ValueError, RuntimeError):
                 results[variant] = np.nan
@@ -464,6 +514,7 @@ def _bic_bootstrap_single(
                     ciii_doublet_ratio=ciii_doublet_ratio,
                     oiii_broad_type=hei_baseline_oiii,
                     hei_broad_type=hei_type,
+                    balmer_broad_lines=balmer_broad_lines,
                 )
             except (ValueError, RuntimeError):
                 results[variant] = np.nan
@@ -489,6 +540,7 @@ def _add_broad_lines(
     *,
     oiii_broad_type: str | None = None,
     hei_broad_type: str | None = None,
+    balmer_broad_lines: list[str] | None = None,
 ) -> list[str]:
     """Add broad Balmer, [OIII], and/or He I entries to a line list.
 
@@ -498,6 +550,9 @@ def _add_broad_lines(
         Base narrow line names.
     broad_type : {"broad1", "broad2", "both", None}
         Balmer broad variant.  ``None`` skips Balmer broad lines.
+    balmer_broad_lines : list of str, optional
+        Balmer lines that receive *broad_type* (default
+        :data:`BROAD_CANDIDATES`).
     oiii_broad_type : {"broad1", "broad2", "both", None}
         [OIII] broad variant.  ``None`` skips OIII broad lines.
         Mirrors the Balmer mapping: BROAD1 = intermediate (FWHM
@@ -513,7 +568,9 @@ def _add_broad_lines(
     """
     extended = list(line_names)
     if broad_type is not None:
-        for base in BROAD_CANDIDATES:
+        if balmer_broad_lines is None:
+            balmer_broad_lines = BROAD_CANDIDATES
+        for base in balmer_broad_lines:
             if base not in line_names:
                 continue
             if broad_type in ("broad1", "both"):
@@ -593,6 +650,7 @@ def _fit_model_variant(
     oiii_broad_type: str | None = None,
     hei_broad_type: str | None = None,
     centroid_max_sigma: float = 1.0,
+    balmer_broad_lines: list[str] | None = None,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -600,6 +658,9 @@ def _fit_model_variant(
     ----------
     broad_type : str or None
         ``None`` for narrow-only, or ``"broad1"``, ``"broad2"``, ``"both"``.
+    balmer_broad_lines : list of str, optional
+        Balmer lines that receive *broad_type* (default
+        :data:`BROAD_CANDIDATES`).
     narrow_fit : FitResult or None
         Narrow-only fit results used to seed narrow line parameters
         when fitting broad variants.
@@ -619,6 +680,7 @@ def _fit_model_variant(
             line_names, broad_type,
             oiii_broad_type=oiii_broad_type,
             hei_broad_type=hei_broad_type,
+            balmer_broad_lines=balmer_broad_lines,
         )
     else:
         fit_lines_list = list(line_names)
@@ -683,6 +745,7 @@ def fit_with_broad(
     lines: list[str] | None = None,
     deg: int = 2,
     fit_balmer_broad: bool = False,
+    balmer_broad_lines: list[str] | None = None,
     fit_oiii_broad: bool = False,
     fit_hei_broad: bool = False,
     n_boot: int = 1000,
@@ -712,7 +775,8 @@ def fit_with_broad(
     - **Balmer broad** (``fit_balmer_broad``): tests narrow vs.
       narrow + intermediate broad (FWHM 500–2000 km/s) vs.
       narrow + very broad (FWHM 2000–5000 km/s) vs. narrow + both.
-      Gated by ``snr_threshold`` on Hα.
+      Gated by ``snr_threshold`` on the strongest line in
+      ``balmer_broad_lines`` (Hα by default).
     - **[OIII] broad** (``fit_oiii_broad``): tests baseline vs.
       baseline + broad [OIII] 5007/4959 (outflow signature).  Gated
       by ``oiii_snr_threshold`` on [OIII] 5007 / 4959.
@@ -739,6 +803,13 @@ def fit_with_broad(
         component (intermediate / very-broad / both).  Default
         ``False`` — opt in only when you want to test for a BLR or
         outflow signature on Hα/Hβ.
+    balmer_broad_lines : list of str, optional
+        Balmer lines that get the broad component, chosen from
+        :data:`BROAD_CANDIDATES` (``"Ha"``, ``"HBETA"``, ``"HDELTA"``,
+        ``"HGAMMA"``); e.g. ``["Ha"]`` tests a broad Hα alone.  ``None``
+        (default) uses all four.  The bootstrap BIC is scored on the
+        Hα/Hβ windows among them, or on their own windows if neither is
+        included.
     fit_oiii_broad : bool
         If ``True``, run an independent BIC test for a broad component
         on [OIII] 5007/4959.  Decoupled from the Balmer test.  Default
@@ -757,7 +828,8 @@ def fit_with_broad(
         Number of parallel jobs for bootstrap. ``-1`` uses all cores,
         ``1`` runs sequentially. Default ``-1``.
     snr_threshold : float
-        Minimum Hα SNR to attempt the Balmer broad fit (default 5.0).
+        Minimum SNR of the strongest requested Balmer line (Hα > Hβ >
+        Hγ > Hδ) to attempt the Balmer broad fit (default 5.0).
     oiii_snr_threshold : float
         Minimum [OIII] 5007 / 4959 SNR to attempt the OIII broad fit
         (default 5.0).
@@ -768,6 +840,7 @@ def fit_with_broad(
     -------
     BroadFitResult
     """
+    balmer_broad_lines = _resolve_balmer_broad_lines(balmer_broad_lines)
     grating = grating or spectrum.grating
     R = R or spectrum.R
 
@@ -850,18 +923,22 @@ def fit_with_broad(
             all_fits=all_fits,
         )
 
-    # Check Hα SNR before attempting Balmer broad fits.
-    ha_snr = 0.0
-    if "Ha" in fit_narrow.lines:
-        ha_snr = fit_narrow.lines["Ha"].snr
+    # Gate on the strongest requested Balmer line (Hα unless excluded).
+    gate_line = next(
+        n for n in ("Ha", "HBETA", "HGAMMA", "HDELTA")
+        if n in balmer_broad_lines
+    )
+    gate_snr = 0.0
+    if gate_line in fit_narrow.lines:
+        gate_snr = fit_narrow.lines[gate_line].snr
 
-    skip_balmer_bic = (not fit_balmer_broad) or (ha_snr < snr_threshold)
+    skip_balmer_bic = (not fit_balmer_broad) or (gate_snr < snr_threshold)
     if skip_balmer_bic:
         if fit_balmer_broad:
             logger.info(
-                "Hα SNR=%.1f < %.1f; skipping Balmer broad fitting "
+                "%s SNR=%.1f < %.1f; skipping Balmer broad fitting "
                 "(OIII broad still tested if requested).",
-                ha_snr, snr_threshold,
+                gate_line, gate_snr, snr_threshold,
             )
         best_name = "narrow"
 
@@ -876,7 +953,12 @@ def fit_with_broad(
         from joblib import Parallel, delayed
         from tqdm import tqdm
 
-        balmer_mask = _balmer_pixel_mask(spectrum.wave_um, z)
+        # Score on the Hα/Hβ windows among the requested lines; Hγ/Hδ
+        # set the window only when neither is requested.
+        bic_lines = [
+            n for n in ("Ha", "HBETA") if n in balmer_broad_lines
+        ] or balmer_broad_lines
+        balmer_mask = _balmer_pixel_mask(spectrum.wave_um, z, lines=bic_lines)
         rng = np.random.default_rng()
         noise_vectors = rng.standard_normal((n_boot_bic, len(spectrum.wave_um)))
 
@@ -891,6 +973,7 @@ def fit_with_broad(
                 tie_uv_centroids, tie_uv_widths, sigma_overrides,
                 centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
                 centroid_max_sigma=centroid_max_sigma,
+                balmer_broad_lines=balmer_broad_lines,
             )
             for i in range(n_boot_bic)
         )
@@ -925,6 +1008,7 @@ def fit_with_broad(
                     broad_type, 0, fit_narrow, 1, sigma_factor, centroid_vmax,
                     moving_average, tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
                     sigma_overrides, centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
+                    balmer_broad_lines=balmer_broad_lines,
                 )
             for variant, fut in futures.items():
                 fit_v, _ = fut.result()
@@ -944,6 +1028,7 @@ def fit_with_broad(
                     variant, 0, fit_narrow, n_jobs, sigma_factor, centroid_vmax,
                     moving_average, tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
                     sigma_overrides, centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
+                    balmer_broad_lines=balmer_broad_lines,
                 )
                 bic_futures[variant] = fut
 
@@ -1039,6 +1124,7 @@ def fit_with_broad(
                         niv_doublet_ratio, ciii_doublet_ratio,
                         oiii_variants, baseline_broad, oiii_mask,
                         centroid_max_sigma=centroid_max_sigma,
+                        balmer_broad_lines=balmer_broad_lines,
                     )
                     for i in range(n_boot_bic)
                 )
@@ -1072,6 +1158,7 @@ def fit_with_broad(
                             niv_doublet_ratio=niv_doublet_ratio,
                             ciii_doublet_ratio=ciii_doublet_ratio,
                             oiii_broad_type=oiii_type,
+                            balmer_broad_lines=balmer_broad_lines,
                         )
                     except (ValueError, RuntimeError):
                         bic_oiii[v] = float("nan")
@@ -1172,6 +1259,7 @@ def fit_with_broad(
                         hei_variants, baseline_broad, oiii_broad_type_sel,
                         hei_mask,
                         centroid_max_sigma=centroid_max_sigma,
+                        balmer_broad_lines=balmer_broad_lines,
                     )
                     for i in range(n_boot_bic)
                 )
@@ -1205,6 +1293,7 @@ def fit_with_broad(
                             ciii_doublet_ratio=ciii_doublet_ratio,
                             oiii_broad_type=oiii_broad_type_sel,
                             hei_broad_type=hei_type,
+                            balmer_broad_lines=balmer_broad_lines,
                         )
                     except (ValueError, RuntimeError):
                         bic_hei[v] = float("nan")
@@ -1278,6 +1367,7 @@ def fit_with_broad(
             ciii_doublet_ratio=ciii_doublet_ratio,
             oiii_broad_type=oiii_broad_type_sel,
             hei_broad_type=hei_broad_type_sel,
+            balmer_broad_lines=balmer_broad_lines,
         )
         all_fits[selected_key] = best_fit
     elif any_broad_sel and selected_key not in all_fits:
@@ -1299,6 +1389,7 @@ def fit_with_broad(
             ciii_doublet_ratio=ciii_doublet_ratio,
             oiii_broad_type=oiii_broad_type_sel,
             hei_broad_type=hei_broad_type_sel,
+            balmer_broad_lines=balmer_broad_lines,
         )
         all_fits[selected_key] = best_fit
 

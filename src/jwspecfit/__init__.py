@@ -174,6 +174,7 @@ def fit_lines(
     n_jobs: int = -1,
     save_path: str | Path | None = None,
     fit_balmer_broad: bool = False,
+    balmer_broad_lines: list[str] | None = None,
     fit_oiii_broad: bool = False,
     fit_hei_broad: bool = False,
     n_boot_bic: int = 100,
@@ -242,6 +243,10 @@ def fit_lines(
     fit_balmer_broad : bool
         If ``True``, run BIC selection for Balmer broad components.
         Default ``False`` (narrow-only).
+    balmer_broad_lines : list of str, optional
+        Balmer lines that get the broad component, chosen from ``"Ha"``,
+        ``"HBETA"``, ``"HDELTA"``, ``"HGAMMA"``; e.g. ``["Ha"]`` tests a
+        broad Hα alone.  ``None`` (default) uses all four.
     fit_oiii_broad : bool
         If ``True``, run independent BIC test for [OIII] outflow
         broad components.  Default ``False`` (narrow-only).
@@ -253,7 +258,8 @@ def fit_lines(
         Bootstrap iterations for BIC model selection (default 100).
         Only used when at least one broad flag is True.
     snr_threshold : float
-        Minimum Hα SNR to attempt Balmer broad fitting (default 5.0).
+        Minimum SNR of the strongest requested Balmer line (Hα > Hβ >
+        Hγ > Hδ) to attempt Balmer broad fitting (default 5.0).
     oiii_snr_threshold : float
         Minimum [OIII] 5007/4959 SNR to attempt OIII broad fitting
         (default 5.0).
@@ -366,6 +372,7 @@ def fit_lines(
                     grating=grating, R=R, lines=lines,
                     deg=deg,
                     fit_balmer_broad=fit_balmer_broad,
+                    balmer_broad_lines=balmer_broad_lines,
                     fit_oiii_broad=fit_oiii_broad,
                     fit_hei_broad=fit_hei_broad,
                     n_boot=n_boot, n_boot_bic=n_boot_bic,
@@ -421,6 +428,7 @@ def fit_lines(
         grating=grating, R=R, lines=lines,
         deg=deg,
         fit_balmer_broad=fit_balmer_broad,
+        balmer_broad_lines=balmer_broad_lines,
         fit_oiii_broad=fit_oiii_broad,
         fit_hei_broad=fit_hei_broad,
         n_boot=n_boot,

@@ -997,6 +997,7 @@ def _fit_with_broad_mcmc(
     deg: int = 2,
     clip_sigma: float = 2.5,
     fit_balmer_broad: bool = False,
+    balmer_broad_lines: list[str] | None = None,
     fit_oiii_broad: bool = False,
     fit_hei_broad: bool = False,
     n_boot_bic: int = 100,
@@ -1064,6 +1065,10 @@ def _fit_with_broad_mcmc(
     fit_balmer_broad : bool
         If ``True`` (default), run BIC selection for a broad Balmer
         component (narrow vs. intermediate vs. very-broad vs. both).
+    balmer_broad_lines : list of str, optional
+        Balmer lines that get the broad component, chosen from ``"Ha"``,
+        ``"HBETA"``, ``"HDELTA"``, ``"HGAMMA"`` (default ``None``: all
+        four).
     fit_oiii_broad : bool
         If ``True`` (default), run an independent BIC test for a broad
         component on [OIII] 5007/4959 (outflow signature).
@@ -1073,7 +1078,8 @@ def _fit_with_broad_mcmc(
     n_jobs : int
         Parallel jobs for BIC bootstrap (default ``-1`` = all cores).
     snr_threshold : float
-        Minimum Ha SNR to attempt Balmer broad fitting (default 5.0).
+        Minimum SNR of the strongest requested Balmer line (Ha > HBETA >
+        HGAMMA > HDELTA) to attempt Balmer broad fitting (default 5.0).
     oiii_snr_threshold : float
         Minimum [OIII] 5007/4959 SNR to attempt OIII broad fitting
         (default 5.0).
@@ -1120,6 +1126,7 @@ def _fit_with_broad_mcmc(
         grating=grating, R=R, lines=lines,
         deg=deg,
         fit_balmer_broad=fit_balmer_broad,
+        balmer_broad_lines=balmer_broad_lines,
         fit_oiii_broad=fit_oiii_broad,
         fit_hei_broad=fit_hei_broad,
         n_boot=0,

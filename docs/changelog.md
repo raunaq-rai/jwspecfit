@@ -6,6 +6,28 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### Choose which Balmer lines get a broad component
+
+- **`balmer_broad_lines=`** on `jwspecfit.fit_lines`,
+  `jwspecfit.fit_with_broad`, `jwspecmcmc.fit_lines` and
+  `jwspecmcmc.fit_with_broad`. `fit_balmer_broad=True` used to put a broad
+  component on every one of Hα, Hβ, Hγ and Hδ; `balmer_broad_lines=["Ha"]`
+  now tests a broad Hα alone. `None` (the default) keeps all four, and
+  default results are bit-identical.
+- **Why it matters for the BIC:** each broad line adds an amplitude and a
+  width to the parameter count, but the bootstrap BIC is scored only on the
+  Hα and Hβ pixels, so the Hγ and Hδ broads were charged a penalty they
+  could never earn back. On the PRISM test spectrum `broad1` adds 8 free
+  parameters with all four lines against 2 with Hα alone: a penalty of
+  8 ln 17 ≈ 23 against 2 ln 11 ≈ 5, next to a ΔBIC threshold of 6.
+- **The BIC window and SNR gate follow the selection.** The bootstrap BIC is
+  scored on the Hα/Hβ windows among the requested lines (on the requested
+  lines' own windows if neither is included). The gate uses the strongest
+  requested line, Hα > Hβ > Hγ > Hδ, so an Hβ-only test at z ≳ 7, where Hα
+  has left the band, is no longer gated on an absent Hα.
+- Names other than Hα/Hβ/Hγ/Hδ raise: only those have their broad centroid
+  tied to the narrow line.
+
 ### Upper limits are built from an assumed width and the local noise
 
 - **`LineResult.upper_limit()` no longer returns `3 × flux_err`.** A line

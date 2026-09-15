@@ -134,7 +134,8 @@ result.lines["OIII_4363"].upper_limit()
 
 ## Broad Balmer components
 
-Four nested models are tested and selected via BIC when `mode="auto"`:
+With `fit_balmer_broad=True`, four nested models are tested and selected
+via BIC:
 
 1. Narrow only.
 2. Narrow + intermediate broad (FWHM ~ 500–2000 km s⁻¹).
@@ -142,9 +143,23 @@ Four nested models are tested and selected via BIC when `mode="auto"`:
 4. Narrow + both broad components.
 
 ```python
-result = jwspecfit.fit_with_broad(spec, z=2.0, n_boot_bic=100)
+result = jwspecfit.fit_with_broad(spec, z=2.0, fit_balmer_broad=True, n_boot_bic=100)
 print(result.selected_model)     # "narrow" | "broad1" | "broad2" | "both"
 ```
+
+By default Hα, Hβ, Hγ and Hδ all get the broad component. Pass
+`balmer_broad_lines` to choose which:
+
+```python
+result = jwspecfit.fit_with_broad(
+    spec, z=2.0, fit_balmer_broad=True, balmer_broad_lines=["Ha"],
+)
+```
+
+Each broad line adds an amplitude and a width to the parameter count, so
+a line with no detectable broad wing only raises the BIC penalty. The
+bootstrap BIC is scored on the Hα/Hβ windows among the requested lines,
+and the SNR gate uses the strongest of them (Hα > Hβ > Hγ > Hδ).
 
 ## UV and absorption lines
 
