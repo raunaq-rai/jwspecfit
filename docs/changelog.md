@@ -6,6 +6,16 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### The low-ionisation density fallback is attributed correctly
+
+- The `n_e(low)` z-fallback reported itself as `Topping+2025a`. The relation it
+  actually evaluates, `54·(1+z)^1.2`, is from Abdurro'uf+2024 (arXiv:2404.16201,
+  ApJ 973, 47) — as the code comment, the methodology document and the reference
+  table all already said. Topping+2025a give only a slope (1.5 ± 0.6) with no
+  published normalisation, which is why Abdurro'uf was adopted for the z > 6
+  sample in the first place. The label was the only thing wrong: no density,
+  temperature or abundance changes.
+
 ### Choose which Balmer lines get a broad component
 
 - **`balmer_broad_lines=`** on `jwspecfit.fit_lines`,

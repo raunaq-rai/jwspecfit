@@ -1960,7 +1960,7 @@ def _build_diagnostics(
             "no [SII]/[OII]/[Si III] doublet available"
         )
         diag["ne(low)"] = (
-            f"z-fallback ({_fb_low:.0f} cm^-3, Topping+2025a) — {_why}"
+            f"z-fallback ({_fb_low:.0f} cm^-3, Abdurro'uf+2024) — {_why}"
         )
 
     # Consistency between the low-ionisation zone and a *measured* dense
