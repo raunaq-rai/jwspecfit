@@ -895,7 +895,7 @@ def fit_with_broad(
 
     bic_boot_dist: dict[str, np.ndarray] = {}
 
-    if not fit_balmer_broad and not fit_oiii_broad:
+    if not fit_balmer_broad and not fit_oiii_broad and not fit_hei_broad:
         # Narrow-only: skip every BIC stage and just return the (optionally
         # bootstrapped) narrow fit.
         if n_boot > 0:
@@ -1008,6 +1008,7 @@ def fit_with_broad(
                     broad_type, 0, fit_narrow, 1, sigma_factor, centroid_vmax,
                     moving_average, tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
                     sigma_overrides, centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
+                    centroid_max_sigma=centroid_max_sigma,
                     balmer_broad_lines=balmer_broad_lines,
                 )
             for variant, fut in futures.items():
@@ -1028,6 +1029,7 @@ def fit_with_broad(
                     variant, 0, fit_narrow, n_jobs, sigma_factor, centroid_vmax,
                     moving_average, tie_uv_doublets, tie_uv_centroids, tie_uv_widths,
                     sigma_overrides, centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
+                    centroid_max_sigma=centroid_max_sigma,
                     balmer_broad_lines=balmer_broad_lines,
                 )
                 bic_futures[variant] = fut

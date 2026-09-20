@@ -117,6 +117,53 @@ class TestFitWithBroad:
         assert result.bic_bootstrap == {}
 
 
+class TestBroadFitPlumbing:
+    """Flags and per-fit options must reach the fits they configure."""
+
+    def test_hei_only_request_runs_the_hei_test(self, prism_spectrum):
+        """fit_hei_broad alone used to return the narrow fit in silence.
+
+        The narrow-only early return checked the Balmer and [OIII] flags but
+        not the He I one, so a He I-only request skipped every BIC stage.
+        """
+        result = fit_with_broad(
+            prism_spectrum, z=6.0, grating="PRISM", fit_hei_broad=True,
+            n_boot=0, n_boot_bic=0, hei_snr_threshold=0.0,
+        )
+        assert np.isfinite(result.bic_hei_off)
+        assert result.hei_selected in ("off", "broad1", "broad2", "both")
+
+    @pytest.mark.parametrize("n_boot_bic", [0, 2])
+    def test_real_data_fits_honour_centroid_max_sigma(
+        self, grating_spectrum, monkeypatch, n_boot_bic,
+    ):
+        """The ThreadPool fits passed their arguments positionally and stopped
+        short of centroid_max_sigma, so those fits silently used the 1.0
+        default however the caller had set it."""
+        import inspect
+
+        import jwspecfit.broad as broad
+
+        real = broad._fit_model_variant
+        sig = inspect.signature(real)
+        seen = []
+
+        def spy(*args, **kwargs):
+            bound = sig.bind(*args, **kwargs)
+            bound.apply_defaults()
+            seen.append(bound.arguments["centroid_max_sigma"])
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(broad, "_fit_model_variant", spy)
+        fit_with_broad(
+            grating_spectrum, z=5.0, grating="G395M", fit_balmer_broad=True,
+            n_boot=0, n_boot_bic=n_boot_bic, n_jobs=1, snr_threshold=0.0,
+            centroid_max_sigma=0.25,
+        )
+        assert seen
+        assert all(s == 0.25 for s in seen)
+
+
 class TestBalmerBroadLines:
     """``balmer_broad_lines`` chooses which Balmer lines get a broad component."""
 
