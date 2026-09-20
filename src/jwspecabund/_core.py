@@ -952,6 +952,64 @@ def _compute_CppOpp_uv_raw(
     return float(cpp_opp), note
 
 
+def _compute_N_Opp_uv_raw(
+    fluxes: dict[str, float],
+    Te: float,
+    ne: float,
+    Te_Npp: float | None = None,
+    ne_Npp: float | None = None,
+    Te_Nppp: float | None = None,
+    ne_Nppp: float | None = None,
+) -> tuple[dict[str, float], str] | None:
+    """Raw N2+/O2+ and N3+/O2+ from the UV lines, or ``None``.
+
+    The nitrogen counterpart of :func:`_compute_CppOpp_uv_raw`.  It supplies
+    ``no_uv_ratios`` to
+    :func:`~jwspecabund.direct.compute_total_abundances`, letting the
+    Martinez+25 ICFs 2, 3 and 5 divide by an O2+ measured from
+    O III] 1661,1666 instead of [O III] 5007.
+
+    Parameters
+    ----------
+    fluxes : dict
+        Dust-corrected fluxes; needs O III] 1661/1666 together with
+        NIII] 1749/1752 or NIV] 1483/1486.
+    Te, ne : float
+        Conditions for the O2+ zone.
+    Te_Npp, ne_Npp : float or None
+        Conditions for N2+; ``None`` places it in the O2+ zone.
+    Te_Nppp, ne_Nppp : float or None
+        Conditions for N3+; ``None`` places it in the O2+ zone.
+
+    Returns
+    -------
+    tuple or None
+        ``({"N++/O++": ..., "N+++/O++": ...}, note)`` keeping only positive,
+        finite ratios, or ``None`` when the lines are missing or the
+        emissivities cannot be evaluated.
+    """
+    from .direct import compute_N_Opp_uv
+
+    try:
+        ratios, note = compute_N_Opp_uv(
+            Te_O=Te, ne_O=ne,
+            flux_1661=fluxes.get("OIII_1661", 0.0),
+            flux_1666=fluxes.get("OIII_1666", 0.0),
+            flux_1749=fluxes.get("NIII_1749", 0.0),
+            flux_1752=fluxes.get("NIII_1752", 0.0),
+            flux_1483=fluxes.get("NIV_1483", 0.0),
+            flux_1486=fluxes.get("NIV_1486", 0.0),
+            Te_Npp=Te_Npp, ne_Npp=ne_Npp,
+            Te_Nppp=Te_Nppp, ne_Nppp=ne_Nppp,
+        )
+    except (ValueError, RuntimeError, KeyError):
+        return None
+    usable = {k: v for k, v in ratios.items() if np.isfinite(v) and v > 0}
+    if not usable:
+        return None
+    return usable, note
+
+
 def _apply_co_uv_icf(
     raw: tuple[float, str] | None,
     icf: float | None,
@@ -2144,6 +2202,24 @@ def _build_diagnostics(
     elif icf_method is not None:
         diag["N/O ICF"] = "N/O could not be computed (no eligible ions)"
 
+    # Which oxygen tracer served the N/O ICF.  Recorded only when it was
+    # the rest-UV one, or when the tracer asked for was not the one used --
+    # the default optical route is already implied by "N/O ICF" above.
+    _no_tracer = totals.get("NO_oxygen_tracer")
+    _no_tracer_reason = totals.get("NO_tracer_reason")
+    if NO_icf_name is not None and _no_tracer == "uv":
+        diag["N/O oxygen"] = (
+            "O²⁺ from O III] 1661,1666 — an 85-180 Å baseline against "
+            "NIII] 1749,1752 / NIV] 1483,1486, so the ionic ratio is nearly "
+            "reddening-free (-0.01 to +0.17 dex/mag, against +0.6-1.5 for "
+            "[OIII] 5007), needs no Hβ, and barely moves with T_e (0.09 dex "
+            "over 10,000-25,000 K, against 1.4)"
+            + (f". Preferred because {_no_tracer_reason}"
+               if _no_tracer_reason else "")
+        )
+    elif NO_icf_name is not None and _no_tracer_reason:
+        diag["N/O oxygen"] = f"O²⁺ from [OIII] 5007 — {_no_tracer_reason}"
+
     # C/O method
     co_method = totals.get("CO_method")
     _co_reason = totals.get("CO_tracer_reason")
@@ -2199,6 +2275,7 @@ def _run_direct(
     co_icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
+    no_oxygen_tracer: str = "optical",
     logU_diagnostic: str | None = None,
     logU_ne: float | None = None,
     logU_override: float | None = None,
@@ -2373,6 +2450,16 @@ def _run_direct(
         ne_C=(ne_mid if ne_mid is not None else ne_Opp),
     ) if np.isfinite(Te_high) else None
 
+    # The rest-UV N/O oxygen tracer needs the same inputs, with each nitrogen
+    # ion kept in the zone compute_ionic_abundances puts it in.
+    _no_uv_raw = _compute_N_Opp_uv_raw(
+        fluxes, Te_high, ne_Opp,
+        Te_Npp=(Te_int if Te_int is not None else Te_high),
+        ne_Npp=(ne_mid if ne_mid is not None else ne_Opp),
+        Te_Nppp=Te_high,
+        ne_Nppp=(ne_high if ne_high is not None else ne_Opp),
+    ) if np.isfinite(Te_high) and no_oxygen_tracer != "optical" else None
+
     totals = compute_total_abundances(
         ionic, logU=logU, Z_Zsun=Z_Zsun, ne=ne_high,
         icf_method=icf_method,
@@ -2380,6 +2467,9 @@ def _run_direct(
         co_logU=logU_co, co_ne=ne_mid,
         co_uv_ratio=_co_uv_raw[0] if _co_uv_raw else None,
         co_uv_note=_co_uv_raw[1] if _co_uv_raw else None,
+        no_uv_ratios=_no_uv_raw[0] if _no_uv_raw else None,
+        no_uv_note=_no_uv_raw[1] if _no_uv_raw else None,
+        no_oxygen_tracer=no_oxygen_tracer,
         Av=Av,
         ionic_upper_limits=ionic_upper_limits,
         _lock_NO_icf=icf_tier,
@@ -2439,6 +2529,9 @@ def _run_direct(
     _co_icf_pt = (
         totals.get("CO_icf_value") if _co_tier_pt in _MARTINEZ_CO_TIERS else None
     )
+    # Every draw uses the oxygen tracer the point estimate settled on, so a
+    # resampled A_V cannot make the N/O posterior a mixture of two tracers.
+    _no_tracer_pt = totals.get("NO_oxygen_tracer")
     # Collect per-tier N/O posteriors for uncertainty on each method.
     _tier_keys = [k for k in (NO_tiers or {}) if not k.startswith("_")]
     NO_tier_mc: dict[str, list[float]] = {k: [] for k in _tier_keys}
@@ -2555,15 +2648,28 @@ def _run_direct(
             # same ions are included/excluded as in the point estimate.
             _gate_nitrogen_ions(ionic_mc, mc_fluxes, errors, snr_NO=snr_NO)
 
+            # Only needed when the point estimate adopted the UV tracer, so
+            # the default optical run costs no extra PyNEB evaluations.
+            _nu_raw = _compute_N_Opp_uv_raw(
+                mc_fluxes, Te_h, ne_Opp_i,
+                Te_Npp=(Te_i if Te_i is not None else Te_h),
+                ne_Npp=(ne_mid if ne_mid is not None else ne_Opp_i),
+                Te_Nppp=Te_h,
+                ne_Nppp=(ne_high if ne_high is not None else ne_Opp_i),
+            ) if _no_tracer_pt == "uv" else None
+
             totals_mc = compute_total_abundances(
                 ionic_mc, logU=logU_icf, Z_Zsun=z_zsun_mc, ne=ne_high,
                 icf_method=icf_method,
                 co_icf_method=co_icf_method,
                 co_logU=logU_co_icf, co_ne=ne_mid,
                 co_uv_ratio=_cu_raw[0] if _cu_raw else None,
+                no_uv_ratios=_nu_raw[0] if _nu_raw else None,
+                no_oxygen_tracer=no_oxygen_tracer,
                 Av=Av,
                 _lock_NO_icf=NO_icf_name,
                 _lock_CO_tier=_co_tier_pt,
+                _lock_NO_tracer=_no_tracer_pt,
             )
 
             oh_mc = totals_mc.get("O/H", np.nan)
@@ -2758,6 +2864,7 @@ def _run_direct(
         "logU_err": logU_err,
         "icf_method": icf_method,
         "NO_icf_name": NO_icf_name,
+        "NO_oxygen_tracer": _no_tracer_pt,
         "ionic": ionic,
         "ionic_upper_limits": ionic_upper_limits if ionic_upper_limits else None,
         "ionic_ul_details": ionic_ul_details if ionic_ul_details else None,
@@ -2833,6 +2940,7 @@ def _run_direct_mcmc(
     co_icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
+    no_oxygen_tracer: str = "optical",
     logU_diagnostic: str | None = None,
     logU_ne: float | None = None,
     logU_override: float | None = None,
@@ -3059,6 +3167,15 @@ def _run_direct_mcmc(
         ne_C=(ne_mid if ne_mid is not None else ne_Opp),
     ) if np.isfinite(Te_high_pt) else None
 
+    # The rest-UV N/O oxygen tracer, each nitrogen ion in its own zone.
+    _no_uv_raw_pt = _compute_N_Opp_uv_raw(
+        med_fluxes, Te_high_pt, ne_Opp,
+        Te_Npp=(Te_int_pt if Te_int_pt is not None else Te_high_pt),
+        ne_Npp=(ne_mid if ne_mid is not None else ne_Opp),
+        Te_Nppp=Te_high_pt,
+        ne_Nppp=(ne_high if ne_high is not None else ne_Opp),
+    ) if np.isfinite(Te_high_pt) and no_oxygen_tracer != "optical" else None
+
     totals_pt = compute_total_abundances(
         ionic_pt, logU=logU_pt, Z_Zsun=Z_Zsun_pt, ne=ne_high,
         icf_method=icf_method,
@@ -3066,6 +3183,9 @@ def _run_direct_mcmc(
         co_logU=logU_co_pt, co_ne=ne_mid,
         co_uv_ratio=_co_uv_raw_pt[0] if _co_uv_raw_pt else None,
         co_uv_note=_co_uv_raw_pt[1] if _co_uv_raw_pt else None,
+        no_uv_ratios=_no_uv_raw_pt[0] if _no_uv_raw_pt else None,
+        no_uv_note=_no_uv_raw_pt[1] if _no_uv_raw_pt else None,
+        no_oxygen_tracer=no_oxygen_tracer,
         Av=Av,
         ionic_upper_limits=ionic_upper_limits,
         _lock_NO_icf=icf_tier,
@@ -3087,6 +3207,8 @@ def _run_direct_mcmc(
         totals_pt.get("CO_icf_value")
         if _co_tier_pt in _MARTINEZ_CO_TIERS else None
     )
+    # Every draw uses the oxygen tracer the point estimate settled on.
+    _no_tracer_pt = totals_pt.get("NO_oxygen_tracer")
 
     n_collected = 0  # scanned draws counted toward n_samples (in-bounds N/O
     #                  or solver failure); out-of-bounds draws keep O/H etc.
@@ -3125,6 +3247,15 @@ def _run_direct_mcmc(
             )
             _cu = _apply_co_uv_icf(_cu_raw, _co_icf_pt)
             CO_uv_post.append(_cu[0] if _cu is not None else np.nan)
+
+            # Only needed when the point estimate adopted the UV tracer.
+            _nu_raw = _compute_N_Opp_uv_raw(
+                sample, Te_h, ne_Opp_i,
+                Te_Npp=(Te_i if Te_i is not None else Te_h),
+                ne_Npp=(ne_mid if ne_mid is not None else ne_Opp_i),
+                Te_Nppp=Te_h,
+                ne_Nppp=(ne_high if ne_high is not None else ne_Opp_i),
+            ) if _no_tracer_pt == "uv" else None
 
             # Z_Zsun for this sample.
             oh_val = ionic_i.get("O+/H+", 0.0) + ionic_i.get("O++/H+", 0.0)
@@ -3195,11 +3326,14 @@ def _run_direct_mcmc(
                 co_icf_method=co_icf_method,
                 co_logU=logU_co_icf, co_ne=ne_mid,
                 co_uv_ratio=_cu_raw[0] if _cu_raw else None,
+                no_uv_ratios=_nu_raw[0] if _nu_raw else None,
+                no_oxygen_tracer=no_oxygen_tracer,
                 # The point estimate's A_V, not this draw's: the tier is
                 # locked below, so a resampled A_V must not re-order tiers.
                 Av=Av,
                 _lock_NO_icf=NO_icf_name,
                 _lock_CO_tier=_co_tier_pt,
+                _lock_NO_tracer=_no_tracer_pt,
             )
 
             oh = totals_i.get("O/H", np.nan)
@@ -3405,6 +3539,7 @@ def _run_direct_mcmc(
         "logU_err": (logU_lo, logU_hi) if logU_lo is not None else None,
         "icf_method": icf_method,
         "NO_icf_name": NO_icf_name,
+        "NO_oxygen_tracer": _no_tracer_pt,
         "ionic": ionic_pt if ionic_pt else None,
         "ionic_upper_limits": ionic_upper_limits if ionic_upper_limits else None,
         "ionic_ul_details": ionic_ul_details if ionic_ul_details else None,
@@ -3565,6 +3700,7 @@ def compute_abundances(
     co_icf_method: str = "auto",
     snr_NO: float = 1.5,
     icf_tier: str | None = None,
+    no_oxygen_tracer: str = "optical",
     logU_diagnostic: str | None = None,
     logU_ne: float | None = None,
     logU_override: float | None = None,
@@ -3803,6 +3939,28 @@ def compute_abundances(
         fallback to other tiers occurs; if the required ions are
         missing, N/O is reported as failed.  Any other string raises
         ``ValueError``.  Default ``None`` (automatic cascade).
+    no_oxygen_tracer : str
+        Which oxygen tracer the Martinez+25 N/O ICFs divide by.
+        ``"optical"`` (default) uses O²⁺ from [O III] 5007, exactly as
+        before this option existed.  ``"uv"`` uses O²⁺ from
+        O III] 1661,1666 — an 85-180 Å baseline against NIII] 1749,1752
+        and NIV] 1483,1486, so the ionic ratio is nearly reddening-free
+        (-0.01 to +0.17 dex of log(N/O) per magnitude of A_V, against
+        +0.6 to +1.5 for [O III] 5007), needs no Hβ and hence no relative
+        flux calibration between the UV and optical gratings, and barely
+        moves with T_e (0.09 dex over 10,000-25,000 K, against 1.4),
+        because λ1666 sits at nearly the same excitation energy as the UV
+        nitrogen lines.  ``"auto"`` prefers the UV tracer only above
+        :data:`~jwspecabund.direct.NO_UV_AV_THRESHOLD` magnitudes of A_V,
+        mirroring the C/O tier order.
+        Only ICFs 2, 3 and 5 can use it; ICFs 1 and 4 need O⁺, whose only
+        tracer is the optical [O II] 3727.  ``"uv"`` falls back to the
+        optical tracer when λ1661/1666 or both UV nitrogen lines are
+        missing, recording why in ``diagnostics["N/O oxygen"]``; the
+        tracer actually used is ``AbundanceResult.NO_oxygen_tracer``.
+        Note that Z/Z_sun still comes from O/H, so the UV tracer removes
+        the optical oxygen from the *ionic ratio*, not from the ICF's
+        metallicity argument.  Default ``"optical"``.
     logU_diagnostic : str or None
         Force the ionisation-parameter diagnostic instead of the
         automatic N43 -> O32 priority tree.  ``"N43"`` (N IV] 1486 /
@@ -3965,6 +4123,7 @@ def compute_abundances(
         "Av_prior": (Av_prior, ("gaussian", "uniform")),
         "Te_relation": (Te_relation, ("3_tier", "classical", "garnett", "desi")),
         "icf_method": (icf_method, ("auto", "martinez25", "izotov06", "direct_sum")),
+        "no_oxygen_tracer": (no_oxygen_tracer, ("optical", "uv", "auto")),
         "co_icf_method": (co_icf_method, ("auto", "martinez25", "garnett97")),
         "forward_sampler": (forward_sampler, ("emcee", "dynesty")),
         "balmer_anchor": (balmer_anchor, _VALID_BALMER_ANCHORS),
@@ -4330,7 +4489,7 @@ def compute_abundances(
                     posteriors, Te_relation, n_posterior=n_posterior,
                     progress=progress, ne_high_max=ne_high_max,
                     snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                    icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                    icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier, no_oxygen_tracer=no_oxygen_tracer,
                     logU_diagnostic=logU_diagnostic,
                     logU_ne=logU_ne,
                     logU_override=logU_override,
@@ -4353,7 +4512,7 @@ def compute_abundances(
                     fluxes, errors, Te_relation, n_mc,
                     progress=progress, ne_high_max=ne_high_max,
                     snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                    icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                    icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier, no_oxygen_tracer=no_oxygen_tracer,
                     logU_diagnostic=logU_diagnostic,
                     logU_ne=logU_ne,
                     logU_override=logU_override,
@@ -4408,6 +4567,7 @@ def compute_abundances(
                 ne_Opp=direct_out.get("ne_Opp"),
                 icf_method=direct_out.get("icf_method"),
                 NO_icf_name=direct_out.get("NO_icf_name"),
+                NO_oxygen_tracer=direct_out.get("NO_oxygen_tracer"),
                 excluded_lines=excluded_lines if excluded_lines else None,
                 NO_tiers=direct_out.get("NO_tiers"),
                 icf_values=direct_out.get("icf_values"),
@@ -4543,7 +4703,7 @@ def compute_abundances(
                             posteriors, Te_relation, n_posterior=n_posterior,
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                            icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                            icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier, no_oxygen_tracer=no_oxygen_tracer,
                             logU_diagnostic=logU_diagnostic,
                             logU_ne=logU_ne,
                     logU_override=logU_override,
@@ -4565,7 +4725,7 @@ def compute_abundances(
                             fluxes, errors, Te_relation, n_mc,
                             progress=progress, ne_high_max=ne_high_max,
                             snr_ne=snr_ne, snr_logU=snr_logU, marginalize_logU=marginalize_logU,
-                            icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier,
+                            icf_method=icf_method, co_icf_method=co_icf_method, snr_NO=snr_NO, icf_tier=icf_tier, no_oxygen_tracer=no_oxygen_tracer,
                             logU_diagnostic=logU_diagnostic,
                             logU_ne=logU_ne,
                     logU_override=logU_override,

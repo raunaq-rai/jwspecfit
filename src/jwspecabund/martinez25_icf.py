@@ -917,3 +917,113 @@ def compute_NO_martinez25_locked(
     if icf_name == "NpppOpp" and N_ppp > 0 and O_pp > 0:
         return N_ppp / O_pp * icf_NpppOpp(logU, Z_Zsun, ne)
     return None
+
+
+#: Tier names available when O2+ is measured from the rest-UV O III]
+#: 1661,1666 lines instead of [O III] 5007.  ICFs 1 and 4 need O+, whose
+#: only tracer is the optical [O II] 3727, so just the three ICFs with O2+
+#: alone in the denominator can use the UV oxygen.
+VALID_NO_UV_ICF_TIERS = ("NppOpp", "NpppOpp", "NppNppp_Opp")
+
+
+def compute_NO_martinez25_uv(
+    uv_ratios: dict[str, float],
+    logU: float,
+    Z_Zsun: float,
+    ne: float = 100.0,
+) -> tuple[float, str] | tuple[None, None]:
+    """Total N/O from the rest-UV ionic ratios, using the same ICFs.
+
+    The counterpart of :func:`compute_NO_martinez25` for ratios already
+    formed against O2+ measured from O III] 1661,1666
+    (:func:`jwspecabund.direct.compute_N_Opp_uv`), so neither Hbeta nor
+    [O III] 5007 enters.  The ICFs are unchanged -- each is a function of
+    the ionic ratio, log(U), Z and n_e, not of the line that measured O2+
+    -- and the names returned match :data:`VALID_NO_ICF_TIERS`, the oxygen
+    tracer being recorded separately by the caller.
+
+    Priority: ICF 5 ((N2+ + N3+)/O2+), then ICF 2 (N2+/O2+), then ICF 3
+    (N3+/O2+, which carries the largest corrections).  ICF 4 is skipped
+    even when [O II] is in hand: summing a UV-traced O2+ with an
+    optically-traced O+ would put the reddening baseline straight back
+    into the denominator, which is the whole point of the UV pairing.
+
+    Parameters
+    ----------
+    uv_ratios : dict
+        ``{"N++/O++": val, "N+++/O++": val}``; either key may be absent.
+    logU : float
+        Ionisation parameter log(U).
+    Z_Zsun : float
+        Gas-phase metallicity in solar units.
+    ne : float
+        Electron density in cm^-3 (default 100).
+
+    Returns
+    -------
+    tuple
+        ``(N/O, icf_name)``, or ``(None, None)`` when no ratio is usable.
+    """
+    npp = uv_ratios.get("N++/O++", 0.0)
+    nppp = uv_ratios.get("N+++/O++", 0.0)
+
+    if npp > 0 and nppp > 0:
+        return (npp + nppp) * icf_NppNppp_Opp(logU, Z_Zsun, ne), "NppNppp_Opp"
+    if npp > 0:
+        return npp * icf_NppOpp(logU, Z_Zsun, ne), "NppOpp"
+    if nppp > 0:
+        return nppp * icf_NpppOpp(logU, Z_Zsun, ne), "NpppOpp"
+    return None, None
+
+
+def compute_NO_martinez25_uv_locked(
+    uv_ratios: dict[str, float],
+    logU: float,
+    Z_Zsun: float,
+    ne: float,
+    icf_name: str,
+) -> float | None:
+    """Rest-UV N/O on one named ICF, with no cascade.
+
+    The UV counterpart of :func:`compute_NO_martinez25_locked`.
+    Monte-Carlo and posterior draws use it so every draw reports the tier
+    the point estimate chose, rather than silently mixing tiers.
+
+    Parameters
+    ----------
+    uv_ratios : dict
+        ``{"N++/O++": val, "N+++/O++": val}``; either key may be absent.
+    logU : float
+        Ionisation parameter log(U).
+    Z_Zsun : float
+        Gas-phase metallicity in solar units.
+    ne : float
+        Electron density in cm^-3.
+    icf_name : str
+        One of :data:`VALID_NO_UV_ICF_TIERS`.
+
+    Returns
+    -------
+    float or None
+        N/O, or ``None`` if the named tier cannot be formed here.
+
+    Raises
+    ------
+    ValueError
+        If *icf_name* cannot use the rest-UV oxygen tracer.
+    """
+    if icf_name not in VALID_NO_UV_ICF_TIERS:
+        raise ValueError(
+            f"N/O ICF tier {icf_name!r} cannot use the rest-UV oxygen "
+            f"tracer; valid options are {', '.join(VALID_NO_UV_ICF_TIERS)}."
+        )
+    npp = uv_ratios.get("N++/O++", 0.0)
+    nppp = uv_ratios.get("N+++/O++", 0.0)
+
+    if icf_name == "NppNppp_Opp" and npp > 0 and nppp > 0:
+        return (npp + nppp) * icf_NppNppp_Opp(logU, Z_Zsun, ne)
+    if icf_name == "NppOpp" and npp > 0:
+        return npp * icf_NppOpp(logU, Z_Zsun, ne)
+    if icf_name == "NpppOpp" and nppp > 0:
+        return nppp * icf_NpppOpp(logU, Z_Zsun, ne)
+    return None

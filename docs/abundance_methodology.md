@@ -646,6 +646,60 @@ log(N/O) = log10(ionic_ratio × ICF)
 The ICF selection procedure is described in
 [Section 8.2](#82-martinez-et-al-2025--density-dependent-icfs).
 
+### 6.7 Rest-UV oxygen tracer — `no_oxygen_tracer`
+
+**Source:** `jwspecabund.direct.compute_N_Opp_uv`,
+`jwspecabund.martinez25_icf.compute_NO_martinez25_uv`
+
+ICFs 2, 3 and 5 divide by O²⁺ alone, and an ICF is a function of the ionic
+ratio, log(U), Z and n_e — not of the line that measured O²⁺.  So O²⁺ can be
+measured from O III] λ1661,1666 instead of [O III] λ5007, the nitrogen
+analogue of the pure-UV C/O of Section 7.4:
+
+```
+N2+/O2+ = I(NIII] 1749+1752) / I(O III] 1661+1666)
+          x eps_O(1661+1666) / eps_N(1749+1752)
+N3+/O2+ = I(NIV] 1483+1486)  / I(O III] 1661+1666)
+          x eps_O(1661+1666) / eps_N(1483+1486)
+```
+
+That makes ICF 5 genuinely pure-UV, which is how Martinez et al. describe it.
+ICFs 1 and 4 need O⁺, whose only tracer is the optical [O II] λ3727, so they
+always use the optical oxygen.
+
+**Why it is better conditioned.**  Measured with this package's own atomic
+data and attenuation curves:
+
+| | N²⁺ vs λ1661,1666 | N²⁺ vs λ5007 | N³⁺ vs λ1661,1666 | N³⁺ vs λ5007 |
+|---|---|---|---|---|
+| T_e swing, 10,000 → 25,000 K | 0.09 dex | 1.37 dex | 0.11 dex | 1.57 dex |
+| Cardelli, dex per mag A_V | −0.006 | +0.555 | +0.065 | +0.626 |
+| Salim, dex per mag A_V | −0.047 | +1.318 | +0.166 | +1.532 |
+
+λ1666 and the UV nitrogen lines sit at nearly the same excitation energy, so
+the emissivity ratio barely moves with T_e; λ5007, at 2.5 eV, does not.  The
+85–180 Å baseline likewise leaves almost no reddening leverage, and no Hβ is
+needed, which also removes the relative flux calibration between the gratings
+covering the UV and the optical.
+
+**What it costs.**  λ1661,1666 run ~20× fainter than λ5007 and need the
+6-level O III collision data (`OIII_1666_COLL_FILE`); the λ1661/1666
+branching-ratio check of Section 7.5 is the guard on that denominator.
+
+**Selection.**  The default `no_oxygen_tracer="optical"` is the behaviour that
+predates this option.  `"uv"` prefers the UV tracer and falls back to the
+optical one when λ1661/1666 or both UV nitrogen lines are missing, recording
+why in `diagnostics["N/O oxygen"]`.  `"auto"` prefers it only above
+`NO_UV_AV_THRESHOLD` magnitudes of A_V, mirroring the C/O tier order.
+`AbundanceResult.NO_oxygen_tracer` reports which tracer was used, and
+Monte-Carlo and posterior draws are locked to the point estimate's tracer, so
+a resampled A_V cannot turn an N/O posterior into a mixture of two tracers.
+
+Two limits are worth keeping in mind.  Z/Z_sun still comes from O/H, so the UV
+tracer removes the optical oxygen from the *ionic ratio*, not from the ICF's
+metallicity argument.  And N/O as a whole still requires O⁺ or O²⁺, so a
+spectrum with no optical oxygen at all yields no N/O by either route.
+
 
 ---
 
@@ -853,6 +907,9 @@ Each ICF corrects a specific ionic ratio to total N/O:
 | **ICF 2** | N2+ / O2+ | UV single-ion.  Overestimates at low log(U). |
 | **ICF 1** | N+ / O+ | Classical optical.  Simplest but least accurate at high ionisation. |
 | **ICF 3** | N3+ / O2+ | Large corrections (100–15,000%); returned in log-space.  **Least preferred.** |
+
+ICFs 2, 3 and 5 divide by O²⁺ alone, so they can equally take that O²⁺ from
+O III] 1661,1666 rather than [O III] 5007 — see [Section 6.7](#67-rest-uv-oxygen-tracer--no_oxygen_tracer).
 
 #### Selection priority
 

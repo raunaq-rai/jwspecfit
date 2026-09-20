@@ -6,6 +6,33 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### N/O can measure O²⁺ from the rest-UV O III] lines
+
+- **`no_oxygen_tracer=` on `compute_abundances`.** The Martinez+25 ICFs 2
+  (N²⁺/O²⁺), 3 (N³⁺/O²⁺) and 5 ((N²⁺+N³⁺)/O²⁺) divide by O²⁺ alone, and an ICF
+  is a function of the ionic ratio, log(U), Z and n_e — not of the line that
+  measured O²⁺. They can therefore pair the UV nitrogen lines with
+  O III] 1661,1666 instead of [O III] 5007, the nitrogen analogue of the
+  pure-UV C/O. `"optical"` stays the default and is bit-identical to before;
+  `"uv"` selects the UV tracer, `"auto"` switches on A_V as C/O does.
+- **Why it is better conditioned**, measured with the package's own atomic data
+  and dust curves: the N²⁺/O²⁺ conversion factor moves 0.09 dex across
+  T_e = 10,000–25,000 K against 1.37 dex for the [O III] 5007 pairing, because
+  λ1666 sits at nearly the same excitation energy as λ1749,1752 while λ5007
+  (2.5 eV) does not. Reddening leverage on log(N/O) drops from +0.56 (Cardelli)
+  and +1.32 (Salim) dex per magnitude of A_V to −0.006 and −0.047. For N³⁺ it is
+  0.11 dex against 1.57, and +0.065/+0.166 against +0.626/+1.532. No Hβ is
+  needed either, so the UV-to-optical grating calibration drops out.
+- **ICF 5 is now genuinely "pure UV"**, as Martinez et al. describe it; its
+  denominator had been optical all along.
+- ICFs 1 and 4 keep the optical oxygen: they need O⁺, and summing a UV-traced
+  O²⁺ with an optical O⁺ would put the reddening baseline back into the
+  denominator. Monte-Carlo and posterior draws lock to the point estimate's
+  tracer, so a resampled A_V cannot make a posterior a mixture of two tracers.
+  `AbundanceResult.NO_oxygen_tracer` records which tracer produced the N/O.
+- Z/Z_sun still comes from O/H, so this removes the optical oxygen from the
+  ionic ratio, not from the ICF's metallicity argument.
+
 ### The low-ionisation density fallback is attributed correctly
 
 - The `n_e(low)` z-fallback reported itself as `Topping+2025a`. The relation it

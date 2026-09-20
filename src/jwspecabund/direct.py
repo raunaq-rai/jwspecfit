@@ -59,6 +59,23 @@ OIII_1666_COLL_FILE = "o_iii_coll_TZ17.dat"
 #: measurement typically costs.
 CO_UV_AV_THRESHOLD: float = 1.0
 
+#: A_V above which the pure-UV oxygen tracer is preferred for N/O.
+#:
+#: The nitrogen counterpart of :data:`CO_UV_AV_THRESHOLD`.  Pairing
+#: N III] 1749,1752 or N IV] 1483,1486 with [O III] 5007 carries +0.56
+#: (Cardelli) to +1.32 (Salim) dex of log(N/O) per magnitude of A_V;
+#: pairing them with O III] 1661,1666, 85-180 A away, carries -0.006 to
+#: +0.17 and needs no Hbeta.  It also removes most of the temperature
+#: leverage: the eps(O)/eps(N) factor moves 0.09 dex over Te =
+#: 10,000-25,000 K against 1.37 dex for the optical pairing, because
+#: lambda1666 sits at nearly the same excitation energy as lambda1749,1752
+#: while lambda5007 (2.5 eV) does not.  The cost is the denominator:
+#: lambda1661,1666 run ~20x fainter than lambda5007.
+#:
+#: Unlike C/O, this threshold is consulted only when the caller asks for
+#: it (``no_oxygen_tracer="auto"``); the N/O default stays optical.
+NO_UV_AV_THRESHOLD: float = 1.0
+
 _OIII_ATOMS: dict[str, Any] = {}
 
 
@@ -1417,6 +1434,152 @@ def compute_CppOpp_uv(
     return float(cpp_opp), "; ".join(notes)
 
 
+def compute_N_Opp_uv(
+    *,
+    Te_O: float,
+    ne_O: float,
+    flux_1661: float = 0.0,
+    flux_1666: float = 0.0,
+    flux_1749: float = 0.0,
+    flux_1752: float = 0.0,
+    flux_1483: float = 0.0,
+    flux_1486: float = 0.0,
+    Te_Npp: float | None = None,
+    ne_Npp: float | None = None,
+    Te_Nppp: float | None = None,
+    ne_Nppp: float | None = None,
+    coll_file: str = OIII_1666_COLL_FILE,
+) -> tuple[dict[str, float], str]:
+    """N2+/O2+ and N3+/O2+ from the rest-UV lines alone.
+
+    The nitrogen counterpart of :func:`compute_CppOpp_uv`::
+
+        N2+/O2+ = I(NIII] 1749+1752) / I(O III] 1661+1666)
+                  x eps_O(1661+1666) / eps_N(1749+1752)
+        N3+/O2+ = I(NIV] 1483+1486)  / I(O III] 1661+1666)
+                  x eps_O(1661+1666) / eps_N(1483+1486)
+
+    Both feed the Martinez+2025 ICFs unchanged: an ICF is a function of the
+    ionic ratio, log(U), Z and n_e and does not care which line measured
+    O2+ (ICF 2 takes N2+/O2+, ICF 3 takes N3+/O2+, ICF 5 takes their sum).
+
+    Pairing the UV nitrogen lines with the UV oxygen lines rather than with
+    [O III] 5007 buys two things.  The ratio spans 85-180 A instead of
+    ~3300-3500 A, so it is nearly reddening-free and needs no Hbeta, which
+    also removes the relative flux calibration between the gratings
+    covering the UV and the optical.  And lambda1666 sits at almost the
+    same excitation energy as lambda1749,1752, so the emissivity ratio
+    barely moves with T_e.  :data:`NO_UV_AV_THRESHOLD` carries the measured
+    numbers for both.
+
+    The cost is the denominator: lambda1661,1666 run ~20x fainter than
+    lambda5007, and cannot be evaluated at all without the 6-level O III
+    collision data (:data:`OIII_1666_COLL_FILE`).
+
+    Parameters
+    ----------
+    Te_O, ne_O : float
+        Conditions for O2+, as for the optical O2+ (the high-ionisation
+        zone temperature and the O2+-zone density).
+    flux_1661, flux_1666 : float
+        Dust-corrected O III] fluxes.  At least one must be positive; a
+        missing component is filled in from the fixed branching ratio
+        (:func:`oiii_uv_branching_ratio`).
+    flux_1749, flux_1752 : float
+        Dust-corrected N III] fluxes.  Both zero omits ``"N++/O++"``.
+    flux_1483, flux_1486 : float
+        Dust-corrected N IV] fluxes.  Both zero omits ``"N+++/O++"``.
+    Te_Npp, ne_Npp : float or None
+        Conditions for N2+.  ``None`` puts N2+ in the O2+ zone; pass the
+        intermediate-zone values to match the zone assignment used by
+        :func:`compute_ionic_abundances` (Martinez+2025 §5.4), which is
+        what :func:`~jwspecabund.compute_abundances` does.  As with C/O,
+        this choice moves the answer more than the oxygen tracer does.
+    Te_Nppp, ne_Nppp : float or None
+        Conditions for N3+.  ``None`` puts N3+ in the O2+ zone; the
+        package convention is the high-ionisation zone.
+    coll_file : str
+        O III collision-strength file; see :func:`_get_oiii_atom`.
+
+    Returns
+    -------
+    tuple
+        ``(ratios, note)``, where *ratios* holds ``"N++/O++"`` and/or
+        ``"N+++/O++"`` for the nitrogen ions available, and *note* records
+        which components were measured and which were inferred.
+
+    Raises
+    ------
+    ValueError
+        If no O III] 1661/1666 component is available, if neither nitrogen
+        ion is available, or if an emissivity is non-positive.
+    """
+    pn = _get_pyneb()
+    o3 = _get_oiii_atom(coll_file)
+
+    e1661 = o3.getEmissivity(Te_O, ne_O, lev_i=6, lev_j=2)
+    e1666 = o3.getEmissivity(Te_O, ne_O, lev_i=6, lev_j=3)
+    if min(e1661, e1666) <= 0:
+        raise ValueError(
+            f"Non-positive O III] emissivity at Te={Te_O:.0f} K, "
+            f"ne={ne_O:.3g} cm^-3."
+        )
+    eps_O = e1661 + e1666
+
+    branch = oiii_uv_branching_ratio(coll_file)
+    notes: list[str] = []
+    if flux_1661 > 0 and flux_1666 > 0:
+        o_sum = flux_1661 + flux_1666
+        notes.append("O III] 1661+1666 measured")
+    elif flux_1666 > 0:
+        o_sum = flux_1666 * (1.0 + branch)
+        notes.append(f"O III] from lambda1666 x (1+{branch:.3f})")
+    elif flux_1661 > 0:
+        o_sum = flux_1661 * (1.0 + branch) / branch
+        notes.append(f"O III] from lambda1661 x (1+{branch:.3f})/{branch:.3f}")
+    else:
+        raise ValueError("Neither O III] 1661 nor 1666 is available.")
+
+    ratios: dict[str, float] = {}
+    for key, spec, waves, pair, Te_N, ne_N, label in (
+        ("N++/O++", 3, (1749, 1752), (flux_1749, flux_1752), Te_Npp, ne_Npp, "NIII]"),
+        ("N+++/O++", 4, (1483, 1486), (flux_1483, flux_1486), Te_Nppp, ne_Nppp, "NIV]"),
+    ):
+        f_a, f_b = pair
+        if f_a <= 0 and f_b <= 0:
+            continue
+        TeN = Te_O if Te_N is None else Te_N
+        neN = ne_O if ne_N is None else ne_N
+        atom = pn.Atom("N", spec)
+        e_a = atom.getEmissivity(TeN, neN, wave=waves[0])
+        e_b = atom.getEmissivity(TeN, neN, wave=waves[1])
+        # With one member only, use that member's emissivity rather than the
+        # doublet sum, as compute_ionic_abundances does: the other component
+        # may have been dropped by the SNR filter rather than being absent.
+        if f_a > 0 and f_b > 0:
+            n_sum, eps_N = f_a + f_b, e_a + e_b
+            notes.append(f"{label} {waves[0]}+{waves[1]} measured")
+        elif f_a > 0:
+            n_sum, eps_N = f_a, e_a
+            notes.append(f"{label} from lambda{waves[0]} alone")
+        else:
+            n_sum, eps_N = f_b, e_b
+            notes.append(f"{label} from lambda{waves[1]} alone")
+        if eps_N <= 0:
+            raise ValueError(
+                f"Non-positive {label} emissivity at Te={TeN:.0f} K, "
+                f"ne={neN:.3g} cm^-3."
+            )
+        if Te_N is not None or ne_N is not None:
+            notes.append(f"{label} at Te={TeN:.0f} K, ne={neN:.3g} cm^-3")
+        ratios[key] = float((n_sum / o_sum) * (eps_O / eps_N))
+
+    if not ratios:
+        raise ValueError("Neither NIII] 1749,1752 nor NIV] 1483,1486 is available.")
+
+    return ratios, "; ".join(notes)
+
+
 
 def compute_Te_NII(
     flux_5756: float,
@@ -1937,6 +2100,79 @@ def _print_icf_reasoning(
     print("=" * 60 + "\n")
 
 
+def _no_oxygen_tracer_order(
+    mode: str,
+    uv_available: bool,
+    Av: float | None = None,
+    Av_threshold: float = NO_UV_AV_THRESHOLD,
+    locked: str | None = None,
+) -> tuple[list[str], str | None]:
+    """Order the oxygen tracers the Martinez+25 N/O ICFs may use.
+
+    Parameters
+    ----------
+    mode : {"optical", "uv", "auto"}
+        ``"optical"`` (the default) keeps [O III] 5007 and never reaches
+        for the UV lines, so N/O is unchanged from before this option
+        existed.  ``"uv"`` prefers O III] 1661,1666 and falls back to the
+        optical tracer when the UV ratio cannot be formed.  ``"auto"``
+        mirrors the C/O behaviour: optical first, but UV first once *Av*
+        exceeds *Av_threshold*, where the reddening leverage on the
+        UV-to-optical pairing outgrows the S/N cost of the faint UV
+        oxygen.
+    uv_available : bool
+        Whether a usable rest-UV ionic ratio was supplied.
+    Av : float or None
+        Adopted V-band attenuation in magnitudes; consulted only for
+        ``"auto"``.
+    Av_threshold : float
+        See *mode*.  Default :data:`NO_UV_AV_THRESHOLD`.
+    locked : str or None
+        Restrict the order to this one tracer.  Monte-Carlo and posterior
+        draws pass the tracer the point estimate selected, so a resampled
+        A_V straddling *Av_threshold* cannot turn an N/O posterior into a
+        silent mixture of two oxygen tracers.
+
+    Returns
+    -------
+    tuple
+        ``(order, reason)``: the tracers to try, most preferred first, and
+        a note when *Av* promoted the UV tracer.
+
+    Raises
+    ------
+    ValueError
+        If *mode* is not ``"optical"``, ``"uv"`` or ``"auto"``.
+    """
+    if mode not in ("optical", "uv", "auto"):
+        raise ValueError(
+            f"no_oxygen_tracer={mode!r}; use 'optical', 'uv' or 'auto'."
+        )
+
+    reason: str | None = None
+    if mode == "optical":
+        order = ["optical"]
+    elif mode == "uv":
+        order = ["uv", "optical"]
+    else:
+        order = ["optical", "uv"]
+        if Av is not None and np.isfinite(Av) and Av > Av_threshold:
+            order = ["uv", "optical"]
+            reason = (
+                f"A_V = {Av:.2f} mag > {Av_threshold:.2f}, so the pure-UV "
+                f"oxygen tracer is preferred over [OIII] 5007"
+            )
+
+    if not uv_available:
+        order = [t for t in order if t != "uv"]
+    if locked is not None:
+        order = [t for t in order if t == locked]
+    if not order or order[0] != "uv":
+        # The UV tracer is not first after all, so an A_V promotion is moot.
+        reason = None
+    return order, reason
+
+
 def compute_total_abundances(
     ionic: dict[str, float],
     logU: float | None = None,
@@ -1950,9 +2186,14 @@ def compute_total_abundances(
     co_uv_note: str | None = None,
     Av: float | None = None,
     co_uv_Av_threshold: float = CO_UV_AV_THRESHOLD,
+    no_uv_ratios: dict[str, float] | None = None,
+    no_uv_note: str | None = None,
+    no_oxygen_tracer: str = "optical",
+    no_uv_Av_threshold: float = NO_UV_AV_THRESHOLD,
     ionic_upper_limits: dict[str, float] | None = None,
     _lock_NO_icf: str | None = None,
     _lock_CO_tier: str | None = None,
+    _lock_NO_tracer: str | None = None,
 ) -> dict[str, float]:
     """Derive total element abundances from ionic abundances + ICFs.
 
@@ -1996,6 +2237,26 @@ def compute_total_abundances(
         flux calibration between the UV and optical gratings; the pure-UV
         pairing spans ~240 Å and carries ~0.04 dex/mag, but has a weaker
         denominator.  Default :data:`CO_UV_AV_THRESHOLD`.
+    no_uv_ratios : dict, optional
+        N2+/O2+ and/or N3+/O2+ measured from the rest-UV lines alone,
+        ``{"N++/O++": val, "N+++/O++": val}`` from
+        :func:`compute_N_Opp_uv`.  Passed in rather than computed here for
+        the same reason as *co_uv_ratio*: it needs the dust-corrected
+        fluxes and the zone T_e/n_e, none of which this function sees.
+        Required before *no_oxygen_tracer* can reach the UV tracer.
+    no_uv_note : str, optional
+        The provenance note returned alongside *no_uv_ratios*, recorded in
+        ``_icf_values["N/O"]["note"]`` when the UV tracer is adopted.
+    no_oxygen_tracer : {"optical", "uv", "auto"}
+        Which oxygen tracer the Martinez+25 N/O ICFs use.  ``"optical"``
+        (default) is [O III] 5007, exactly as before this option existed;
+        ``"uv"`` prefers O III] 1661,1666; ``"auto"`` switches on *Av*.
+        See :func:`_no_oxygen_tracer_order`.  Only ICFs 2, 3 and 5 can use
+        the UV tracer (:data:`~jwspecabund.martinez25_icf.VALID_NO_UV_ICF_TIERS`);
+        ICFs 1 and 4 need O+, whose only tracer is the optical [O II] 3727.
+    no_uv_Av_threshold : float
+        A_V above which ``no_oxygen_tracer="auto"`` prefers the rest-UV
+        oxygen tracer.  Default :data:`NO_UV_AV_THRESHOLD`.
 
     Returns
     -------
@@ -2110,99 +2371,194 @@ def compute_total_abundances(
 
         # N/O — Martinez+25 with direct_sum fallback
         elif use_martinez:
-            from .martinez25_icf import compute_NO_martinez25, compute_NO_martinez25_locked
+            from .martinez25_icf import (
+                VALID_NO_UV_ICF_TIERS,
+                compute_NO_martinez25,
+                compute_NO_martinez25_locked,
+                compute_NO_martinez25_uv,
+                compute_NO_martinez25_uv_locked,
+            )
             ne_icf = ne if ne is not None else NE_DEFAULT
-            # If locked to a specific ICF tier, use it directly.
-            # When locked, do NOT fall back — return no N/O so the MC
-            # iteration gets NaN rather than mixing tiers.
-            ionic_with_ul = ionic  # default; overwritten if ULs used
-            if _lock_NO_icf is not None:
-                NO_val = compute_NO_martinez25_locked(ionic, logU, Z_Zsun, ne_icf, _lock_NO_icf)
-                NO_icf_name = _lock_NO_icf
-                if NO_val is not None:
+
+            # Which oxygen tracer may serve the ICF, and in what order.
+            # ICFs 2, 3 and 5 divide by O2+ alone, so O2+ can equally come
+            # from O III] 1661,1666 -- an ICF is a function of the ionic
+            # ratio, log(U), Z and n_e, not of the line that measured O2+.
+            _uv_ratios = no_uv_ratios or {}
+            _uv_ok = any(
+                v > 0 and np.isfinite(v) for v in _uv_ratios.values()
+            )
+            _no_order, _no_reason = _no_oxygen_tracer_order(
+                no_oxygen_tracer, _uv_ok, Av, no_uv_Av_threshold,
+                _lock_NO_tracer,
+            )
+
+            def _adopt_no_uv() -> bool:
+                """Set N/O from the rest-UV ratios; True if it was formed."""
+                if _lock_NO_icf is not None:
+                    if _lock_NO_icf not in VALID_NO_UV_ICF_TIERS:
+                        return False
+                    _val = compute_NO_martinez25_uv_locked(
+                        _uv_ratios, logU, Z_Zsun, ne_icf, _lock_NO_icf,
+                    )
+                    _name = _lock_NO_icf
+                else:
+                    _val, _name = compute_NO_martinez25_uv(
+                        _uv_ratios, logU, Z_Zsun, ne_icf,
+                    )
+                if _val is None or not np.isfinite(_val) or _val <= 0:
+                    return False
+                totals["N/O"] = _val
+                totals["NO_icf_name"] = _name
+                totals["icf_method"] = "martinez25"
+                totals["NO_oxygen_tracer"] = "uv"
+                _raw = {
+                    "NppNppp_Opp": (
+                        _uv_ratios.get("N++/O++", 0.0)
+                        + _uv_ratios.get("N+++/O++", 0.0)
+                    ),
+                    "NppOpp": _uv_ratios.get("N++/O++", 0.0),
+                    "NpppOpp": _uv_ratios.get("N+++/O++", 0.0),
+                }.get(_name, 0.0)
+                if _raw > 0:
+                    icf_dict["N/O"] = {
+                        "icf": _val / _raw,
+                        "method": f"Martinez+25 ({_name})",
+                        "oxygen": "O III] 1661,1666",
+                        "raw": np.log10(_raw),
+                        "corrected": np.log10(_val),
+                    }
+                    if no_uv_note:
+                        icf_dict["N/O"]["note"] = no_uv_note
+                return True
+
+            for _tracer in _no_order:
+                if _tracer == "uv":
+                    if _adopt_no_uv():
+                        break
+                    continue
+
+                # --- optical O2+ tracer: [O III] 5007 ---
+                # If locked to a specific ICF tier, use it directly.
+                # When locked, do NOT fall back — return no N/O so the MC
+                # iteration gets NaN rather than mixing tiers.
+                ionic_with_ul = ionic  # default; overwritten if ULs used
+                if _lock_NO_icf is not None:
+                    NO_val = compute_NO_martinez25_locked(
+                        ionic, logU, Z_Zsun, ne_icf, _lock_NO_icf,
+                    )
+                    NO_icf_name = _lock_NO_icf
+                    if NO_val is not None:
+                        totals["N/O"] = NO_val
+                        totals["NO_icf_name"] = NO_icf_name
+                        totals["icf_method"] = "martinez25"
+                    elif ionic_upper_limits:
+                        # Ions not detected — try with 3σ upper-limit ionic
+                        # abundances to produce an N/O upper limit.
+                        ionic_with_ul = dict(ionic)
+                        for ul_key, ul_val in ionic_upper_limits.items():
+                            if ionic_with_ul.get(ul_key, 0.0) <= 0:
+                                ionic_with_ul[ul_key] = ul_val
+                        NO_ul_val = compute_NO_martinez25_locked(
+                            ionic_with_ul, logU, Z_Zsun, ne_icf, _lock_NO_icf,
+                        )
+                        if NO_ul_val is not None:
+                            NO_val = NO_ul_val  # so ICF dict block below fires
+                            totals["N/O"] = NO_ul_val
+                            totals["NO_icf_name"] = NO_icf_name
+                            totals["icf_method"] = "martinez25"
+                            totals["NO_is_upper_limit"] = True
+                    # else: N/O stays unset → NaN in MC loop
+                else:
+                    NO_val, NO_icf_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)
+                if _lock_NO_icf is None and NO_val is not None:
                     totals["N/O"] = NO_val
                     totals["NO_icf_name"] = NO_icf_name
                     totals["icf_method"] = "martinez25"
-                elif ionic_upper_limits:
-                    # Ions not detected — try with 3σ upper-limit ionic
-                    # abundances to produce an N/O upper limit.
-                    ionic_with_ul = dict(ionic)
-                    for ul_key, ul_val in ionic_upper_limits.items():
-                        if ionic_with_ul.get(ul_key, 0.0) <= 0:
-                            ionic_with_ul[ul_key] = ul_val
-                    NO_ul_val = compute_NO_martinez25_locked(
-                        ionic_with_ul, logU, Z_Zsun, ne_icf, _lock_NO_icf,
-                    )
-                    if NO_ul_val is not None:
-                        NO_val = NO_ul_val  # so ICF dict block below fires
-                        totals["N/O"] = NO_ul_val
-                        totals["NO_icf_name"] = NO_icf_name
-                        totals["icf_method"] = "martinez25"
-                        totals["NO_is_upper_limit"] = True
-                # else: N/O stays unset → NaN in MC loop
-            else:
-                NO_val, NO_icf_name = compute_NO_martinez25(ionic, logU, Z_Zsun, ne_icf)
-            if _lock_NO_icf is None and NO_val is not None:
-                totals["N/O"] = NO_val
-                totals["NO_icf_name"] = NO_icf_name
-                totals["icf_method"] = "martinez25"
-            # Store N/O ICF value for the selected tier.
-            if NO_val is not None and NO_icf_name is not None:
-                _icf_key_map = {
-                    "NppNppp_Opp": "_icf5_value",
-                    "NpNpp_OpOpp": "_icf4_value",
-                    "NpppOpp": "_icf3_value",
-                    "NppOpp": "_icf2_value",
-                    "NpOp": "_icf1_value",
-                }
-                # Use UL-augmented ionic dict if upper limits were used.
-                _ion = ionic_with_ul if totals.get("NO_is_upper_limit") else ionic
-                # Compute raw ionic ratio (without ICF)
-                _no_icf_funcs = {
-                    "NppNppp_Opp": lambda: (
-                        (_ion.get("N++/H+", 0) + _ion.get("N+++/H+", 0)) / O_pp if O_pp > 0 else 0
-                    ),
-                    "NpOp": lambda: _ion.get("N+/H+", 0) / O_plus if O_plus > 0 else 0,
-                    "NppOpp": lambda: _ion.get("N++/H+", 0) / O_pp if O_pp > 0 else 0,
-                    "NpppOpp": lambda: _ion.get("N+++/H+", 0) / O_pp if O_pp > 0 else 0,
-                    "NpNpp_OpOpp": lambda: (
-                        (_ion.get("N+/H+", 0) + _ion.get("N++/H+", 0)) / (O_plus + O_pp)
-                        if (O_plus + O_pp) > 0 else 0
-                    ),
-                }
-                raw_ratio = _no_icf_funcs.get(NO_icf_name, lambda: 0)()
-                if raw_ratio > 0 and NO_val > 0:
-                    icf_no = NO_val / raw_ratio
-                    icf_dict["N/O"] = {
-                        "icf": icf_no, "method": f"Martinez+25 ({NO_icf_name})",
-                        "raw": np.log10(raw_ratio),
-                        "corrected": np.log10(NO_val),
+                # Store N/O ICF value for the selected tier.
+                if NO_val is not None and NO_icf_name is not None:
+                    _icf_key_map = {
+                        "NppNppp_Opp": "_icf5_value",
+                        "NpNpp_OpOpp": "_icf4_value",
+                        "NpppOpp": "_icf3_value",
+                        "NppOpp": "_icf2_value",
+                        "NpOp": "_icf1_value",
                     }
-            elif _lock_NO_icf is None and NO_val is None:
-                # Fall back to direct_sum tiers if Martinez+25 has no
-                # suitable ionic ratios (e.g. nitrogen ions SNR-gated).
-                N_plus = ionic.get("N+/H+", 0.0)
-                N_pp = ionic.get("N++/H+", 0.0)
-                N_ppp = ionic.get("N+++/H+", 0.0)
-                N_pppp = ionic.get("N4+/H+", 0.0)
-                if N_plus > 0 and (N_pp + N_ppp) > 0:
-                    totals["N/O"] = (N_plus + N_pp + N_ppp + N_pppp) / OH
-                    totals["icf_method"] = "direct_sum"
-                    totals["NO_icf_name"] = "Np_Npp_Nppp"
-                elif (N_pp + N_ppp) > 0 and O_pp > 0:
-                    totals["N/O"] = (N_pp + N_ppp + N_pppp) / O_pp
-                    totals["icf_method"] = "direct_sum"
-                    if N_pp > 0 and N_ppp > 0:
-                        totals["NO_icf_name"] = "Npp_Nppp_Opp"
-                    elif N_ppp > 0:
-                        totals["NO_icf_name"] = "Nppp_Opp"
-                    else:
-                        totals["NO_icf_name"] = "Npp_Opp"
-                elif N_plus > 0 and O_plus > 0:
-                    icf_n = icf_nitrogen(O_plus, OH)
-                    totals["N/O"] = icf_n * N_plus / OH if OH > 0 else 0
-                    totals["icf_method"] = "izotov06"
-                    totals["NO_icf_name"] = "izotov06_fallback"
+                    # Use UL-augmented ionic dict if upper limits were used.
+                    _ion = ionic_with_ul if totals.get("NO_is_upper_limit") else ionic
+                    # Compute raw ionic ratio (without ICF)
+                    _no_icf_funcs = {
+                        "NppNppp_Opp": lambda: (
+                            (_ion.get("N++/H+", 0) + _ion.get("N+++/H+", 0)) / O_pp
+                            if O_pp > 0 else 0
+                        ),
+                        "NpOp": lambda: _ion.get("N+/H+", 0) / O_plus if O_plus > 0 else 0,
+                        "NppOpp": lambda: _ion.get("N++/H+", 0) / O_pp if O_pp > 0 else 0,
+                        "NpppOpp": lambda: _ion.get("N+++/H+", 0) / O_pp if O_pp > 0 else 0,
+                        "NpNpp_OpOpp": lambda: (
+                            (_ion.get("N+/H+", 0) + _ion.get("N++/H+", 0)) / (O_plus + O_pp)
+                            if (O_plus + O_pp) > 0 else 0
+                        ),
+                    }
+                    raw_ratio = _no_icf_funcs.get(NO_icf_name, lambda: 0)()
+                    if raw_ratio > 0 and NO_val > 0:
+                        icf_no = NO_val / raw_ratio
+                        icf_dict["N/O"] = {
+                            "icf": icf_no, "method": f"Martinez+25 ({NO_icf_name})",
+                            "raw": np.log10(raw_ratio),
+                            "corrected": np.log10(NO_val),
+                        }
+                elif _lock_NO_icf is None and NO_val is None:
+                    # Fall back to direct_sum tiers if Martinez+25 has no
+                    # suitable ionic ratios (e.g. nitrogen ions SNR-gated).
+                    N_plus = ionic.get("N+/H+", 0.0)
+                    N_pp = ionic.get("N++/H+", 0.0)
+                    N_ppp = ionic.get("N+++/H+", 0.0)
+                    N_pppp = ionic.get("N4+/H+", 0.0)
+                    if N_plus > 0 and (N_pp + N_ppp) > 0:
+                        totals["N/O"] = (N_plus + N_pp + N_ppp + N_pppp) / OH
+                        totals["icf_method"] = "direct_sum"
+                        totals["NO_icf_name"] = "Np_Npp_Nppp"
+                    elif (N_pp + N_ppp) > 0 and O_pp > 0:
+                        totals["N/O"] = (N_pp + N_ppp + N_pppp) / O_pp
+                        totals["icf_method"] = "direct_sum"
+                        if N_pp > 0 and N_ppp > 0:
+                            totals["NO_icf_name"] = "Npp_Nppp_Opp"
+                        elif N_ppp > 0:
+                            totals["NO_icf_name"] = "Nppp_Opp"
+                        else:
+                            totals["NO_icf_name"] = "Npp_Opp"
+                    elif N_plus > 0 and O_plus > 0:
+                        icf_n = icf_nitrogen(O_plus, OH)
+                        totals["N/O"] = icf_n * N_plus / OH if OH > 0 else 0
+                        totals["icf_method"] = "izotov06"
+                        totals["NO_icf_name"] = "izotov06_fallback"
+
+                if "N/O" in totals:
+                    break
+
+            # Record which oxygen tracer actually produced the N/O, and why
+            # it was not the one asked for when that is the case.
+            if "N/O" in totals:
+                totals.setdefault("NO_oxygen_tracer", "optical")
+                if totals["NO_oxygen_tracer"] == "uv":
+                    if _no_reason:
+                        totals["NO_tracer_reason"] = _no_reason
+                elif _no_order and _no_order[0] == "uv":
+                    totals["NO_tracer_reason"] = (
+                        "rest-UV oxygen tracer preferred but not formable "
+                        "here; used [OIII] 5007"
+                    )
+                elif no_oxygen_tracer == "uv" and not _uv_ok:
+                    totals["NO_tracer_reason"] = (
+                        "rest-UV oxygen tracer requested but needs O III] "
+                        "1661/1666 with NIII] or NIV]; used [OIII] 5007"
+                    )
+            elif not _no_order and _lock_NO_tracer is not None:
+                failures["N/O"] = (
+                    f"N/O oxygen tracer {_lock_NO_tracer!r}, locked to the one "
+                    "the point estimate selected, could not be formed here"
+                )
         else:
             N_plus = ionic.get("N+/H+", 0.0)
             if N_plus > 0 and O_plus > 0:
@@ -2210,8 +2566,9 @@ def compute_total_abundances(
                 totals["N/O"] = icf_n * N_plus / OH if OH > 0 else 0
                 totals["icf_method"] = "izotov06"
 
-        # Record N/O failure reason if not computed.
-        if "N/O" not in totals:
+        # Record N/O failure reason if not computed, unless a more specific
+        # one (e.g. a locked oxygen tracer that could not be formed) is set.
+        if "N/O" not in totals and "N/O" not in failures:
             _n_ions = [k for k in ("N+/H+", "N++/H+", "N+++/H+", "N4+/H+")
                        if ionic.get(k, 0.0) > 0]
             _o_ions = [k for k in ("O+/H+", "O++/H+")

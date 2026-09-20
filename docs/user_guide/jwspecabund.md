@@ -119,7 +119,10 @@ C²⁺/H⁺, Ne²⁺/H⁺, S⁺/H⁺, S²⁺/H⁺, Ar²⁺/H⁺, Ar³⁺/H⁺. I
 total:
 
 - **N/O** — Martinez+25 by default (tiers auto-selected, override via
-  `icf_tier=`; needs logU + Z), Izotov+06 fallback
+  `icf_tier=`; needs logU + Z), Izotov+06 fallback. O²⁺ comes from
+  [O III] 5007 unless `no_oxygen_tracer="uv"` (or `"auto"`, which switches on
+  A_V) puts it on O III] 1661,1666 instead: nearly reddening-free and far
+  less T_e-sensitive, for ICFs 2, 3 and 5 only
 - **C/O** — Martinez (2026, in prep.) C²⁺/O²⁺ ICF by default
   (`co_icf_method="auto"`, when logU + Z + C²⁺ + O²⁺ are available), Garnett+97
   (or direct-sum) fallback
@@ -148,6 +151,7 @@ low-ionisation temperatures come from a `Te_relation`:
 | `logU`, `logU_err`                           | Ionisation parameter                              |
 | `ionic`                                      | Dict of ionic abundance ratios                    |
 | `icf_method`, `NO_icf_name`                  | ICF scheme and tier used for N/O                  |
+| `NO_oxygen_tracer`                           | `"optical"` or `"uv"` — the O²⁺ the N/O ICF used  |
 | `OH_posterior`, `NO_posterior`               | Full posterior arrays (MC / MCMC)                 |
 | `method`                                     | `"direct"` / `"strong_line"` / `"forward"`        |
 

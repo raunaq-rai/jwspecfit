@@ -159,6 +159,7 @@ class AbundanceResult:
     oiii_uv_doublet: dict[str, Any] | None = field(default=None, repr=False)
     icf_method: str | None = None
     NO_icf_name: str | None = None
+    NO_oxygen_tracer: str | None = None
     lya_f_esc: float | None = None
     lya_f_esc_err: float | tuple[float, float] | None = None
     lya_f_esc_posterior: np.ndarray | None = field(default=None, repr=False)
@@ -335,6 +336,8 @@ class AbundanceResult:
             lines.append(f"  ICF method  = {self.icf_method}")
         if self.NO_icf_name is not None:
             lines.append(f"  N/O ICF     = {self.NO_icf_name}")
+        if self.NO_oxygen_tracer == "uv":
+            lines.append("  N/O O²⁺     = O III] 1661,1666 (rest-UV tracer)")
 
         # --- ICF values ---
         if self.icf_values:
