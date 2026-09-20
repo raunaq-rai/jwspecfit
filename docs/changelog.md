@@ -33,6 +33,28 @@ history on GitHub is the authoritative source.
 - Z/Z_sun still comes from O/H, so this removes the optical oxygen from the
   ionic ratio, not from the ICF's metallicity argument.
 
+### A He I-only broad request is no longer ignored
+
+- `jwspecfit.fit_with_broad`'s narrow-only early return checked
+  `fit_balmer_broad` and `fit_oiii_broad` but not `fit_hei_broad`, so asking
+  for the He I broad test *alone* returned the narrow fit and skipped every BIC
+  stage in silence. It reached `jwspecfit.fit_lines` and `jwspecmcmc` too, which
+  both route He I-only requests through that function. Enabling any other broad
+  flag alongside it had been masking the bug.
+- **`centroid_max_sigma` now reaches the real-data broad fits.** The two
+  `ThreadPoolExecutor` submissions passed their arguments positionally and
+  stopped one short, so those fits used the 1.0 default whatever the caller
+  set. They supply the single-point BIC values and, with `n_boot=0`, the
+  best-fit handed to `jwspecmcmc`. Default runs are unaffected.
+
+### The C/O oxygen tracer is chosen by A_V (documenting existing behaviour)
+
+- The pure-UV C/O is not only reported alongside the optical one: above
+  `CO_UV_AV_THRESHOLD` = 1 magnitude of A_V it is *adopted*, because past that
+  point the reddening leverage on the UV-to-optical pairing outgrows the S/N
+  cost of the faint λ1661,1666 denominator. This has been the behaviour for a
+  while and was missing from both the changelog and §7.4.
+
 ### The low-ionisation density fallback is attributed correctly
 
 - The `n_e(low)` z-fallback reported itself as `Topping+2025a`. The relation it

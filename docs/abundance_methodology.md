@@ -786,9 +786,17 @@ the zone choice rather than by the oxygen tracer: on a stacked spectrum
 that is worth 0.126 dex, against 0.031 dex for the tracer itself.
 
 **Reporting.** This is always computed alongside the adopted C/O when the
-lines are present, as `alt_results["CO_uv"]`, with its own posterior.  It
-is not adopted automatically — where they disagree, which to trust depends
-on the λ1661/λ1666 check below.
+lines are present, as `alt_results["CO_uv"]`, with its own posterior.
+
+**Which one is adopted** depends on A_V.  Below `CO_UV_AV_THRESHOLD`
+(1 magnitude) the optical pairing wins, because the S/N of [O III] 5007
+outweighs the reddening term; above it the pure-UV pairing does, because the
+reddening leverage has outgrown the ~0.1–0.2 dex that a faint λ1666
+measurement costs.  `diagnostics["C/O"]` names the tracer used and
+`totals["CO_tracer_reason"]` says why, and Monte-Carlo and posterior draws
+are locked to the tier the point estimate chose so a resampled A_V cannot
+make the posterior a mixture.  Where the two disagree, which to trust
+depends on the λ1661/λ1666 check below.
 
 ### 7.5 O III] 1661/1666 — a free consistency check
 
