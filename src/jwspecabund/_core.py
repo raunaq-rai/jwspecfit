@@ -1323,8 +1323,11 @@ def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
 #: Martinez+2025 recommend; ``"O32"`` ([O III] 5007 / [O II] 3727) is
 #: evaluated at ``ne_high``, so a poorly-constrained high-zone density
 #: propagates straight into log(U) and from there into the N/O and C/O ICFs.
+#: ``"O32_ionic"`` uses the same two lines as O32 but goes through the
+#: O2+/O+ ionic ratio, so each line is read at the density of its own zone
+#: (Martinez+2025 App. C, Table 8); it is opt-in only.
 #: Left unset, the automatic tree prefers N43 and falls back to O32.
-VALID_LOGU_DIAGNOSTICS: tuple[str, ...] = ("N43", "O32")
+VALID_LOGU_DIAGNOSTICS: tuple[str, ...] = ("N43", "O32", "O32_ionic")
 
 #: Internal marker for a log(U) handed in via ``logU_override`` rather
 #: than derived from a line ratio.  Never a valid ``logU_diagnostic``.
@@ -1456,6 +1459,7 @@ def _compute_logU(
     snr_logU: float = 3.0,
     lock_diag: str | None = None,
     logU_ne: float | None = None,
+    ionic: dict[str, float] | None = None,
 ) -> tuple[float | None, str | None]:
     """Compute ionisation parameter (Berg+2025 step 5).
 
@@ -1498,8 +1502,11 @@ def _compute_logU(
         N43 is unavailable or out of range.  Used by the Monte-Carlo
         loops to keep every draw on the same diagnostic as the point
         estimate, so the log(U) posterior is not a silent mixture of
-        N43- and O32-based draws.  ``None`` (default) uses the full
-        priority tree.
+        N43- and O32-based draws.  ``"O32_ionic"`` converts the O2+/O+
+        ionic ratio from *ionic* instead (O32 with zone-appropriate
+        densities; Martinez+2025 App. C); it is never part of the
+        automatic tree and likewise has no fallback.  ``None``
+        (default) uses the full priority tree.
     logU_ne : float, optional
         Pin the density at which the ratio is converted to log(U),
         overriding *ne_high*.  Martinez+2025 tabulate their calibration
@@ -1513,17 +1520,21 @@ def _compute_logU(
         N43, which is density-insensitive by construction, and none on
         the ICF surfaces, which keep the measured zone densities.
         ``None`` (default) uses *ne_high*.
+    ionic : dict, optional
+        Ionic abundances (``"O+/H+"``, ``"O++/H+"``) for the
+        ``"O32_ionic"`` diagnostic.  Ignored by N43 and O32.  No SNR
+        gate is applied here; the ionic abundances are gated upstream.
 
     Returns
     -------
     tuple
-        ``(logU, diagnostic)`` where diagnostic is ``"N43"`` or
-        ``"O32"``.  Returns ``(None, None)`` if the (locked or
+        ``(logU, diagnostic)`` where diagnostic is ``"N43"``,
+        ``"O32"`` or ``"O32_ionic"``.  Returns ``(None, None)`` if the (locked or
         priority-selected) diagnostic is not available.
     """
     from .martinez25_icf import (
         LOG_OH_SOLAR, _LOG_N43_VALID, _LOG_U_VALID,
-        log_U_from_N43, log_U_from_O32,
+        log_U_from_N43, log_U_from_O32, log_U_from_O32_ionic,
     )
 
     # The density the ratio -> log(U) conversion is read off.  Pinned by
@@ -1624,6 +1635,24 @@ def _compute_logU(
                 " (pinned)" if logU_ne is not None else "",
             )
             return logU, "O32"
+
+    # O32 with zone-appropriate densities via the O2+/O+ ionic ratio
+    # (Martinez+2025 App. C).  Opt-in only, and no fallback to O32: a
+    # missing O+ or O2+ leaves log(U) unavailable, as a locked N43 does.
+    if lock_diag == "O32_ionic":
+        opp = (ionic or {}).get("O++/H+", 0.0)
+        op = (ionic or {}).get("O+/H+", 0.0)
+        if opp > 0 and op > 0:
+            log_OppOp = np.log10(opp / op)
+            logU = log_U_from_O32_ionic(log_OppOp, Z_Zsun, ne_U)
+            logger.info(
+                "log(U) from O32_ionic (O2+/O+) = %.2f (log O2+/O+ = %.3f, "
+                "ne=%.0f cm^-3%s).",
+                logU, log_OppOp, ne_U,
+                " (pinned)" if logU_ne is not None else "",
+            )
+            return logU, "O32_ionic"
+        return None, None
 
     return None, None
 
@@ -1868,6 +1897,7 @@ def _build_diagnostics(
     logU_diagnostic: str | None = None,
     logU_ne: float | None = None,
     logU_override_err: float | tuple[float, float] | None = None,
+    ionic: dict[str, float] | None = None,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -2125,6 +2155,11 @@ def _build_diagnostics(
                 + (f"; O32 is density-sensitive and was evaluated at {_where}"
                    if logU_diagnostic == "O32" or logU_ne is not None else "")
             )
+        elif logU_diag == "O32_ionic":
+            diag["log(U)"] = (
+                "log U_int from O32 via ionic O2+/O+ (zone densities; "
+                f"Martinez+2025 App. C) -> log(U) = {logU:.2f}" + _forced
+            )
     elif logU_diagnostic is not None:
         diag["log(U)"] = (
             f"not available ({logU_diagnostic} was forced via logU_diagnostic "
@@ -2146,7 +2181,7 @@ def _build_diagnostics(
         )
         if logU is not None and logU_diag is not None and Z_Zsun is not None:
             _logU_meas, _ = _compute_logU(
-                fluxes, Z_Zsun, _ne_meas, lock_diag=logU_diag,
+                fluxes, Z_Zsun, _ne_meas, lock_diag=logU_diag, ionic=ionic,
             )
             if _logU_meas is not None and np.isfinite(_logU_meas):
                 _txt += (
@@ -2414,18 +2449,19 @@ def _run_direct(
     elif Z_Zsun is not None:
         logU, logU_diag = _compute_logU(
             fluxes, Z_Zsun, ne_high, errors=errors, snr_logU=snr_logU,
-            lock_diag=logU_diagnostic, logU_ne=logU_ne,
+            lock_diag=logU_diagnostic, logU_ne=logU_ne, ionic=ionic,
         )
         # C/O ICF: recompute log U at the intermediate (C2+) zone density.
-        # Only the density-sensitive O32 diagnostic changes; N43 is
-        # density-insensitive so this is a no-op there.  A pinned
+        # Only the density-sensitive O32 diagnostic changes appreciably;
+        # N43 is density-insensitive so this is a no-op there, and
+        # O32_ionic moves by ~0.003 dex (kept for a uniform code path).  A pinned
         # logU_ne makes it a no-op for both, so skip it and let the one
         # log(U) serve both zones.
         logU_co = logU
         if logU_diag is not None and ne_mid is not None and logU_ne is None:
             logU_co, _ = _compute_logU(
                 fluxes, Z_Zsun, ne_mid, errors=errors, snr_logU=snr_logU,
-                lock_diag=logU_diag,
+                lock_diag=logU_diag, ionic=ionic,
             )
 
     # --- Step 6: Total abundances with ICFs ---
@@ -2505,7 +2541,7 @@ def _run_direct(
         totals=totals, niv_rejected=niv_rejected,
         ne_Opp=ne_Opp, Te_int=Te_int, te_high_diag=_Te_diagnostic, z=z,
         sc=_sc, Z_Zsun=Z_Zsun, logU_diagnostic=logU_diagnostic,
-        logU_ne=logU_ne, logU_override_err=logU_override_err,
+        logU_ne=logU_ne, logU_override_err=logU_override_err, ionic=ionic,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -2609,6 +2645,7 @@ def _run_direct(
                 logU_mc_val, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_high, errors=errors,
                     snr_logU=snr_logU, lock_diag=logU_diag, logU_ne=logU_ne,
+                    ionic=ionic_mc,
                 )
             else:
                 logU_mc_val = _NO_DRAW
@@ -2634,7 +2671,7 @@ def _run_direct(
                     and logU_ne is None):
                 logU_co_mc, _ = _compute_logU(
                     mc_fluxes, z_zsun_mc, ne_mid, errors=errors,
-                    snr_logU=snr_logU, lock_diag=logU_diag,
+                    snr_logU=snr_logU, lock_diag=logU_diag, ionic=ionic_mc,
                 )
                 if logU_co_mc is not None and np.isfinite(logU_co_mc):
                     logU_co_sample = float(logU_co_mc)
@@ -3134,6 +3171,7 @@ def _run_direct_mcmc(
         logU_pt, logU_diag = _compute_logU(
             med_fluxes, Z_Zsun_pt, ne_high, errors=med_errors,
             snr_logU=snr_logU, lock_diag=logU_diagnostic, logU_ne=logU_ne,
+            ionic=ionic_pt,
         )
         # C/O ICF: log U at the intermediate (C2+) zone density.  A
         # pinned logU_ne makes this a no-op, so skip it.
@@ -3141,7 +3179,7 @@ def _run_direct_mcmc(
         if logU_diag is not None and ne_mid is not None and logU_ne is None:
             logU_co_pt, _ = _compute_logU(
                 med_fluxes, Z_Zsun_pt, ne_mid, errors=med_errors,
-                snr_logU=snr_logU, lock_diag=logU_diag,
+                snr_logU=snr_logU, lock_diag=logU_diag, ionic=ionic_pt,
             )
 
     if ionic_pt:
@@ -3284,6 +3322,7 @@ def _run_direct_mcmc(
                 logU_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_high, errors=med_errors,
                     snr_logU=snr_logU, lock_diag=logU_diag, logU_ne=logU_ne,
+                    ionic=ionic_i,
                 )
             else:
                 logU_val = _NO_DRAW
@@ -3306,7 +3345,7 @@ def _run_direct_mcmc(
                     and logU_ne is None):
                 logU_co_val, _ = _compute_logU(
                     sample, z_zsun_i, ne_mid, errors=med_errors,
-                    snr_logU=snr_logU, lock_diag=logU_diag,
+                    snr_logU=snr_logU, lock_diag=logU_diag, ionic=ionic_i,
                 )
                 if logU_co_val is not None and np.isfinite(logU_co_val):
                     logU_co_sample = float(logU_co_val)
@@ -3562,6 +3601,7 @@ def _run_direct_mcmc(
                 te_high_diag=_Te_diagnostic, z=z, sc=_sc,
                 Z_Zsun=Z_Zsun_pt, logU_diagnostic=logU_diagnostic,
                 logU_ne=logU_ne, logU_override_err=logU_override_err,
+                ionic=ionic_pt,
             ),
             **_diag_extra,
         },
@@ -3964,9 +4004,18 @@ def compute_abundances(
     logU_diagnostic : str or None
         Force the ionisation-parameter diagnostic instead of the
         automatic N43 -> O32 priority tree.  ``"N43"`` (N IV] 1486 /
-        N III] 1750) or ``"O32"`` ([O III] 5007 / [O II] 3727); any
-        other string raises ``ValueError``.  Default ``None``
-        (automatic).
+        N III] 1750), ``"O32"`` ([O III] 5007 / [O II] 3727) or
+        ``"O32_ionic"``; any other string raises ``ValueError``.
+        Default ``None`` (automatic).
+
+        ``"O32_ionic"`` is O32 with zone-appropriate densities via the
+        O2+/O+ ionic ratio (Martinez+2025 App. C, Table 8): the same two
+        lines, but [O II] is read at ne_low and [O III] at the O2+ zone
+        density before the ratio is converted, so the conversion itself
+        is nearly flat in density.  It is *not* density-free -- O+/H+
+        still assumes ne_low, and [O II] from denser gas biases log(U)
+        high, the opposite way to O32 at ne_high.  Opt-in only; the
+        automatic tree never selects it.
 
         When forced, there is no fallback: if the named diagnostic
         cannot be formed from the available lines, log(U) is reported as

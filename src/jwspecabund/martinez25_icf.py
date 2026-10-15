@@ -36,6 +36,10 @@ _LOG_NE_GRID = np.array([2.0, 3.0, 4.0, 5.0, 6.0])
 _LOG_U_VALID = (-3.5, -1.0)
 _LOG_O32_VALID = (-1.0, 2.5)
 _LOG_N43_VALID = (-3.0, 0.5)
+#: log(O2+/O+) span of the Martinez+2025 Fig. 18 model surface.  The
+#: Table 8 fit reaches log U = -3.5 at x = -1.03 to -0.76 and log U = -1.0
+#: at x = 1.48 to 2.17 across Z = 0.05-0.40 Z/Zsun and ne = 1e2-1e6 cm^-3.
+_LOG_OPP_OP_VALID = (-1.0, 2.2)
 
 #: Metallicity range the Martinez+2025 Cloudy grid actually spans,
 #: 0.05 <= Z/Zsun <= 0.40 (12+log(O/H) = 7.389 to 8.292).
@@ -139,6 +143,17 @@ _COEFF_LOG_U_N43: dict[float, list[float]] = {
     4: [-1.66787,  0.91085,  2.26720,  1.63593,  0.09245,  8.61368, -0.45877,  0.20331,  0.00723, -14.59398],
     5: [-1.67830,  0.89072,  2.20159,  1.56124,  0.08156,  8.23949, -0.55776,  0.17851,  0.00484, -14.35798],
     6: [-1.68390,  0.88034,  1.93562,  1.55433,  0.08954,  8.03766, -0.43756,  0.22411,  0.00874, -13.90218],
+}
+
+# --- log(U) from O2+/O+ ionic ratio, i.e. O32 with zone-appropriate densities ---
+# Martinez+2025 Appendix C, Table 8 (p. 40).
+# x = log(O2+/O+), y = Z/Zsun, returns log(U_int)
+_COEFF_LOG_U_O32_IONIC: dict[float, list[float]] = {
+    2: [-3.01893,  0.68142,  0.39134,  0.40444,  0.13516,  1.93922, -0.38687,  0.11450,  0.07717, -3.95339],
+    3: [-3.02826,  0.67769,  0.47521,  0.36650,  0.08499,  1.24708, -0.37495,  0.10476,  0.02243, -2.87921],
+    4: [-3.03228,  0.68678,  0.47450,  0.36517,  0.08376,  1.01559, -0.41327,  0.11398,  0.00769, -2.47978],
+    5: [-3.03319,  0.68770,  0.41954,  0.34904,  0.08278,  1.14266, -0.39662,  0.11960,  0.00657, -2.61133],
+    6: [-3.03090,  0.68578,  0.30140,  0.25356,  0.07391,  1.42633, -0.25902,  0.13938,  0.01181, -2.90696],
 }
 
 # --- ICF 1: N+/O+ -> N/O (Table 4) ---
@@ -523,6 +538,58 @@ def log_U_from_O32(
     log_O32 = _warn_and_reject(log_O32, _LOG_O32_VALID, "log(O32)")
     Z_Zsun = _warn_and_reject(Z_Zsun, _Z_ZSUN_VALID, "Z/Zsun")
     return _interp_ne(ne, _COEFF_LOG_U_O32, log_O32, Z_Zsun)
+
+
+def log_U_from_O32_ionic(
+    log_OppOp: float,
+    Z_Zsun: float,
+    ne: float = 100.0,
+) -> float:
+    """Compute log(U_int) from the O2+/O+ ionic abundance ratio.
+
+    This is O32 with zone-appropriate densities: the same two lines,
+    [O III] 5007 and [O II] 3726,3729, but each converted to an ionic
+    abundance at the temperature and density of the zone it comes from
+    (O2+ at Te_high and the O2+ zone density, O+ at Te_low and ne_low)
+    before the ratio is converted to log(U).
+
+    Parameters
+    ----------
+    log_OppOp : float
+        log10(O2+/O+).
+    Z_Zsun : float
+        Gas-phase metallicity in solar units.
+    ne : float
+        Electron density in cm^-3 (default 100).  The O2+/O+ -> log(U)
+        conversion is nearly flat in density (Martinez+2025 Fig. 18):
+        over 1e2-1e6 cm^-3 the spread is < 0.12 dex for
+        log(O2+/O+) <= 0.6, but the 1e2 cm^-3 surface peels away at
+        higher ionisation (0.2-0.3 dex at log(O2+/O+) = 1.2).  Over
+        1e3-1e6 cm^-3 it stays < 0.15 dex up to log(O2+/O+) = 1.8.
+
+    Returns
+    -------
+    float
+        log(U_int).
+
+    Notes
+    -----
+    Martinez+2025 Appendix C, Table 8; their recommended fallback when
+    N43 is unavailable (Recommendation 5).  Valid for
+    0.02 <= Z/Zsun <= 0.4 (the published grid stops at 0.05; see
+    :data:`_Z_ZSUN_VALID`) and -1.0 <= log(O2+/O+) <= 2.2.
+
+    This is *not* a density-free measurement: the density assumption is
+    made explicit, not removed.  O+/H+ is computed at ne_low, so if dense
+    gas contributes [O II] emission, O+ is underestimated and log(U)
+    comes out biased high.  That pushes the opposite way to O32 read at
+    ne_high (which treats all [O II] as collisionally suppressed and
+    biases log(U) low), so the two bracket the true value.  The risk is
+    largest where the intermediate-zone density is highest.
+    """
+    log_OppOp = _warn_and_reject(log_OppOp, _LOG_OPP_OP_VALID, "log(O2+/O+)")
+    Z_Zsun = _warn_and_reject(Z_Zsun, _Z_ZSUN_VALID, "Z/Zsun")
+    return _interp_ne(ne, _COEFF_LOG_U_O32_IONIC, log_OppOp, Z_Zsun)
 
 
 def log_U_from_N43(

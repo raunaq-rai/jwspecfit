@@ -68,6 +68,7 @@ from .martinez25_icf import (
     logU_extrapolation_report,
     log_U_from_N43,
     log_U_from_O32,
+    log_U_from_O32_ionic,
 )
 from .dust import (
     cardelli_extinction,
@@ -130,6 +131,7 @@ __all__ = [
     "logU_extrapolation_report",
     "log_U_from_N43",
     "log_U_from_O32",
+    "log_U_from_O32_ionic",
     "salim_attenuation",
     "sanders25_metallicity",
 ]

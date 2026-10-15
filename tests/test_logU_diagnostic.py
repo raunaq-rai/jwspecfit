@@ -111,7 +111,7 @@ def no_nitrogen():
 
 class TestValidation:
     def test_valid_options_exported(self):
-        assert VALID_LOGU_DIAGNOSTICS == ("N43", "O32")
+        assert VALID_LOGU_DIAGNOSTICS == ("N43", "O32", "O32_ionic")
 
     @pytest.mark.parametrize("bad", ["o32", "O32 ", "n43", "OIII", ""])
     def test_invalid_string_raises(self, bad):
