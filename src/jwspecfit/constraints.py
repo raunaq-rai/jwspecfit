@@ -41,11 +41,26 @@ _INTERCOM_LOW_DENSITY_RATIOS: dict[tuple[str, str], float] = {
     ("CIII]_1907", "CIII]"):     0.65,   # Keenan+1992
     ("CII]_2326", "CII]_2324"):  0.49,   # A-value ratio, same upper level
     ("NIV_1486",   "NIV_1483"):  1.48,   # low-density limit (PyNEB); drops below 1 at ne > 5e4
-    # PyNEB N III at Te = 1.5e4 K: 2.75 at ne = 1e2, rising to 3.5 by 1e5.
-    # (lam1748.6 is the 3->1 transition, lam1752.2 the 4->2, so unlike the
-    # O III] pair this one is density-sensitive.)
-    ("NIII_1749",  "NIII_1752"): 2.75,
     ("SiIII_1",   "SiIII_2"):   0.67,
+}
+
+# N III] 1750 quintuplet: F(member) / F(NIII_1750), from PyNEB
+# (n_iii_atom_GMZ98, n_iii_coll_BP92) at Te = 1.5e4 K, ne = 1e4 cm^-3.
+# The five members lie within 7 A of each other, so they cannot be
+# separated at R ~ 1000 and freeing their ratios would be degenerate: the
+# whole multiplet is fitted with ONE free flux (that of 1749.7, the
+# strongest member) plus one shared velocity and width.  Above ~1e4 cm^-3
+# the shares barely move (1e5 changes them by <= 5%); at 1e3 the weak
+# members rise by up to 40% relative to 1749.7.  The fitted total flux,
+# which is what the abundances use, barely notices: on a noise-free R = 1000
+# blend injected at ne = 1e2 / 1e3 / 1e5 it is biased by -0.033 / -0.013 /
+# +0.002 dex (tests/test_niii_multiplet.py).
+NIII_MULTIPLET_ANCHOR = "NIII_1750"
+NIII_MULTIPLET_RATIOS: dict[str, float] = {
+    "NIII_1747": 0.1002,   # 4P3/2 -> 2P1/2
+    "NIII_1749": 0.1732,   # 4P1/2 -> 2P1/2
+    "NIII_1752": 0.5961,   # 4P3/2 -> 2P3/2
+    "NIII_1754": 0.1844,   # 4P1/2 -> 2P3/2
 }
 
 
@@ -207,7 +222,6 @@ class ConstraintSet:
                 ("OIII_1666", "OIII_1661"),
                 ("CIII]_1907", "CIII]"),
                 ("NIV_1486",   "NIV_1483"),
-                ("NIII_1749",  "NIII_1752"),
                 ("SiIII_1",   "SiIII_2"),
                 ("CII]_2326", "CII]_2324"),
             ]
@@ -242,7 +256,7 @@ class ConstraintSet:
             # doublet constraint already ties 1661 to 1666).
             if self.tie_uv_widths:
                 _UV_INTERCOM = [
-                    "CIII]_1907", "NIV_1486", "NIII_1749",
+                    "CIII]_1907", "NIV_1486", "NIII_1750",
                 ]
                 _uv_present = [n for n in _UV_INTERCOM if n in idx]
                 if len(_uv_present) >= 2:
@@ -254,6 +268,19 @@ class ConstraintSet:
                         i_t = idx[name]
                         ratio = REST_LINES_A[name] / lam_anchor
                         p[2 * nL + i_t] = sigma_anchor * ratio
+
+            # N III] quintuplet: one flux, one velocity, one width.  Runs after
+            # the width tie so the members inherit the anchor's final σ.
+            if NIII_MULTIPLET_ANCHOR in idx:
+                i_a = idx[NIII_MULTIPLET_ANCHOR]
+                lam_a = REST_LINES_A[NIII_MULTIPLET_ANCHOR]
+                for name, ratio in NIII_MULTIPLET_RATIOS.items():
+                    if name in idx:
+                        i_m = idx[name]
+                        lam_ratio = REST_LINES_A[name] / lam_a
+                        p[i_m] = p[i_a] * ratio
+                        p[nL + i_m] = p[nL + i_a] * lam_ratio
+                        p[2 * nL + i_m] = p[2 * nL + i_a] * lam_ratio
 
         # --- Doublet-internal width tying (always active) ---
         # Members of these doublets always share the same velocity width,
@@ -350,7 +377,6 @@ class ConstraintSet:
                 ("OIII_1666", "OIII_1661"),
                 ("CIII]_1907", "CIII]"),
                 ("NIV_1486",   "NIV_1483"),
-                ("NIII_1749",  "NIII_1752"),
                 ("SiIII_1",   "SiIII_2"),
                 ("CII]_2326", "CII]_2324"),
             ]
@@ -369,12 +395,21 @@ class ConstraintSet:
                     elif sec in _blended:
                         free[i_sec] = False
 
+            # N III] quintuplet: every member but the anchor is derived.
+            if NIII_MULTIPLET_ANCHOR in idx:
+                for name in NIII_MULTIPLET_RATIOS:
+                    if name in idx:
+                        i_m = idx[name]
+                        free[i_m] = False
+                        free[nL + i_m] = False
+                        free[2 * nL + i_m] = False
+
             # UV intercombination widths: first available is anchor (free),
             # all others are derived (not free).
             # OIII] excluded — its width is independent.
             if self.tie_uv_widths:
                 _UV_INTERCOM = [
-                    "CIII]_1907", "NIV_1486", "NIII_1749",
+                    "CIII]_1907", "NIV_1486", "NIII_1750",
                 ]
                 _uv_present = [n for n in _UV_INTERCOM if n in idx]
                 if len(_uv_present) >= 2:

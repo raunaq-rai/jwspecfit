@@ -202,13 +202,13 @@ class TestConstraintSetFreeMask:
         assert free[2 * nL + 1] is np.False_  # secondary width tied
 
     def test_niii_free_mask(self):
-        """NIII] doublet: kinematics-only."""
-        names = ["NIII_1749", "NIII_1752"]
+        """NIII] quintuplet: one free flux (see test_niii_multiplet.py)."""
+        names = ["NIII_1750", "NIII_1752"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         free = cs.free_mask()
         nL = 2
-        assert free[1] is np.True_
+        assert free[1] is np.False_
         assert free[nL + 1] is np.False_
         assert free[2 * nL + 1] is np.False_
 
@@ -732,7 +732,6 @@ class TestBlendedDoubletRatiosMatchAtomicData:
         [
             ("CIII]_1907", "CIII]", "C", 3, 1907, 1909),
             ("NIV_1486", "NIV_1483", "N", 4, 1486, 1483),
-            ("NIII_1749", "NIII_1752", "N", 3, 1749, 1752),
             ("SiIII_1", "SiIII_2", "Si", 3, 1883, 1892),
         ],
     )

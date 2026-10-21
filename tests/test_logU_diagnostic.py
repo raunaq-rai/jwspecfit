@@ -14,6 +14,8 @@ import pytest
 
 from jwspecabund import VALID_LOGU_DIAGNOSTICS, compute_abundances
 
+from .test_niii_multiplet import niii_split
+
 
 @dataclass
 class _Line:
@@ -55,15 +57,14 @@ def _result(Te=18000.0, ne=1000.0, O_pp=3.0e-5, O_p=2.0e-6,
         fluxes["OII_3726"] = _f(O_p, o2.getEmissivity(Te, ne, wave=3726))
         fluxes["OII_3729"] = _f(O_p, o2.getEmissivity(Te, ne, wave=3729))
     if with_n43:
-        # N43 = (1483 + 1486) / (1749 + 1752) = 0.25 -> log N43 = -0.61,
+        # N43 = (1483 + 1486) / NIII] 1750 = 0.25 -> log N43 = -0.61,
         # comfortably inside the calibrated [-3.0, 0.5].  The N IV] doublet
         # sits at its low-density ratio (1486/1483 = 1.48) so ne(high) stays
         # modest -- O32 is evaluated there, and a high ne(high) would push
         # log(U) below the -3.5 validity floor and make the comparison moot.
         fluxes["NIV_1483"] = 2.0
         fluxes["NIV_1486"] = 2.96
-        fluxes["NIII_1749"] = 14.0
-        fluxes["NIII_1752"] = 6.0
+        fluxes.update(niii_split(20.0))
     return _MockFitResult(fluxes, {k: frac * v for k, v in fluxes.items()})
 
 

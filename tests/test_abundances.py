@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from .test_niii_multiplet import niii_split
+
 
 # -----------------------------------------------------------------------
 # Dust correction tests
@@ -1504,8 +1506,7 @@ class TestDoubletCompleteness:
         fluxes = {
             "NIV_1483": 2.0e-19,
             "NIV_1486": 2.0e-19,
-            "NIII_1749": 5.0e-18,
-            "NIII_1752": 3.0e-18,
+            **niii_split(8.0e-18),
         }
 
         logU, diag = _compute_logU(fluxes, Z_Zsun=0.1, ne_high=300.0)
@@ -1794,16 +1795,14 @@ class TestDoubletCompletenessLogU:
         fluxes = {
             "NIV_1483": 1.0e-18,   # low SNR member
             "NIV_1486": 5.0e-18,   # decent SNR
-            "NIII_1749": 5.0e-18,
-            "NIII_1752": 3.0e-18,
+            **niii_split(8.0e-18),
             "OIII_5007": 3.0e-16,
             "OII_doublet": 8.0e-17,
         }
         errors = {
             "NIV_1483": 2.0e-18,   # SNR = 0.5 → below threshold
             "NIV_1486": 1.0e-18,   # SNR = 5.0 → OK
-            "NIII_1749": 1.0e-18,  # SNR = 5.0 → OK
-            "NIII_1752": 1.0e-18,  # SNR = 3.0 → OK
+            **{n: 1.0e-19 for n in niii_split(1.0)},  # total SNR = 16 → OK
             "OIII_5007": 5.0e-17,
             "OII_doublet": 1.5e-17,
         }
@@ -2181,7 +2180,7 @@ class TestLogUDiagnosticLock:
     # Tiny errors so both N doublets always pass the SNR gate; only the
     # N43 ratio (set per draw) governs which branch is taken.
     ERRS = {k: 1e-4 for k in (
-        "NIV_1483", "NIV_1486", "NIII_1749", "NIII_1752",
+        "NIV_1483", "NIV_1486", *niii_split(1.0),
         "OIII_5007", "OII_doublet",
     )}
 
@@ -2190,7 +2189,7 @@ class TestLogUDiagnosticLock:
         niii, niv = 1.0, 10.0 ** log_n43
         return {
             "NIV_1483": niv * 0.4, "NIV_1486": niv * 0.6,
-            "NIII_1749": niii * 0.6, "NIII_1752": niii * 0.4,
+            **niii_split(niii),
             "OIII_5007": 10.0, "OII_doublet": 2.0,
         }
 

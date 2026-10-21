@@ -17,6 +17,8 @@ import pytest
 from jwspecabund import compute_abundances
 from jwspecabund._core import _compute_logU
 
+from .test_niii_multiplet import niii_split
+
 
 @dataclass
 class _Line:
@@ -61,8 +63,7 @@ def _result(Te=18000.0, ne=1000.0, O_pp=3.0e-5, O_p=2.0e-6,
         # N IV] at its low-density ratio so ne(high) stays modest.
         fluxes["NIV_1483"] = 2.0
         fluxes["NIV_1486"] = 2.96
-        fluxes["NIII_1749"] = 14.0
-        fluxes["NIII_1752"] = 6.0
+        fluxes.update(niii_split(20.0))
     return _MockFitResult(fluxes, {k: frac * v for k, v in fluxes.items()})
 
 
@@ -142,7 +143,7 @@ class TestUnitOverride:
     FLUXES = {
         "OIII_5007": 100.0, "OII_3726": 6.0, "OII_3729": 6.0,
         "NIV_1483": 2.0, "NIV_1486": 2.96,
-        "NIII_1749": 14.0, "NIII_1752": 6.0,
+        **niii_split(20.0),
     }
 
     @pytest.mark.parametrize("pin", [100.0, 1e3, 1e4, 1e5])

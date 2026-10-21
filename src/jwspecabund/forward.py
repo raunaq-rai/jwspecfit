@@ -202,9 +202,11 @@ _LINE_COMPONENTS: dict[str, list[tuple[str, int, int]]] = {
     # UV semi-forbidden lines
     "NIV_1483":    [("N", 4, 1483)],
     "NIV_1486":    [("N", 4, 1487)],
-    "NIII_1749":   [("N", 3, 1749)],
-    "NIII_1752":   [("N", 3, 1752)],
-    "NIII_doublet": [("N", 3, 1749), ("N", 3, 1752)],
+    # N III] 1750 quintuplet: one observable for the whole blend.  The
+    # members share one fitted flux, so they are collapsed into
+    # "NIII_doublet" by _build_observables rather than entered as five
+    # (fully correlated) observables.
+    "NIII_doublet": [("N", 3, w) for w in (1747, 1749, 1750, 1752, 1754)],
     "CII]_2324":   [("C", 2, 2324)],
     "CII]_2326":   [("C", 2, 2326)],
     "CIII]_1907":  [("C", 3, 1907)],
@@ -319,6 +321,17 @@ def _build_observables(
     ratio_errs: list[float] = []
     obs_components: list[list[tuple[str, int, int]]] = []
 
+    # Collapse the fitted N III] quintuplet members into one observable,
+    # summing the emissivity over the members actually present.
+    from .direct import niii_multiplet_flux
+
+    f_n3, e_n3, w_n3 = niii_multiplet_flux(line_fluxes, line_errors)
+    n3_components: list[tuple[str, int, int]] | None = None
+    if f_n3 > 0 and line_fluxes.get("NIII_doublet", 0.0) <= 0:
+        line_fluxes = {**line_fluxes, "NIII_doublet": f_n3}
+        line_errors = {**line_errors, "NIII_doublet": e_n3}
+        n3_components = [("N", 3, w) for w in w_n3]
+
     # Lines that require more atomic levels than PyNEB's default data
     # provides (e.g. [OIII] 1661/1666 need a 6-level O++ atom).
     _SKIP_LINES = {"OIII_1661", "OIII_1666"}
@@ -329,6 +342,8 @@ def _build_observables(
         if name not in line_fluxes or line_fluxes[name] <= 0:
             continue
 
+        if name == "NIII_doublet" and n3_components is not None:
+            components = n3_components
         f_line = line_fluxes[name]
         e_line = line_errors.get(name, 0.0)
 

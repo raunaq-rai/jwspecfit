@@ -15,9 +15,14 @@ REST_LINES_A: dict[str, float] = {
     "NIV_1483": 1483.321,
     "NIV_1486": 1486.496,
     "NIV_doublet": 1484.91,
+    # N III] 1750 quintuplet (4P -> 2P°).  The 1744.35 (5->1) member has
+    # zero emissivity in PyNEB and is omitted.
+    "NIII_1747": 1746.823,
     "NIII_1749": 1748.646,
+    "NIII_1750": 1749.674,
     "NIII_1752": 1752.160,
-    "NIII_doublet": 1750.40,
+    "NIII_1754": 1753.995,
+    "NIII_doublet": 1750.56,   # emissivity-weighted quintuplet centre, ne = 1e4
     "CIV_1": 1548.187,
     "CIV_2": 1550.772,
     "CIV_doublet": 1549.48,
@@ -187,8 +192,11 @@ _GRATING_LINES = [
     "abs_AlIII1862",
     "OIII_1661",
     "OIII_1666",
+    "NIII_1747",
     "NIII_1749",
+    "NIII_1750",
     "NIII_1752",
+    "NIII_1754",
     "SiIII_1",
     "SiIII_2",
     "CIII]_1907",

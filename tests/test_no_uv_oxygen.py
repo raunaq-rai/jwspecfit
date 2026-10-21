@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 
 from jwspecabund.direct import (
+    NIII_MULTIPLET,
     NO_UV_AV_THRESHOLD,
     _get_oiii_atom,
     _no_oxygen_tracer_order,
@@ -45,7 +46,7 @@ def _Z(oh):
 
 
 def _emissivities(Te=TE, ne=NE):
-    """(eps_O_uv, eps_1749, eps_1752, eps_1483, eps_1486) at (Te, ne)."""
+    """(eps_O_uv, {NIII] member: eps}, eps_1483, eps_1486) at (Te, ne)."""
     import pyneb as pn
 
     o3 = _get_oiii_atom()
@@ -53,22 +54,21 @@ def _emissivities(Te=TE, ne=NE):
     eps_O = (o3.getEmissivity(Te, ne, lev_i=6, lev_j=2)
              + o3.getEmissivity(Te, ne, lev_i=6, lev_j=3))
     return (eps_O,
-            n3.getEmissivity(Te, ne, wave=1749),
-            n3.getEmissivity(Te, ne, wave=1752),
+            {n: n3.getEmissivity(Te, ne, wave=w) for n, w in NIII_MULTIPLET.items()},
             n4.getEmissivity(Te, ne, wave=1483),
             n4.getEmissivity(Te, ne, wave=1486))
 
 
 def _uv_fluxes(npp=0.20, nppp=0.05, Te=TE, ne=NE, o_total=1.0):
     """Fluxes that encode exactly these two ionic ratios at (Te, ne)."""
-    eps_O, e49, e52, e83, e86 = _emissivities(Te, ne)
+    eps_O, e3, e83, e86 = _emissivities(Te, ne)
     b = oiii_uv_branching_ratio()
-    n3_sum = npp * o_total * (e49 + e52) / eps_O
+    e3_tot = sum(e3.values())
+    n3_sum = npp * o_total * e3_tot / eps_O
     n4_sum = nppp * o_total * (e83 + e86) / eps_O
     return dict(
         flux_1666=o_total / (1 + b), flux_1661=o_total * b / (1 + b),
-        flux_1749=n3_sum * e49 / (e49 + e52),
-        flux_1752=n3_sum * e52 / (e49 + e52),
+        niii_fluxes={n: n3_sum * e / e3_tot for n, e in e3.items()},
         flux_1483=n4_sum * e83 / (e83 + e86),
         flux_1486=n4_sum * e86 / (e83 + e86),
     )
@@ -103,10 +103,10 @@ class TestComputeNOppUv:
         """A doublet member dropped by the SNR filter must not halve N²⁺."""
         f = _uv_fluxes()
         both = compute_N_Opp_uv(Te_O=TE, ne_O=NE, **f)[0]["N++/O++"]
-        only = dict(f, flux_1752=0.0)
+        only = dict(f, niii_fluxes=dict(f["niii_fluxes"], NIII_1752=0.0))
         ratios, note = compute_N_Opp_uv(Te_O=TE, ne_O=NE, **only)
         assert ratios["N++/O++"] == pytest.approx(both, rel=1e-9)
-        assert "1749 alone" in note
+        assert "1747+1749+1750+1754 alone" in note
 
     def test_only_one_nitrogen_ion_gives_only_that_key(self):
         f = _uv_fluxes()
@@ -124,7 +124,7 @@ class TestComputeNOppUv:
 
     @pytest.mark.parametrize("missing, match", [
         (dict(flux_1661=0.0, flux_1666=0.0), "O III]"),
-        (dict(flux_1749=0.0, flux_1752=0.0, flux_1483=0.0, flux_1486=0.0),
+        (dict(niii_fluxes=None, flux_1483=0.0, flux_1486=0.0),
          "NIII]"),
     ])
     def test_raises_without_a_needed_ion(self, missing, match):
@@ -140,13 +140,13 @@ class TestComputeNOppUv:
         f = _uv_fluxes()
         n3 = pn.Atom("N", 3)
         o3 = _get_oiii_atom()
-        f_N = f["flux_1749"] + f["flux_1752"]
+        f_N = sum(f["niii_fluxes"].values())
         uv, opt = [], []
         for Te in (1.0e4, 2.5e4):
             uv.append(compute_N_Opp_uv(Te_O=Te, ne_O=NE, **f)[0]["N++/O++"])
             # Same construction against [O III] 5007, at one fixed flux.
-            eps_N = (n3.getEmissivity(Te, NE, wave=1749)
-                     + n3.getEmissivity(Te, NE, wave=1752))
+            eps_N = sum(n3.getEmissivity(Te, NE, wave=w)
+                        for w in NIII_MULTIPLET.values())
             opt.append((f_N / 1.0) * o3.getEmissivity(Te, NE, wave=5007) / eps_N)
         assert abs(np.log10(uv[1] / uv[0])) < 0.15
         assert abs(np.log10(opt[1] / opt[0])) > 1.0
@@ -159,9 +159,10 @@ class TestComputeNOppUv:
         A = cardelli_extinction(waves, Av=1.0)
         f = _uv_fluxes()
         red = dict(f)
-        for k, w in (("flux_1661", 0), ("flux_1666", 0),
-                     ("flux_1749", 1), ("flux_1752", 1)):
-            red[k] = f[k] * 10 ** (-0.4 * A[w])
+        for k in ("flux_1661", "flux_1666"):
+            red[k] = f[k] * 10 ** (-0.4 * A[0])
+        red["niii_fluxes"] = {n: v * 10 ** (-0.4 * A[1])
+                              for n, v in f["niii_fluxes"].items()}
         drift = np.log10(
             compute_N_Opp_uv(Te_O=TE, ne_O=NE, **red)[0]["N++/O++"]
             / compute_N_Opp_uv(Te_O=TE, ne_O=NE, **f)[0]["N++/O++"]
@@ -395,8 +396,8 @@ def _uv_nitrogen_object(Te=2.0e4, ne=1000.0, O_pp=1.5e-5, O_p=1.8e-6,
         "OIII_5007": _f(O_pp, o3.getEmissivity(Te, ne, wave=5007)),
         "OIII_1661": _f(O_pp, o3.getEmissivity(Te, ne, lev_i=6, lev_j=2)),
         "OIII_1666": _f(O_pp, o3.getEmissivity(Te, ne, lev_i=6, lev_j=3)),
-        "NIII_1749": _f(N_pp, n3.getEmissivity(Te, ne, wave=1749)),
-        "NIII_1752": _f(N_pp, n3.getEmissivity(Te, ne, wave=1752)),
+        **{n: _f(N_pp, n3.getEmissivity(Te, ne, wave=w))
+           for n, w in NIII_MULTIPLET.items()},
         "NIV_1483": _f(N_ppp, n4.getEmissivity(Te, ne, wave=1483)),
         "NIV_1486": _f(N_ppp, n4.getEmissivity(Te, ne, wave=1486)),
         "CIII]_1907": _f(C_pp, c3.getEmissivity(Te, ne, wave=1907)),

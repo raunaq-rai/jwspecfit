@@ -63,13 +63,33 @@ _SNR_PROTECTED = {
     # Nitrogen lines used for ionic abundances — gated separately
     # by _gate_nitrogen_ions() when icf_method="direct_sum".
     "NII_6585",
-    "NIII_1749", "NIII_1752",
+    "NIII_1747", "NIII_1749", "NIII_1750", "NIII_1752", "NIII_1754",
     "NIV_1483", "NIV_1486",
     "NV_1", "NV_2",
     "CIV_1", "CIV_2",
     "CIII]_1907", "CIII]",
     "CII]_2324", "CII]_2326",
 }
+
+
+def _summed_flux_err(
+    names: list[str] | tuple[str, ...],
+    fluxes: dict[str, float],
+    errors: dict[str, float] | None,
+) -> tuple[float, float]:
+    """Total flux and error of lines summed into one ionic abundance.
+
+    Members of the N III] 1750 quintuplet are fitted with one free flux,
+    so their errors are fully correlated and add linearly; the members of
+    every other doublet add in quadrature.
+    """
+    from .direct import NIII_MULTIPLET
+
+    errs = [(errors or {}).get(n, 0.0) for n in names]
+    flux = float(sum(fluxes.get(n, 0.0) for n in names))
+    if all(n in NIII_MULTIPLET for n in names):
+        return flux, float(sum(errs))
+    return flux, float(np.sqrt(sum(e**2 for e in errs)))
 
 
 def _extract_fluxes(result: Any) -> tuple[dict[str, float], dict[str, float], bool]:
@@ -973,7 +993,7 @@ def _compute_N_Opp_uv_raw(
     ----------
     fluxes : dict
         Dust-corrected fluxes; needs O III] 1661/1666 together with
-        NIII] 1749/1752 or NIV] 1483/1486.
+        the NIII] 1750 quintuplet or NIV] 1483/1486.
     Te, ne : float
         Conditions for the O2+ zone.
     Te_Npp, ne_Npp : float or None
@@ -988,15 +1008,14 @@ def _compute_N_Opp_uv_raw(
         finite ratios, or ``None`` when the lines are missing or the
         emissivities cannot be evaluated.
     """
-    from .direct import compute_N_Opp_uv
+    from .direct import NIII_MULTIPLET, compute_N_Opp_uv
 
     try:
         ratios, note = compute_N_Opp_uv(
             Te_O=Te, ne_O=ne,
             flux_1661=fluxes.get("OIII_1661", 0.0),
             flux_1666=fluxes.get("OIII_1666", 0.0),
-            flux_1749=fluxes.get("NIII_1749", 0.0),
-            flux_1752=fluxes.get("NIII_1752", 0.0),
+            niii_fluxes={n: fluxes.get(n, 0.0) for n in NIII_MULTIPLET},
             flux_1483=fluxes.get("NIV_1483", 0.0),
             flux_1486=fluxes.get("NIV_1486", 0.0),
             Te_Npp=Te_Npp, ne_Npp=ne_Npp,
@@ -1297,21 +1316,22 @@ def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
     """
     exclude: set[str] = set()
 
+    from .direct import NIII_MULTIPLET
+
     _uv_doublets = [
-        (("NIII_1749", "NIII_1752"), "N++/H+"),
+        (tuple(NIII_MULTIPLET), "N++/H+"),
         (("NIV_1483", "NIV_1486"), "N+++/H+"),
         (("NV_1", "NV_2"), "N4+/H+"),
         (("CIV_1", "CIV_2"), "C+++/H+"),
         (("CII]_2324", "CII]_2326"), "C+/H+"),
     ]
-    for (name_a, name_b), ion_key in _uv_doublets:
-        has_a = fluxes.get(name_a, 0.0) > 0
-        has_b = fluxes.get(name_b, 0.0) > 0
-        if has_a != has_b:  # one but not both
+    for names, ion_key in _uv_doublets:
+        n_present = sum(fluxes.get(n, 0.0) > 0 for n in names)
+        if 0 < n_present < len(names):  # some but not all
             exclude.add(ion_key)
             logger.info(
-                "Incomplete doublet (%s/%s): excluding %s from ICF.",
-                name_a, name_b, ion_key,
+                "Incomplete doublet (%s): excluding %s from ICF.",
+                "/".join(names), ion_key,
             )
 
     return exclude
@@ -1491,8 +1511,9 @@ def _compute_logU(
         overrides it.
     errors : dict, optional
         Flux errors.  When provided, the **total doublet** SNR
-        (summed flux / quadrature-summed error) must be >= *snr_logU*
-        for each doublet in N43 to be used.
+        (summed flux / quadrature-summed error; linear for the
+        correlated NIII] quintuplet) must be >= *snr_logU* for each
+        doublet in N43 to be used.
     snr_logU : float
         Minimum total-doublet SNR for N43 (default 3.0).
     lock_diag : str, optional
@@ -1532,6 +1553,7 @@ def _compute_logU(
         ``"O32"`` or ``"O32_ionic"``.  Returns ``(None, None)`` if the (locked or
         priority-selected) diagnostic is not available.
     """
+    from .direct import NIII_MULTIPLET
     from .martinez25_icf import (
         LOG_OH_SOLAR, _LOG_N43_VALID, _LOG_U_VALID,
         log_U_from_N43, log_U_from_O32, log_U_from_O32_ionic,
@@ -1541,35 +1563,33 @@ def _compute_logU(
     # *logU_ne* when given, otherwise the measured high-zone density.
     ne_U = float(logU_ne) if logU_ne is not None else ne_high
 
-    def _doublet_ok(name_a: str, name_b: str) -> tuple[bool, float]:
-        """Check both members present and total doublet SNR above cut.
+    def _doublet_ok(*names: str) -> tuple[bool, float]:
+        """Check all members present and total SNR above cut.
 
         Returns ``(ok, total_flux)``.
         """
-        fa = fluxes.get(name_a, 0.0)
-        fb = fluxes.get(name_b, 0.0)
-        # Both members must be detected (positive flux).
-        if fa <= 0 or fb <= 0:
+        # All members must be detected (positive flux).
+        if any(fluxes.get(n, 0.0) <= 0 for n in names):
             return False, 0.0
-        total = fa + fb
-        if errors is not None:
-            ea = errors.get(name_a, 0.0)
-            eb = errors.get(name_b, 0.0)
-            total_err = np.sqrt(ea**2 + eb**2)
-            if total_err > 0 and total / total_err < snr_logU:
-                return False, 0.0
+        total, total_err = _summed_flux_err(names, fluxes, errors)
+        if errors is not None and total_err > 0 and total / total_err < snr_logU:
+            return False, 0.0
         return True, total
 
-    # N43 = NIV]1486 / NIII]1750 — density-insensitive, recommended.
-    # Total doublet SNR must pass the cut for both NIV] and NIII].
+    # N43 = NIV]1483,1486 / NIII]1750 — density-insensitive, recommended.
+    # NIII] 1750 is the whole quintuplet (Martinez+2025 footnote 1).
+    # Total SNR must pass the cut for both NIV] and NIII].
     if lock_diag in (None, "N43"):
         niv_ok, niv_flux = _doublet_ok("NIV_1483", "NIV_1486")
         if not niv_ok and (fluxes.get("NIV_1483", 0) > 0 or fluxes.get("NIV_1486", 0) > 0):
             logger.info("N43: NIV] doublet below total SNR threshold (%.1f); skipping.", snr_logU)
 
-        niii_ok, niii_flux = _doublet_ok("NIII_1749", "NIII_1752")
-        if not niii_ok and (fluxes.get("NIII_1749", 0) > 0 or fluxes.get("NIII_1752", 0) > 0):
-            logger.info("N43: NIII] doublet below total SNR threshold (%.1f); skipping.", snr_logU)
+        niii_ok, niii_flux = _doublet_ok(*NIII_MULTIPLET)
+        if not niii_ok and any(fluxes.get(n, 0) > 0 for n in NIII_MULTIPLET):
+            logger.info(
+                "N43: NIII] quintuplet incomplete or below total SNR "
+                "threshold (%.1f); skipping.", snr_logU,
+            )
 
         if niv_flux > 0 and niii_flux > 0:
             N43 = niv_flux / niii_flux
@@ -1664,7 +1684,7 @@ def _compute_logU(
 # Mapping from ionic-abundance key to the flux line(s) that produce it.
 _N_ION_LINES: dict[str, list[str]] = {
     "N+/H+":   ["NII_6585"],
-    "N++/H+":  ["NIII_1749", "NIII_1752"],
+    "N++/H+":  ["NIII_1747", "NIII_1749", "NIII_1750", "NIII_1752", "NIII_1754"],
     "N+++/H+": ["NIV_1483", "NIV_1486"],
     "N4+/H+":  ["NV_1", "NV_2"],
 }
@@ -1735,9 +1755,7 @@ def _gate_nitrogen_ions(
                 continue
 
         # Total SNR check.
-        total_flux = sum(fluxes.get(n, 0.0) for n in line_names)
-        total_err2 = sum(errors.get(n, 0.0) ** 2 for n in line_names)
-        total_err = np.sqrt(total_err2) if total_err2 > 0 else 0.0
+        total_flux, total_err = _summed_flux_err(line_names, fluxes, errors)
         if total_flux <= 0 or total_err <= 0:
             continue
         snr = total_flux / total_err
@@ -1781,7 +1799,7 @@ def _compute_ionic_upper_limits(
         Ion key -> metadata dict with keys ``lines``, ``flux_ul``,
         ``n_sigma``, ``method``.
     """
-    from .direct import _ionic_abundance
+    from .direct import NIII_MULTIPLET, _ionic_abundance
 
     Hb = fluxes.get("HBETA", 0.0)
     if Hb <= 0:
@@ -1801,7 +1819,7 @@ def _compute_ionic_upper_limits(
         ("O+/H+",   "O", 2, ["OII_doublet"], [3727],       Te_low,  ne_low),
         ("O++/H+",  "O", 3, ["OIII_5007"],   [5007],       Te_high, ne_opp),
         ("N+/H+",   "N", 2, ["NII_6585"],    [6584],       Te_low,  ne_low),
-        ("N++/H+",  "N", 3, ["NIII_1749", "NIII_1752"], [1749, 1752], Te_mid, ne_mid),
+        ("N++/H+",  "N", 3, list(NIII_MULTIPLET), list(NIII_MULTIPLET.values()), Te_mid, ne_mid),
         ("N+++/H+", "N", 4, ["NIV_1483", "NIV_1486"],   [1483, 1486], Te_high, ne_high),
         ("C+/H+",   "C", 2, ["CII]_2324", "CII]_2326"], [2323, 2325, 2326, 2327, 2328], Te_low, ne_low),
         ("C++/H+",  "C", 3, ["CIII]_1907", "CIII]"],    [1907, 1909], Te_mid, ne_mid),
@@ -1823,16 +1841,21 @@ def _compute_ionic_upper_limits(
         if _ul:
             # Add continuum-RMS limits in quadrature (independent noise
             # in each doublet member: combined 3σ = √(Σ (3σ_i)²)).
+            # The N III] quintuplet is one blended feature, not five
+            # independent lines: each member's limit already bounds the
+            # whole blend, so take the largest rather than adding them.
             member_uls = [_ul[n] for n in line_names if n in _ul]
-            if member_uls:
+            if member_uls and ion_key == "N++/H+":
+                flux_ul = max(member_uls)
+            elif member_uls:
                 flux_ul = np.sqrt(sum(u**2 for u in member_uls))
 
         if flux_ul is None or flux_ul <= 0:
-            # Fall back to fit errors (quadrature sum × n_sigma).
-            total_err2 = sum(errors.get(n, 0.0) ** 2 for n in line_names)
-            if total_err2 <= 0:
+            # Fall back to fit errors (summed error × n_sigma).
+            _, total_err = _summed_flux_err(line_names, fluxes, errors)
+            if total_err <= 0:
                 continue
-            flux_ul = n_sigma * np.sqrt(total_err2)
+            flux_ul = n_sigma * total_err
             ul_method = "fit_error"
 
         wave_arg = waves if len(waves) > 1 else waves[0]
@@ -2144,7 +2167,7 @@ def _build_diagnostics(
             )
         elif logU_diag == "N43":
             diag["log(U)"] = (
-                f"N43 diagnostic (NIV] 1486 / NIII] 1750) -> log(U) = {logU:.2f}"
+                f"N43 diagnostic (NIV] 1483,1486 / NIII] 1750) -> log(U) = {logU:.2f}"
                 + _forced
             )
         elif logU_diag == "O32":
@@ -2245,7 +2268,7 @@ def _build_diagnostics(
     if NO_icf_name is not None and _no_tracer == "uv":
         diag["N/O oxygen"] = (
             "O²⁺ from O III] 1661,1666 — an 85-180 Å baseline against "
-            "NIII] 1749,1752 / NIV] 1483,1486, so the ionic ratio is nearly "
+            "NIII] 1750 / NIV] 1483,1486, so the ionic ratio is nearly "
             "reddening-free (-0.01 to +0.17 dex/mag, against +0.6-1.5 for "
             "[OIII] 5007), needs no Hβ, and barely moves with T_e (0.09 dex "
             "over 10,000-25,000 K, against 1.4)"
@@ -3907,8 +3930,9 @@ def compute_abundances(
     snr_logU : float
         Minimum **total-doublet** SNR for NIV] and NIII] when
         computing log(U) from N43 (default 1.5).  The summed doublet
-        flux is divided by the quadrature-summed error; if this is
-        below the threshold, N43 is skipped and O32 is used instead.
+        flux is divided by the quadrature-summed error (linearly summed
+        for the NIII] quintuplet, whose members share one fitted flux);
+        if this is below the threshold, N43 is skipped and O32 is used instead.
     marginalize_logU : bool
         Whether to **marginalise over** log(U) — i.e. let it vary per draw
         and propagate its uncertainty into the ICF-based ratios (default
@@ -3967,7 +3991,7 @@ def compute_abundances(
         Minimum total-line SNR for each nitrogen ion when using
         ``icf_method="direct_sum"`` (default 2.0).  For doublets
         (NIII], NIV], NV), the summed flux is divided by the
-        quadrature-summed error.  Ions below this threshold are
+        quadrature-summed error (linear for the NIII] quintuplet).  Ions below this threshold are
         excluded from the direct sum, causing the code to fall
         through to a lower tier (or Izotov+06).
     icf_tier : str or None
@@ -3983,7 +4007,7 @@ def compute_abundances(
         Which oxygen tracer the Martinez+25 N/O ICFs divide by.
         ``"optical"`` (default) uses O²⁺ from [O III] 5007, exactly as
         before this option existed.  ``"uv"`` uses O²⁺ from
-        O III] 1661,1666 — an 85-180 Å baseline against NIII] 1749,1752
+        O III] 1661,1666 — an 85-180 Å baseline against NIII] 1750
         and NIV] 1483,1486, so the ionic ratio is nearly reddening-free
         (-0.01 to +0.17 dex of log(N/O) per magnitude of A_V, against
         +0.6 to +1.5 for [O III] 5007), needs no Hβ and hence no relative

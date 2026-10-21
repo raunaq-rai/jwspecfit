@@ -135,7 +135,7 @@ _COEFF_LOG_U_O32: dict[float, list[float]] = {
     6: [-4.08448,  0.54480,  0.17599, -0.23221,  0.01351,  2.15922, -0.47220,  0.19535,  0.00841, -2.95869],
 }
 
-# --- log(U) from N43 = NIV]1486/NIII]1750 (Table 3, lower) ---
+# --- log(U) from N43 = NIV]1483,1486/NIII]1750 quintuplet (Table 3, lower) ---
 # x = log(N43), y = Z/Zsun, returns log(U_high)
 _COEFF_LOG_U_N43: dict[float, list[float]] = {
     2: [-1.29754,  1.60610,  4.10271,  3.82481,  0.52310, 12.37774,  0.22144,  0.74401,  0.09083, -17.63486],
@@ -602,7 +602,8 @@ def log_U_from_N43(
     Parameters
     ----------
     log_N43 : float
-        log10(NIV] 1486 / NIII] 1750).
+        log10(NIV] 1483+1486 / NIII] 1750), where NIII] 1750 is the sum of
+        the whole quintuplet (Martinez+2025 footnote 1).
     Z_Zsun : float
         Gas-phase metallicity in solar units.
     ne : float

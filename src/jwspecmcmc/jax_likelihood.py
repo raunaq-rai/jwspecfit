@@ -19,6 +19,8 @@ import numpy as np
 from jwspecfit.constraints import (
     ConstraintSet,
     NII_RATIO,
+    NIII_MULTIPLET_ANCHOR,
+    NIII_MULTIPLET_RATIOS,
     _INTERCOM_LOW_DENSITY_RATIOS,
 )
 from jwspecfit.lines import REST_LINES_A
@@ -137,7 +139,6 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
             ("OIII_1666", "OIII_1661"),
             ("CIII]_1907", "CIII]"),
             ("NIV_1486", "NIV_1483"),
-            ("NIII_1749", "NIII_1752"),
             ("SiIII_1", "SiIII_2"),
         ]
         _blended = cs.blended_doublets or set()
@@ -154,7 +155,7 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
 
         # UV intercombination width tying
         if cs.tie_uv_widths:
-            _UV_INTERCOM = ["CIII]_1907", "NIV_1486", "NIII_1749"]
+            _UV_INTERCOM = ["CIII]_1907", "NIV_1486", "NIII_1750"]
             _uv_present = [n for n in _UV_INTERCOM if n in idx]
             if len(_uv_present) >= 2:
                 anchor = _uv_present[0]
@@ -163,6 +164,19 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
                 for name in _uv_present[1:]:
                     ratio = REST_LINES_A[name] / lam_anchor
                     ops.append((2 * nL + idx[name], 2 * nL + i_anchor, ratio))
+
+        # N III] quintuplet: one flux, one velocity, one width.  Runs after
+        # the width tie so the members inherit the anchor's final σ.
+        if NIII_MULTIPLET_ANCHOR in idx:
+            i_a = idx[NIII_MULTIPLET_ANCHOR]
+            lam_a = REST_LINES_A[NIII_MULTIPLET_ANCHOR]
+            for name, ratio in NIII_MULTIPLET_RATIOS.items():
+                if name in idx:
+                    i_m = idx[name]
+                    lam_ratio = REST_LINES_A[name] / lam_a
+                    ops.append((i_m, i_a, ratio))
+                    ops.append((nL + i_m, nL + i_a, lam_ratio))
+                    ops.append((2 * nL + i_m, 2 * nL + i_a, lam_ratio))
 
     # --- Always-tie-width doublets (unconditional) ---
     _ALWAYS_TIE_WIDTH = [

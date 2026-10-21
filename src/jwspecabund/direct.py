@@ -62,19 +62,70 @@ CO_UV_AV_THRESHOLD: float = 1.0
 #: A_V above which the pure-UV oxygen tracer is preferred for N/O.
 #:
 #: The nitrogen counterpart of :data:`CO_UV_AV_THRESHOLD`.  Pairing
-#: N III] 1749,1752 or N IV] 1483,1486 with [O III] 5007 carries +0.56
+#: N III] 1750 or N IV] 1483,1486 with [O III] 5007 carries +0.56
 #: (Cardelli) to +1.32 (Salim) dex of log(N/O) per magnitude of A_V;
 #: pairing them with O III] 1661,1666, 85-180 A away, carries -0.006 to
 #: +0.17 and needs no Hbeta.  It also removes most of the temperature
 #: leverage: the eps(O)/eps(N) factor moves 0.09 dex over Te =
 #: 10,000-25,000 K against 1.37 dex for the optical pairing, because
-#: lambda1666 sits at nearly the same excitation energy as lambda1749,1752
+#: lambda1666 sits at nearly the same excitation energy as N III] 1750
 #: while lambda5007 (2.5 eV) does not.  The cost is the denominator:
 #: lambda1661,1666 run ~20x fainter than lambda5007.
 #:
 #: Unlike C/O, this threshold is consulted only when the caller asks for
 #: it (``no_oxygen_tracer="auto"``); the N/O default stays optical.
 NO_UV_AV_THRESHOLD: float = 1.0
+
+#: N III] 1750 quintuplet: fitted line name -> PyNEB wave label.
+#:
+#: Each label maps to a unique transition of ``n_iii_atom_GMZ98``
+#: (1747 = 4->1, 1749 = 3->1, 1750 = 5->2, 1752 = 4->2, 1754 = 3->2); the
+#: 1744.35 A (5->1) member has zero emissivity and is omitted.  Martinez+2025
+#: (footnote 1) define "N III] 1750" as the sum of all five, both for N43 and
+#: for N2+, which is why every consumer sums the flux AND the emissivity over
+#: the same members.  Summing only 1749+1752 (3->1 and 4->2) captures ~37% of
+#: the emissivity at ne >~ 1e4 cm^-3.
+NIII_MULTIPLET: dict[str, int] = {
+    "NIII_1747": 1747,
+    "NIII_1749": 1749,
+    "NIII_1750": 1750,
+    "NIII_1752": 1752,
+    "NIII_1754": 1754,
+}
+
+
+def niii_multiplet_flux(
+    fluxes: dict[str, float],
+    errors: dict[str, float] | None = None,
+) -> tuple[float, float, list[int]]:
+    """Total N III] 1750 flux from the quintuplet members present.
+
+    Parameters
+    ----------
+    fluxes : dict
+        Line fluxes keyed by name (see :data:`NIII_MULTIPLET`).
+    errors : dict, optional
+        Line flux errors keyed by name.
+
+    Returns
+    -------
+    tuple
+        ``(flux, err, waves)``: the summed flux of the members with positive
+        flux, its error, and their PyNEB wave labels -- the emissivity to
+        divide by is the sum over exactly these *waves*.  ``(0.0, 0.0, [])``
+        when no member is present.
+
+    Notes
+    -----
+    The errors add linearly, not in quadrature: :mod:`jwspecfit` fits the
+    quintuplet with one free flux and fixed shares, so the member errors
+    are fully correlated (quadrature would overstate the S/N by ~1.7x).
+    """
+    present = [n for n in NIII_MULTIPLET if fluxes.get(n, 0.0) > 0]
+    flux = float(sum(fluxes[n] for n in present))
+    err = float(sum((errors or {}).get(n, 0.0) for n in present))
+    return flux, err, [NIII_MULTIPLET[n] for n in present]
+
 
 _OIII_ATOMS: dict[str, Any] = {}
 
@@ -1440,8 +1491,7 @@ def compute_N_Opp_uv(
     ne_O: float,
     flux_1661: float = 0.0,
     flux_1666: float = 0.0,
-    flux_1749: float = 0.0,
-    flux_1752: float = 0.0,
+    niii_fluxes: dict[str, float] | None = None,
     flux_1483: float = 0.0,
     flux_1486: float = 0.0,
     Te_Npp: float | None = None,
@@ -1454,8 +1504,8 @@ def compute_N_Opp_uv(
 
     The nitrogen counterpart of :func:`compute_CppOpp_uv`::
 
-        N2+/O2+ = I(NIII] 1749+1752) / I(O III] 1661+1666)
-                  x eps_O(1661+1666) / eps_N(1749+1752)
+        N2+/O2+ = I(NIII] 1750) / I(O III] 1661+1666)
+                  x eps_O(1661+1666) / eps_N(1750)
         N3+/O2+ = I(NIV] 1483+1486)  / I(O III] 1661+1666)
                   x eps_O(1661+1666) / eps_N(1483+1486)
 
@@ -1468,7 +1518,7 @@ def compute_N_Opp_uv(
     ~3300-3500 A, so it is nearly reddening-free and needs no Hbeta, which
     also removes the relative flux calibration between the gratings
     covering the UV and the optical.  And lambda1666 sits at almost the
-    same excitation energy as lambda1749,1752, so the emissivity ratio
+    same excitation energy as N III] 1750, so the emissivity ratio
     barely moves with T_e.  :data:`NO_UV_AV_THRESHOLD` carries the measured
     numbers for both.
 
@@ -1485,8 +1535,11 @@ def compute_N_Opp_uv(
         Dust-corrected O III] fluxes.  At least one must be positive; a
         missing component is filled in from the fixed branching ratio
         (:func:`oiii_uv_branching_ratio`).
-    flux_1749, flux_1752 : float
-        Dust-corrected N III] fluxes.  Both zero omits ``"N++/O++"``.
+    niii_fluxes : dict, optional
+        Dust-corrected N III] 1750 quintuplet fluxes keyed by
+        :data:`NIII_MULTIPLET` name; the emissivity is summed over the
+        members with positive flux (Martinez+2025 §5.5).  None present
+        omits ``"N++/O++"``.
     flux_1483, flux_1486 : float
         Dust-corrected N IV] fluxes.  Both zero omits ``"N+++/O++"``.
     Te_Npp, ne_Npp : float or None
@@ -1540,31 +1593,31 @@ def compute_N_Opp_uv(
     else:
         raise ValueError("Neither O III] 1661 nor 1666 is available.")
 
+    niii = niii_fluxes or {}
     ratios: dict[str, float] = {}
-    for key, spec, waves, pair, Te_N, ne_N, label in (
-        ("N++/O++", 3, (1749, 1752), (flux_1749, flux_1752), Te_Npp, ne_Npp, "NIII]"),
-        ("N+++/O++", 4, (1483, 1486), (flux_1483, flux_1486), Te_Nppp, ne_Nppp, "NIV]"),
+    for key, spec, members, Te_N, ne_N, label in (
+        ("N++/O++", 3,
+         [(NIII_MULTIPLET[n], niii.get(n, 0.0)) for n in NIII_MULTIPLET],
+         Te_Npp, ne_Npp, "NIII]"),
+        ("N+++/O++", 4, [(1483, flux_1483), (1486, flux_1486)],
+         Te_Nppp, ne_Nppp, "NIV]"),
     ):
-        f_a, f_b = pair
-        if f_a <= 0 and f_b <= 0:
+        # Sum the emissivity over the members actually measured, as
+        # compute_ionic_abundances does: a missing component may have been
+        # dropped by the SNR filter rather than being absent.
+        present = [(w, f) for w, f in members if f > 0]
+        if not present:
             continue
         TeN = Te_O if Te_N is None else Te_N
         neN = ne_O if ne_N is None else ne_N
         atom = pn.Atom("N", spec)
-        e_a = atom.getEmissivity(TeN, neN, wave=waves[0])
-        e_b = atom.getEmissivity(TeN, neN, wave=waves[1])
-        # With one member only, use that member's emissivity rather than the
-        # doublet sum, as compute_ionic_abundances does: the other component
-        # may have been dropped by the SNR filter rather than being absent.
-        if f_a > 0 and f_b > 0:
-            n_sum, eps_N = f_a + f_b, e_a + e_b
-            notes.append(f"{label} {waves[0]}+{waves[1]} measured")
-        elif f_a > 0:
-            n_sum, eps_N = f_a, e_a
-            notes.append(f"{label} from lambda{waves[0]} alone")
+        n_sum = sum(f for _, f in present)
+        eps_N = sum(atom.getEmissivity(TeN, neN, wave=w) for w, _ in present)
+        waves = "+".join(str(w) for w, _ in present)
+        if len(present) == len(members):
+            notes.append(f"{label} {waves} measured")
         else:
-            n_sum, eps_N = f_b, e_b
-            notes.append(f"{label} from lambda{waves[1]} alone")
+            notes.append(f"{label} from lambda{waves} alone")
         if eps_N <= 0:
             raise ValueError(
                 f"Non-positive {label} emissivity at Te={TeN:.0f} K, "
@@ -1575,7 +1628,7 @@ def compute_N_Opp_uv(
         ratios[key] = float((n_sum / o_sum) * (eps_O / eps_N))
 
     if not ratios:
-        raise ValueError("Neither NIII] 1749,1752 nor NIV] 1483,1486 is available.")
+        raise ValueError("Neither NIII] 1750 nor NIV] 1483,1486 is available.")
 
     return ratios, "; ".join(notes)
 
@@ -1960,16 +2013,12 @@ def compute_ionic_abundances(
     elif _civ2 > 0:
         ionic["C+++/H+"] = _ionic_abundance("C", 4, _civ2, Hb, Te_high, ne_hi, 1551)
 
-    # N2+/H+ from NIII] 1749 + 1752 — intermediate zone (Te_mid, ne_md)
-    # Martinez+2025 §5.4: N²⁺ uses Te_int and ne_int.
-    _n1749 = fluxes.get("NIII_1749", 0.0)
-    _n1752 = fluxes.get("NIII_1752", 0.0)
-    if _n1749 > 0 and _n1752 > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749 + _n1752, Hb, Te_mid, ne_md, [1749, 1752])
-    elif _n1749 > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1749, Hb, Te_mid, ne_md, 1749)
-    elif _n1752 > 0:
-        ionic["N++/H+"] = _ionic_abundance("N", 3, _n1752, Hb, Te_mid, ne_md, 1752)
+    # N2+/H+ from the NIII] 1750 quintuplet — intermediate zone (Te_mid, ne_md)
+    # Martinez+2025 §5.4: N²⁺ uses Te_int and ne_int; §5.5: flux and
+    # emissivity both summed over the quintuplet.
+    _niii, _, _niii_waves = niii_multiplet_flux(fluxes)
+    if _niii > 0:
+        ionic["N++/H+"] = _ionic_abundance("N", 3, _niii, Hb, Te_mid, ne_md, _niii_waves)
 
     # N3+/H+ from NIV] 1483 + 1486 — T_high zone
     _n1483 = fluxes.get("NIV_1483", 0.0)
