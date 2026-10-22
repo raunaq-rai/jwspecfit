@@ -341,6 +341,7 @@ def fit_lines(
     lya_break: bool = False,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    continuum: np.ndarray | None = None,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
 ) -> FitResult:
@@ -414,11 +415,23 @@ def fit_lines(
         line name.  Each value is ``(mu_lo, mu_hi)``.  Overrides the
         automatic centroid bounds for the specified lines.  Useful for
         anchoring closely-spaced doublet members in noisy spectra.
+    continuum : np.ndarray, optional
+        External continuum in µJy on the input spectrum's pixel grid (e.g.
+        an SPS fit with the lines masked).  Replaces the internal
+        polynomial / median-filter continuum; ``deg``, ``clip_sigma`` and
+        ``moving_average`` are then ignored.  NaN pixels are excluded.
 
     Returns
     -------
     FitResult
     """
+    if continuum is not None:
+        continuum = np.asarray(continuum, dtype=float)
+        if continuum.shape != spectrum.flux_ujy.shape:
+            raise ValueError(
+                f"continuum has shape {continuum.shape}, spectrum has "
+                f"{spectrum.flux_ujy.shape}"
+            )
     spec = spectrum
     grating = grating or spec.grating
     R = R or spec.R
@@ -446,6 +459,8 @@ def fit_lines(
             R=spec.R,
             meta=spec.meta,
         )
+        if continuum is not None:
+            continuum = continuum[mask_win]
         logger.info(
             "Fit window: %.0f–%.0f Å (%d pixels)", lo_A, hi_A, spec.n_pix,
         )
@@ -503,19 +518,20 @@ def fit_lines(
     _lya_in_lines = "Lya" in line_names
     _lya_break = lya_break or _lya_in_lines
 
-    continuum = fit_continuum(
-        spec.wave_um,
-        spec.flux_ujy,
-        spec.err_ujy,
-        z,
-        line_names,
-        grating=grating,
-        R=R,
-        deg=deg,
-        clip_sigma=clip_sigma,
-        moving_average=moving_average,
-        lya_break=_lya_break,
-    )
+    if continuum is None:
+        continuum = fit_continuum(
+            spec.wave_um,
+            spec.flux_ujy,
+            spec.err_ujy,
+            z,
+            line_names,
+            grating=grating,
+            R=R,
+            deg=deg,
+            clip_sigma=clip_sigma,
+            moving_average=moving_average,
+            lya_break=_lya_break,
+        )
     flux_sub = spec.flux_ujy - continuum
 
     # Convert to F_λ for fitting.

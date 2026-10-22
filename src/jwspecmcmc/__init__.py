@@ -34,6 +34,8 @@ except PackageNotFoundError:  # running from a source tree without an install
 
 from typing import Any, Callable
 
+import numpy as np
+
 from jwspecfit.io import Spectrum
 
 from ._engine import _fit_lines_mcmc, _fit_with_broad_mcmc
@@ -107,6 +109,8 @@ def fit_lines(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    continuum: np.ndarray | None = None,
+    continuum_err: np.ndarray | None = None,
 ) -> MCMCResult | MCMCBroadFitResult:
     """Fit emission lines using MCMC sampling.
 
@@ -157,6 +161,14 @@ def fit_lines(
         Continuum model.  ``False`` (default) fits a polynomial of degree
         *deg*; ``True`` uses a 75-pixel running-median filter; an ``int``
         uses a running-median filter of that window size.
+    continuum : np.ndarray, optional
+        External continuum in µJy on the input spectrum's pixel grid (e.g.
+        an SPS fit with the lines masked).  Replaces the internal
+        continuum, so ``deg``, ``clip_sigma`` and ``moving_average`` are
+        ignored.  Narrow-only fits; not supported with the broad flags.
+    continuum_err : np.ndarray, optional
+        1-sigma uncertainty of ``continuum`` (µJy), propagated into the
+        equivalent widths.
     init_from_mle : bool
         If ``True`` (default), seed the sampler from a fast least-squares
         MLE (via :func:`jwspecfit.fit_lines`).  Strongly recommended; it
@@ -320,8 +332,14 @@ def fit_lines(
             centroid_overrides=centroid_overrides,
             niv_doublet_ratio=niv_doublet_ratio,
             ciii_doublet_ratio=ciii_doublet_ratio,
+            continuum=continuum,
+            continuum_err=continuum_err,
         )
 
+    if continuum is not None:
+        raise NotImplementedError(
+            "An external continuum is only supported for narrow-only fits."
+        )
     return _fit_with_broad_mcmc(
         spectrum, z,
         sampler=sampler,

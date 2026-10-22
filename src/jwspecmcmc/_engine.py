@@ -164,6 +164,8 @@ def _fit_lines_mcmc(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    continuum: np.ndarray | None = None,
+    continuum_err: np.ndarray | None = None,
 ) -> MCMCResult:
     """Fit emission lines using MCMC sampling.
 
@@ -232,11 +234,28 @@ def _fit_lines_mcmc(
         Per-line sigma (width) bounds in Angstroms, keyed by line name.
         Each value is ``(sigma_lo, sigma_hi)``.  Overrides the automatic
         grating-based bounds for the specified lines.
+    continuum : np.ndarray, optional
+        External continuum in µJy on the input spectrum's pixel grid (e.g.
+        an SPS fit with the lines masked).  Replaces the internal
+        continuum; ``deg``, ``clip_sigma`` and ``moving_average`` are then
+        ignored.  NaN pixels are excluded from the fit.
+    continuum_err : np.ndarray, optional
+        1-sigma uncertainty of ``continuum`` (µJy), propagated into the
+        equivalent widths.  Zero if omitted.
 
     Returns
     -------
     MCMCResult
     """
+    if continuum is not None:
+        continuum = np.asarray(continuum, dtype=float)
+        if continuum.shape != spectrum.flux_ujy.shape:
+            raise ValueError(
+                f"continuum has shape {continuum.shape}, spectrum has "
+                f"{spectrum.flux_ujy.shape}"
+            )
+        continuum_err = (np.zeros_like(continuum) if continuum_err is None
+                         else np.asarray(continuum_err, dtype=float))
     # ------------------------------------------------------------------
     # 1. Spectrum setup (mirrors fitter.py lines 202-260)
     # ------------------------------------------------------------------
@@ -266,6 +285,8 @@ def _fit_lines_mcmc(
             R=spec.R,
             meta=spec.meta,
         )
+        if continuum is not None:
+            continuum, continuum_err = continuum[mask_win], continuum_err[mask_win]
 
     # ------------------------------------------------------------------
     # 2. Line detection
@@ -311,13 +332,14 @@ def _fit_lines_mcmc(
     _lya_in_lines = "Lya" in line_names
     _lya_break = _lya_in_lines
 
-    continuum, continuum_err = fit_continuum(
-        spec.wave_um, spec.flux_ujy, spec.err_ujy, z, line_names,
-        grating=grating, R=R, deg=deg, clip_sigma=clip_sigma,
-        moving_average=moving_average,
-        lya_break=_lya_break,
-        return_err=True,
-    )
+    if continuum is None:
+        continuum, continuum_err = fit_continuum(
+            spec.wave_um, spec.flux_ujy, spec.err_ujy, z, line_names,
+            grating=grating, R=R, deg=deg, clip_sigma=clip_sigma,
+            moving_average=moving_average,
+            lya_break=_lya_break,
+            return_err=True,
+        )
     flux_sub = spec.flux_ujy - continuum
 
     flam = _ujy_to_flam(flux_sub, spec.wave_um)
@@ -588,6 +610,7 @@ def _fit_lines_mcmc(
             lya_break=_lya_break,
             moving_average=moving_average,
             sigma_factor=sigma_factor,
+            continuum=continuum,
         )
         if mle_result.success:
             # Map MLE params back by line name — the MLE fit may have
