@@ -180,15 +180,18 @@ class TestConstraintSetFreeMask:
         assert free[2 * nL + 1] is np.False_
 
     def test_oiii_uv_free_mask(self):
-        """OIII] UV doublet: kinematics-only (amplitude free)."""
+        """OIII] UV doublet: amplitude free unless the branching ratio is fixed."""
         names = ["OIII_1666", "OIII_1661"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
-                           tie_uv_doublets=True)
+                           tie_uv_doublets=True, fix_branching_ratios=False)
         free = cs.free_mask()
         nL = 2
         assert free[1] is np.True_      # amplitude free
         assert free[nL + 1] is np.False_
         assert free[2 * nL + 1] is np.False_
+        # Default: the 1661/1666 branching ratio is fixed, so the amplitude is derived.
+        cs_fix = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False)
+        assert cs_fix.free_mask()[1] is np.False_
 
     def test_niv_free_mask(self):
         """NIV] doublet: kinematics-only (amplitude free)."""
@@ -315,14 +318,17 @@ class TestConstraintSetApply:
         assert p_out[1] == pytest.approx(p_out[0] * NV_RATIO)
 
     def test_oiii_uv_amplitude_free(self):
-        """OIII] 1661 amplitude is free (not fixed ratio) when resolved."""
+        """OIII] 1661 amplitude is free when resolved, unless the branching ratio is fixed."""
         names = ["OIII_1666", "OIII_1661"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
-                           tie_uv_doublets=True)
+                           tie_uv_doublets=True, fix_branching_ratios=False)
         p = self._make_params(names)
         p[0], p[1] = 3.0, 1.5  # different amplitudes
         p_out = cs.apply(p)
         assert p_out[1] == pytest.approx(1.5)  # amplitude unchanged
+        # Default: fixed at 0.4016 x 1666.
+        p_fix = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False).apply(p)
+        assert p_fix[1] == pytest.approx(3.0 * 0.4016)
 
     def test_ciii_amplitude_free(self):
         """CIII] amplitude is NOT overwritten (kinematics-only, not blended)."""

@@ -65,6 +65,7 @@ REST_LINES_A: dict[str, float] = {
     "HEI_3889": 3889.74894995,
     "H8": 3890.16605856,
     "HEPSILON": 3971.20218326,
+    "NeIII_3968": 3968.593,       # [Ne III] 3967.47 air; 1.4 A from Hepsilon, tied to 3869
     "HEI_4027": 4027.327,
     # Balmer series
     "HDELTA": 4102.8996,
@@ -86,6 +87,7 @@ REST_LINES_A: dict[str, float] = {
     "CIV_5814": 5813.62,
     "HEI_5877": 5877.2525,
     "OI_6302": 6302.046,
+    "OI_6366": 6365.533,         # [O I] 6363.78 air; tied to 6302
     "NII_6549": 6549.8589,
     "Ha": 6564.6319,
     "NII_6585": 6585.2784,
@@ -217,6 +219,7 @@ _GRATING_LINES = [
     "NeIII_3869",
     "H8",               # HeI 3889 blended with H8 (Δ=0.4 Å); unresolvable at any NIRSpec R
     "HEPSILON",
+    "NeIII_3968",       # 1.4 Å from Hε; tied to NeIII_3869, otherwise Hε absorbs it
     "HEI_4027",
     "HDELTA",
     "HEI_4145",
@@ -242,6 +245,7 @@ _GRATING_LINES = [
     "CIV_5814",
     "HEI_5877",
     "OI_6302",
+    "OI_6366",
     "NII_6549",
     "Ha",
     "NII_6585",

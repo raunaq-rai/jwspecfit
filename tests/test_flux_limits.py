@@ -186,9 +186,14 @@ class TestAssumedWidth:
         assert sigma_v == pytest.approx(120.0, abs=25.0)
 
     def test_undetected_lines_do_not_drag_the_width(self, synthetic_fit):
-        """Low-SNR lines are excluded, so a collapsed σ cannot bias it."""
-        loose = intrinsic_sigma_kms(synthetic_fit.lines, grating="G395M", snr_min=0.0)
-        strict = intrinsic_sigma_kms(synthetic_fit.lines, grating="G395M", snr_min=5.0)
+        """Low-SNR lines are excluded, so a collapsed σ cannot bias it.
+
+        Uses one detected and one undetected line: the tied lines all share
+        one width, so in the full set the undetected one cannot move the median.
+        """
+        pair = {n: synthetic_fit.lines[n] for n in ("Ha", "OIII_4363")}
+        loose = intrinsic_sigma_kms(pair, grating="G395M", snr_min=0.0, min_lines=1)
+        strict = intrinsic_sigma_kms(pair, grating="G395M", snr_min=5.0, min_lines=1)
         assert loose < strict
 
     def test_none_when_nothing_is_detected(self, synthetic_fit):

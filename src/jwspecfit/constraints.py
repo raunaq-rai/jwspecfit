@@ -63,6 +63,23 @@ NIII_MULTIPLET_RATIOS: dict[str, float] = {
     "NIII_1754": 0.1844,   # 4P1/2 -> 2P3/2
 }
 
+# Pure branching ratios: both members decay from the same upper level, so
+# F(secondary) / F(primary) is fixed by the A-values alone.  PyNEB gives the
+# same value to four figures for Te = 1-2e4 K and ne = 1e2-1e5 cm^-3.  The
+# secondary shares the primary's flux ratio, velocity and width.
+BRANCHING_RATIOS: dict[tuple[str, str], float] = {
+    # (primary, secondary): F(secondary) / F(primary)
+    ("OIII_5007", "OIII_4959"): 1.0 / 2.984,
+    ("OIII_1666", "OIII_1661"): 0.4016,
+    ("NeIII_3869", "NeIII_3968"): 1.0 / 3.320,
+    ("OI_6302", "OI_6366"): 1.0 / 3.131,
+}
+
+# Case B H8/H9 (PyNEB, ne = 1e3 cm^-3): 1.436 / 1.437 / 1.438 at Te = 1 / 1.5 /
+# 2e4 K.  The lines are 54 A apart, so dust cancels.  H8 is 0.4 A from
+# He I 3889, which is free, so without this tie their split is degenerate.
+H8_H9_RATIO = 1.437
+
 
 @dataclass
 class ConstraintSet:
@@ -81,6 +98,10 @@ class ConstraintSet:
         unresolved and should have their amplitude fixed to the
         low-density-limit ratio.  Populated by the fitter based on
         spectral resolution.
+    fix_branching_ratios : bool
+        Fix every pair in :data:`BRANCHING_RATIOS` (flux ratio, velocity and
+        width, overriding ``tie_uv_centroids`` for O III] 1661) and H8 to
+        :data:`H8_H9_RATIO` x H9.
     """
 
     line_names: list[str]
@@ -92,6 +113,7 @@ class ConstraintSet:
     blended_doublets: set[str] | None = None
     niv_doublet_ratio: float | None = None
     ciii_doublet_ratio: float | None = None
+    fix_branching_ratios: bool = True
 
     def apply(self, params: np.ndarray) -> np.ndarray:
         """Apply constraints to a parameter vector (in-place copy).
@@ -293,6 +315,18 @@ class ConstraintSet:
                 lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
                 p[2 * nL + idx[sec]] = p[2 * nL + idx[pri]] * lam_ratio
 
+        # --- Fixed branching ratios (last: every primary is final by now) ---
+        if self.fix_branching_ratios:
+            for (pri, sec), ratio in BRANCHING_RATIOS.items():
+                if pri in idx and sec in idx:
+                    i_pri, i_sec = idx[pri], idx[sec]
+                    lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
+                    p[i_sec] = p[i_pri] * ratio
+                    p[nL + i_sec] = p[nL + i_pri] * lam_ratio
+                    p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
+            if "H8" in idx and "H9" in idx:
+                p[idx["H8"]] = p[idx["H9"]] * H8_H9_RATIO
+
         return p
 
     def free_mask(self) -> np.ndarray:
@@ -423,6 +457,15 @@ class ConstraintSet:
         for pri, sec in _ALWAYS_TIE_WIDTH:
             if pri in idx and sec in idx:
                 free[2 * nL + idx[sec]] = False
+
+        # Fixed branching ratios: the secondary is fully derived.
+        if self.fix_branching_ratios:
+            for pri, sec in BRANCHING_RATIOS:
+                if pri in idx and sec in idx:
+                    i_sec = idx[sec]
+                    free[i_sec] = free[nL + i_sec] = free[2 * nL + i_sec] = False
+            if "H8" in idx and "H9" in idx:
+                free[idx["H8"]] = False
 
         return free
 

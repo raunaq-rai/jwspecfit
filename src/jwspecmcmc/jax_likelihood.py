@@ -17,6 +17,8 @@ from math import sqrt
 import numpy as np
 
 from jwspecfit.constraints import (
+    BRANCHING_RATIOS,
+    H8_H9_RATIO,
     ConstraintSet,
     NII_RATIO,
     NIII_MULTIPLET_ANCHOR,
@@ -186,6 +188,18 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
         if pri in idx and sec in idx:
             lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
             ops.append((2 * nL + idx[sec], 2 * nL + idx[pri], lam_ratio))
+
+    # --- Fixed branching ratios (last, as in ConstraintSet.apply) ---
+    if cs.fix_branching_ratios:
+        for (pri, sec), ratio in BRANCHING_RATIOS.items():
+            if pri in idx and sec in idx:
+                i_pri, i_sec = idx[pri], idx[sec]
+                lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
+                ops.append((i_sec, i_pri, ratio))
+                ops.append((nL + i_sec, nL + i_pri, lam_ratio))
+                ops.append((2 * nL + i_sec, 2 * nL + i_pri, lam_ratio))
+        if "H8" in idx and "H9" in idx:
+            ops.append((idx["H8"], idx["H9"], H8_H9_RATIO))
 
     return ops
 
