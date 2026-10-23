@@ -537,8 +537,8 @@ def _compute_multi_ne(
     tuple
         ``(ne_low, ne_mid, ne_high, ne_Opp, ne_failures)`` in cm^-3.
 
-        - ``ne_low``: from [SII] 6718/6732 or [OII] 3726/3729 (~14 eV);
-          z-fallback ``54*(1+z)^1.2``.  Used for O⁺, N⁺, S⁺, C⁺.
+        - ``ne_low``: from [Si III] 1883/1892, then [SII] 6718/6732, then
+          [OII] 3726/3729 (``_NE_LOW_DOUBLETS``); z-fallback ``54*(1+z)^1.2``.  Used for O⁺, N⁺, S⁺, C⁺.
         - ``ne_mid``: from CIII] 1907/1909 (~24 eV); ``None`` if
           unavailable.  Used for C²⁺, N²⁺, S²⁺, Ar²⁺.
         - ``ne_high``: from NIV] 1483/1486 (~47 eV), then [Ar IV];
@@ -561,59 +561,36 @@ def _compute_multi_ne(
 
     ne_failures: dict[str, str] = {}
 
-    # Low-ionisation zone: [SII] 6718/6732 or [OII] 3726/3729.
+    # Low-ionisation zone, in priority order (_NE_LOW_DOUBLETS): [Si III],
+    # then [S II], then [O II].  A doublet that is present but below the
+    # SNR gate, or whose solve fails, falls through to the next one; the
+    # reason is recorded in ne_failures under its key.
     ne_low = ne_zone_fallback("low", z)
     _fb_low = ne_low
-    if "SII_6718" in fluxes and "SII_6732" in fluxes:
-        if _doublet_snr_ok("SII_6718", "SII_6732", fluxes, errors, snr_ne):
-            try:
+    for key, l1, l2, combined, _ in _NE_LOW_DOUBLETS:
+        if l1 not in fluxes or l2 not in fluxes:
+            continue
+        if not _doublet_snr_ok(l1, l2, fluxes, errors, snr_ne, combined=combined):
+            logger.warning(
+                "%s doublet below SNR threshold (%.1f); trying the next "
+                "low-ionisation doublet.", key, snr_ne,
+            )
+            ne_failures[key] = f"doublet below SNR threshold ({snr_ne:.1f})"
+            continue
+        try:
+            if l1 == "SiIII_1":
+                ne_low = compute_ne_SiIII(fluxes[l1], fluxes[l2], Te_guess=te_low)
+            else:
                 ne_low = compute_ne(
-                    fluxes["SII_6718"], fluxes["SII_6732"],
-                    doublet="SII", Te_guess=te_low,
+                    fluxes[l1], fluxes[l2],
+                    doublet="SII" if l1 == "SII_6718" else "OII", Te_guess=te_low,
                 )
-            except Exception as exc:
-                logger.warning("n_e(SII) failed; using %.0f cm^-3.", _fb_low)
-                ne_failures["n_e(SII)"] = f"PyNEB solve failed: {exc}"
-        else:
-            logger.warning(
-                "n_e(SII) doublet below SNR threshold (%.1f); "
-                "using z-fallback %.0f cm^-3.", snr_ne, _fb_low,
-            )
-    elif "OII_3726" in fluxes and "OII_3729" in fluxes:
-        if _doublet_snr_ok("OII_3726", "OII_3729", fluxes, errors, snr_ne):
-            try:
-                ne_low = compute_ne(
-                    fluxes["OII_3726"], fluxes["OII_3729"],
-                    doublet="OII", Te_guess=te_low,
-                )
-            except Exception as exc:
-                logger.warning("n_e(OII) failed; using %.0f cm^-3.", _fb_low)
-                ne_failures["n_e(OII)"] = f"PyNEB solve failed: {exc}"
-        else:
-            logger.warning(
-                "n_e(OII) doublet below SNR threshold (%.1f); "
-                "using z-fallback %.0f cm^-3.", snr_ne, _fb_low,
-            )
-    elif "SiIII_1" in fluxes and "SiIII_2" in fluxes:
-        # UV fallback: optical [SII]/[OII] not covered (e.g. high-z UV
-        # stacks).  [Si III] 1883/1892 is the bluest low-ionisation
-        # density diagnostic (Martinez+2025 Table 2 n_e(Si²⁺)).
-        if _doublet_snr_ok("SiIII_1", "SiIII_2", fluxes, errors, snr_ne, combined=True):
-            try:
-                ne_low = compute_ne_SiIII(
-                    fluxes["SiIII_1"], fluxes["SiIII_2"], Te_guess=te_low,
-                )
-                logger.info(
-                    "n_e(low) from [Si III] (UV fallback) = %.0f cm^-3.", ne_low,
-                )
-            except Exception as exc:
-                logger.warning("n_e([Si III]) failed; using %.0f cm^-3.", _fb_low)
-                ne_failures["n_e([Si III])"] = f"PyNEB solve failed: {exc}"
-        else:
-            logger.warning(
-                "n_e([Si III]) doublet below SNR threshold (%.1f); "
-                "using z-fallback %.0f cm^-3.", snr_ne, _fb_low,
-            )
+        except Exception as exc:
+            logger.warning("%s failed; trying the next low-ionisation doublet.", key)
+            ne_failures[key] = f"PyNEB solve failed: {exc}"
+            continue
+        logger.info("n_e(low) from %s = %.0f cm^-3.", key, ne_low)
+        break
 
     # Mid-ionisation zone: CIII] 1907/1909 (~24 eV).
     ne_mid = None
@@ -1061,6 +1038,24 @@ _NE_CAP_MIN_CONVERGED_FRAC: float = 0.5
 #: high-density asymptote well before 1e4 and cannot distinguish 1e4 from
 #: 1e6 (Arellano-Cordova et al. 2026, arXiv:2602.13007).
 _NE_LOW_SATURATION: float = 1.0e4
+
+#: Low-ionisation density doublets in priority order:
+#: ``(failure key, line 1, line 2, combined SNR gate, diagnostics label)``.
+#: [Si III] 1883/1892 comes first: Si2+ spans 16-34 eV, close to the O+
+#: zone (14-35 eV), and the lines are covered at high z when [S II] is not.
+#: It is only density-sensitive above ~3e3 cm^-3 (_NE_SIIII_FLOOR), the
+#: complement of [S II]/[O II], which saturate above ~1e4.
+_NE_LOW_DOUBLETS: tuple[tuple[str, str, str, bool, str], ...] = (
+    ("n_e([Si III])", "SiIII_1", "SiIII_2", True,
+     "[Si III] 1883/1892 doublet ratio (UV)"),
+    ("n_e(SII)", "SII_6718", "SII_6732", False, "[SII] 6718/6732 doublet ratio"),
+    ("n_e(OII)", "OII_3726", "OII_3729", False, "[OII] 3726/3729 doublet ratio"),
+)
+
+#: Below this density the [Si III] 1883/1892 ratio is within 10% of its
+#: low-density limit (1.57 at 1.5e4 K; 1.52 at 1e3 cm^-3), so a value under
+#: it is closer to an upper limit than a measurement.
+_NE_SIIII_FLOOR: float = 3.0e3
 
 
 #: Human-readable labels for each T_e(O++) diagnostic.
@@ -1921,6 +1916,7 @@ def _build_diagnostics(
     logU_ne: float | None = None,
     logU_override_err: float | tuple[float, float] | None = None,
     ionic: dict[str, float] | None = None,
+    ne_failures: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Build a diagnostics dict explaining how each quantity was derived.
 
@@ -1955,6 +1951,10 @@ def _build_diagnostics(
         Adds a ``"log(U) density"`` entry naming it, the measured
         density it replaced, and the difference between the two log(U)
         values.
+    ne_failures : dict, optional
+        Density-solve failures from :func:`_compute_multi_ne`; names the
+        low-ionisation doublets that fell through, and so which one set
+        ``ne_low``.
 
     Returns
     -------
@@ -2048,31 +2048,35 @@ def _build_diagnostics(
     # z-dependent fallback (on a failed/absent solve ne_low IS the fallback).
     from .direct import ne_zone_fallback
     _fb_low = ne_zone_fallback("low", z)
-    _has_sii = "SII_6718" in fluxes and "SII_6732" in fluxes
-    _has_oii = "OII_3726" in fluxes and "OII_3729" in fluxes
-    _has_siiii = "SiIII_1" in fluxes and "SiIII_2" in fluxes
+    # The doublet used is the first one present that did not fall through
+    # (see _compute_multi_ne).
+    _fails = ne_failures or {}
+    _present = [d for d in _NE_LOW_DOUBLETS if d[1] in fluxes and d[2] in fluxes]
+    _src = next((d for d in _present if d[0] not in _fails), None)
     _measured_low = abs(ne_low - _fb_low) > 1e-6
     if _measured_low:
-        if _has_sii:
-            diag["ne(low)"] = f"[SII] 6718/6732 doublet ratio -> {ne_low:.0f} cm^-3"
-        elif _has_oii:
-            diag["ne(low)"] = f"[OII] 3726/3729 doublet ratio -> {ne_low:.0f} cm^-3"
-        elif _has_siiii:
-            diag["ne(low)"] = (
-                f"[Si III] 1883/1892 doublet ratio (UV) -> {ne_low:.0f} cm^-3"
-            )
-        else:
-            diag["ne(low)"] = f"{ne_low:.0f} cm^-3"
+        diag["ne(low)"] = (
+            f"{_src[4]} -> {ne_low:.0f} cm^-3" if _src is not None
+            else f"{ne_low:.0f} cm^-3"
+        )
+        _skipped = [d for d in _present if d[0] in _fails]
+        if _src is not None and _skipped:
+            diag["ne(low)"] += " (" + "; ".join(
+                f"{d[4].split(' doublet')[0]} skipped: {_fails[d[0]]}"
+                for d in _skipped
+            ) + ")"
     else:
         _why = (
-            "[SII] doublet failed SNR cut or solve" if _has_sii else
-            "[OII] doublet failed SNR cut or solve" if _has_oii else
-            "[Si III] doublet failed SNR cut or solve" if _has_siiii else
-            "no [SII]/[OII]/[Si III] doublet available"
+            "; ".join(
+                f"{d[4].split(' doublet')[0]} doublet failed SNR cut or solve"
+                for d in _present
+            )
+            or "no [Si III]/[SII]/[OII] doublet available"
         )
         diag["ne(low)"] = (
             f"z-fallback ({_fb_low:.0f} cm^-3, Abdurro'uf+2024) — {_why}"
         )
+    _siiii_low = _measured_low and _src is not None and _src[1] == "SiIII_1"
 
     # Consistency between the low-ionisation zone and a *measured* dense
     # O++ zone.  [S II]/[O II] saturate below 1e4 cm^-3, so when the joint
@@ -2083,7 +2087,17 @@ def _build_diagnostics(
         and ne_Opp >= _NE_LOW_SATURATION
         and (sc is None or (sc.converged and not sc.ne_is_upper_limit))
     )
-    if _dense_Opp and ne_low < _NE_LOW_SATURATION:
+    if _siiii_low:
+        # [Si III] stays density-sensitive up to ~1e6 cm^-3, so the
+        # saturation caveats below are [S II]/[O II]-only; its own weak
+        # regime is the low-density end.
+        if ne_low < _NE_SIIII_FLOOR:
+            diag["ne(low)"] += (
+                f" — NOTE: below {_NE_SIIII_FLOOR:.0g} cm^-3 the [Si III] "
+                "ratio is within 10% of its low-density limit, so treat this "
+                "as an upper limit"
+            )
+    elif _dense_Opp and ne_low < _NE_LOW_SATURATION:
         diag["ne(low)"] += (
             f" — NOTE: n_e(O++) = {ne_Opp:.3g} cm^-3, but [S II]/[O II] "
             f"saturate below {_NE_LOW_SATURATION:.0g} cm^-3, so this value "
@@ -2565,6 +2579,7 @@ def _run_direct(
         ne_Opp=ne_Opp, Te_int=Te_int, te_high_diag=_Te_diagnostic, z=z,
         sc=_sc, Z_Zsun=Z_Zsun, logU_diagnostic=logU_diagnostic,
         logU_ne=logU_ne, logU_override_err=logU_override_err, ionic=ionic,
+        ne_failures=ne_failures,
     )
 
     # --- MC error propagation (all 6 steps per iteration) ---
@@ -3624,7 +3639,7 @@ def _run_direct_mcmc(
                 te_high_diag=_Te_diagnostic, z=z, sc=_sc,
                 Z_Zsun=Z_Zsun_pt, logU_diagnostic=logU_diagnostic,
                 logU_ne=logU_ne, logU_override_err=logU_override_err,
-                ionic=ionic_pt,
+                ionic=ionic_pt, ne_failures=ne_failures,
             ),
             **_diag_extra,
         },

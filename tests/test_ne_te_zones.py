@@ -357,6 +357,45 @@ class TestNeDiagnosticLabels:
         assert "[SII]" in out["diagnostics"]["ne(low)"]
         assert "fallback" not in out["diagnostics"]["ne(low)"]
 
+    def test_ne_low_labels_siIII_and_skipped_sii(self):
+        from jwspecabund._core import _run_direct
+
+        fluxes = {**self._oiii(), "SII_6718": 1.4, "SII_6732": 1.0,
+                  "SiIII_1": 1.3, "SiIII_2": 1.0}
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=10, progress=False, seed=1, z=7.0,
+        )
+        s = out["diagnostics"]["ne(low)"]
+        assert s.startswith("[Si III] 1883/1892")
+
+    def test_ne_low_labels_sii_when_siIII_weak(self):
+        from jwspecabund._core import _run_direct
+
+        fluxes = {**self._oiii(), "SII_6718": 1.4, "SII_6732": 1.0,
+                  "SiIII_1": 1.3, "SiIII_2": 1.0}
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        errors.update({"SiIII_1": 1.0, "SiIII_2": 1.0})
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=10, progress=False, seed=1, z=7.0,
+        )
+        s = out["diagnostics"]["ne(low)"]
+        assert s.startswith("[SII] 6718/6732")
+        assert "[Si III] 1883/1892 skipped" in s
+
+    def test_ne_low_flags_siIII_below_its_floor(self):
+        from jwspecabund._core import _run_direct
+
+        # Ratio 1.55: ~4e2 cm^-3, in the insensitive low-density regime.
+        fluxes = {**self._oiii(), "SiIII_1": 1.55, "SiIII_2": 1.0}
+        errors = {k: v / 200.0 for k, v in fluxes.items()}
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=10, progress=False, seed=1, z=7.0,
+        )
+        s = out["diagnostics"]["ne(low)"]
+        assert s.startswith("[Si III]")
+        assert "upper limit" in s
+
     def test_ne_low_labels_zfallback(self):
         # No low-ion doublet -> ne(low) must say z-fallback, not a doublet.
         from jwspecabund._core import _run_direct
@@ -465,19 +504,54 @@ class TestMultiNeWiring:
         assert ne_low != pytest.approx(ne_zone_fallback("low", 0.0))
         assert 10 < ne_low < 1e5
 
-    def test_optical_low_ion_preferred_over_siIII(self):
-        # When both [SII] and [Si III] are present, [SII] wins (optical first).
+    def test_siIII_preferred_over_optical(self):
+        # When both [SII] and [Si III] are present, [Si III] wins.
         from jwspecabund._core import _compute_multi_ne
-        from jwspecabund.direct import compute_ne
+        from jwspecabund.direct import compute_ne_SiIII
 
         fluxes = {
             "SII_6718": 1.4, "SII_6732": 1.0,
-            "SiIII_1": 1.5, "SiIII_2": 1.0,
+            "SiIII_1": 1.3, "SiIII_2": 1.0,
         }
         errors = {k: v / 50.0 for k, v in fluxes.items()}
+        ne_low, _, _, _, fail = _compute_multi_ne(
+            fluxes, errors=errors, snr_ne=3.0, z=0.0,
+        )
+        assert ne_low == pytest.approx(compute_ne_SiIII(1.3, 1.0, Te_guess=1.5e4))
+        assert "n_e([Si III])" not in fail
+
+    @pytest.mark.parametrize("bad", ["snr", "solve"])
+    def test_weak_siIII_falls_through_to_sii(self, bad):
+        # A present-but-unusable [Si III] must not block a good [SII].
+        from jwspecabund._core import _compute_multi_ne
+        from jwspecabund.direct import compute_ne
+
+        si = (1.3, 1.0) if bad == "snr" else (5.0, 1.0)   # 5.0: above the limit
+        fluxes = {"SII_6718": 1.4, "SII_6732": 1.0,
+                  "SiIII_1": si[0], "SiIII_2": si[1]}
+        errors = {"SII_6718": 0.028, "SII_6732": 0.02}
+        errors.update({"SiIII_1": 1.0, "SiIII_2": 1.0} if bad == "snr"
+                      else {"SiIII_1": 0.05, "SiIII_2": 0.05})
+        ne_low, _, _, _, fail = _compute_multi_ne(
+            fluxes, errors=errors, snr_ne=3.0, z=0.0,
+        )
+        assert ne_low == pytest.approx(
+            compute_ne(1.4, 1.0, doublet="SII", Te_guess=1.5e4), rel=1e-6,
+        )
+        assert "n_e([Si III])" in fail
+        assert "n_e(SII)" not in fail
+
+    def test_sii_preferred_over_oii(self):
+        from jwspecabund._core import _compute_multi_ne
+        from jwspecabund.direct import compute_ne
+
+        fluxes = {"SII_6718": 1.4, "SII_6732": 1.0,
+                  "OII_3726": 1.0, "OII_3729": 1.3}
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
         ne_low = _compute_multi_ne(fluxes, errors=errors, snr_ne=3.0, z=0.0)[0]
-        ne_sii = compute_ne(1.4, 1.0, doublet="SII", Te_guess=1.5e4)
-        assert ne_low == pytest.approx(ne_sii, rel=1e-6)
+        assert ne_low == pytest.approx(
+            compute_ne(1.4, 1.0, doublet="SII", Te_guess=1.5e4), rel=1e-6,
+        )
 
     def test_ciii_fallback_when_no_arIV(self):
         from jwspecabund._core import _compute_multi_ne

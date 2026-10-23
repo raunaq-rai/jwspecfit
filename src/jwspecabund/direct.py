@@ -413,10 +413,10 @@ def compute_ne_SiIII(
 ) -> float:
     """Compute electron density from the [Si III] 1883/1892 ratio.
 
-    A UV density diagnostic (Si²⁺, 16-33 eV).  Used as the low-ionisation
-    density fallback for O⁺/N⁺ when the optical [SII]/[OII] doublets are
-    out of coverage (e.g. high-z UV-only stacks; Martinez+2025 Table 2
-    list n_e(Si²⁺) for the low/intermediate zone).
+    A UV density diagnostic (Si²⁺, 16-33 eV).  The preferred low-ionisation
+    density for O⁺/N⁺, ahead of [SII] and [OII] (Martinez+2025 Table 2
+    list n_e(Si²⁺) for the low/intermediate zone).  Sensitive from ~3e3 to
+    ~1e6 cm^-3; below that the ratio is within 10% of its low-density limit.
 
     Parameters
     ----------
