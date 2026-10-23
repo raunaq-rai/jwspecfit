@@ -79,8 +79,8 @@ Available prior classes: `UniformPrior`, `GaussianPrior`, `LogUniformPrior`.
 result.convergence   # {"R_hat": {...}, "ESS": {...}}
 ```
 
-Gelman-Rubin R̂ should sit below 1.05 and ESS above a few hundred per
-parameter for a trusted fit.
+The rank-normalised split R̂ (Vehtari et al. 2021) should sit below 1.01
+and ESS above a few hundred per parameter for a trusted fit.
 
 ## Plotting
 

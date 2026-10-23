@@ -92,7 +92,7 @@ result = jwspecmcmc.fit_lines(spec, z=6.0, sampler="nuts")   # Bayesian NUTS fit
 
 # Assess convergence before trusting the posteriors
 conv = result.convergence
-print(f"converged={conv['converged']}  "        # True iff R-hat<1.05 & ESS>100 (all params)
+print(f"converged={conv['converged']}  "        # True iff R-hat<1.01 & ESS>100 (all params)
       f"R-hat_max={conv['r_hat_max']:.3f}  "     # worst R-hat — quote this
       f"ESS_min={conv['ess_min']:.0f}")
 
@@ -180,10 +180,10 @@ attached to the result in the `convergence` dictionary:
 
 ```python
 conv = result.convergence
-conv["converged"]   # bool: True if R-hat < 1.05 and ESS > 100 for all params
+conv["converged"]   # bool: True if R-hat < 1.01 and ESS > 100 for all params
 conv["r_hat_max"]   # worst (largest) R-hat across parameters
 conv["ess_min"]     # smallest effective sample size
-conv["r_hat"]       # per-parameter R-hat array
+conv["r_hat"]       # per-parameter rank-normalised split R-hat (Vehtari+2021)
 conv["ess"]         # per-parameter ESS array
 ```
 

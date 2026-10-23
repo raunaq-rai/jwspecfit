@@ -198,7 +198,7 @@ effective samples.
 
 | Diagnostic | Criterion | Reference |
 |-----------|-----------|-----------|
-| Gelman–Rubin R̂ | R̂ < 1.05 for all parameters | Gelman & Rubin (1992) |
+| Rank-normalised split R̂ | R̂ < 1.01 for all parameters | Vehtari et al. (2021) |
 | Effective sample size (ESS) | ESS > 100 for all parameters | Via FFT autocorrelation |
 
 ### 2.5 Posterior summaries
