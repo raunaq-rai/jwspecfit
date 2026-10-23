@@ -751,3 +751,38 @@ class TestBlendedDoubletRatiosMatchAtomicData:
                  / atom.getEmissivity(1.5e4, 1e2, wave=wave_pri))
         const = _INTERCOM_LOW_DENSITY_RATIOS[(pri, sec)]
         assert ratio == pytest.approx(const, rel=0.10)
+
+
+class TestFixBlendedRatiosSwitch:
+    """``fix_blended_ratios=False`` keeps an unresolved doublet's ratio free."""
+
+    _LINES = ["CIII]_1907", "CIII]"]
+
+    def _spec(self):
+        # 1906.7/1908.7 at R=1000: 2.1 A apart, below the 4.71 sigma_inst cut.
+        return _make_uv_spectrum(
+            z=3.0, lines_to_inject={"CIII]_1907": 3e-17, "CIII]": 1.5e-17},
+            R=1000.0, noise_level=0.002,
+        )
+
+    def test_default_fixes_the_ratio(self):
+        res = fit_lines(self._spec(), z=3.0, R=1000.0, lines=self._LINES, n_boot=0)
+        assert res.constraints.blended_doublets == {"CIII]"}
+
+    def test_switch_frees_the_ratio(self):
+        res = fit_lines(self._spec(), z=3.0, R=1000.0, lines=self._LINES, n_boot=0,
+                        fix_blended_ratios=False)
+        assert not res.constraints.blended_doublets
+        assert res.constraints.free_mask()[1]               # 1909 amplitude free
+        ratio = res.lines["CIII]"].flux / res.lines["CIII]_1907"].flux
+        assert ratio == pytest.approx(0.5, abs=0.1)         # injected, not 0.67
+
+    def test_mcmc_passes_the_switch(self):
+        import jwspecmcmc
+
+        res = jwspecmcmc.fit_lines(
+            self._spec(), z=3.0, R=1000.0, lines=self._LINES, sampler="emcee",
+            n_walkers=16, n_steps=200, n_burn=50, progress=False,
+            fix_blended_ratios=False,
+        )
+        assert not res.constraints.blended_doublets

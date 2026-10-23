@@ -341,6 +341,7 @@ def fit_lines(
     lya_break: bool = False,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    fix_blended_ratios: bool = True,
     continuum: np.ndarray | None = None,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
@@ -415,6 +416,10 @@ def fit_lines(
         line name.  Each value is ``(mu_lo, mu_hi)``.  Overrides the
         automatic centroid bounds for the specified lines.  Useful for
         anchoring closely-spaced doublet members in noisy spectra.
+    fix_blended_ratios : bool
+        If ``True`` (default), a UV doublet closer than 4.71 sigma_inst
+        (2 x FWHM) has its flux ratio fixed to the low-density limit.  Set
+        ``False`` to keep both amplitudes free (kinematics stay tied).
     continuum : np.ndarray, optional
         External continuum in µJy on the input spectrum's pixel grid (e.g.
         an SPS fit with the lines masked).  Replaces the internal
@@ -605,7 +610,7 @@ def fit_lines(
     _BLEND_THRESHOLD = 4.71  # 2 × FWHM in sigma units
 
     _blended: set[str] = set()
-    if tie_uv_doublets:
+    if tie_uv_doublets and fix_blended_ratios:
         for (pri, sec) in _INTERCOM_LOW_DENSITY_RATIOS:
             if pri in line_names and sec in line_names:
                 lam_pri = REST_LINES_A[pri] * (1.0 + z)

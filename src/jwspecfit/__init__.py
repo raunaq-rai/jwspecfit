@@ -194,6 +194,7 @@ def fit_lines(
     lya_break: bool = False,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    fix_blended_ratios: bool = True,
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
@@ -289,6 +290,11 @@ def fit_lines(
         Tie UV doublet kinematics and fix resonance-line flux ratios.
         Recommended for stacked spectra where doublets are poorly
         resolved (default ``True``).
+    fix_blended_ratios : bool
+        If ``True`` (default), a UV doublet closer than 4.71 sigma_inst
+        (2 x FWHM) has its flux ratio fixed to the low-density limit.  Set
+        ``False`` to keep both amplitudes free (kinematics stay tied).
+        Narrow-only fits.
 
     Returns
     -------
@@ -301,6 +307,11 @@ def fit_lines(
         When both broad flags are False, or when *wave_windows_A* is
         specified (merged result).
     """
+    if not fix_blended_ratios and (fit_balmer_broad or fit_oiii_broad or fit_hei_broad):
+        raise NotImplementedError(
+            "fix_blended_ratios=False is only supported for narrow-only fits."
+        )
+
     # --- Multi-window fitting ---
     if wave_windows_A is not None:
         if wave_range_A is not None:
@@ -364,6 +375,7 @@ def fit_lines(
                     lya_break=lya_break,
                     niv_doublet_ratio=niv_doublet_ratio,
                     ciii_doublet_ratio=ciii_doublet_ratio,
+                    fix_blended_ratios=fix_blended_ratios,
                     _label=win_label,
                 )
             else:
@@ -421,6 +433,7 @@ def fit_lines(
             lya_break=lya_break,
             niv_doublet_ratio=niv_doublet_ratio,
             ciii_doublet_ratio=ciii_doublet_ratio,
+            fix_blended_ratios=fix_blended_ratios,
         )
 
     return fit_with_broad(

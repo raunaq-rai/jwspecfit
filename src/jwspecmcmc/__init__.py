@@ -109,6 +109,7 @@ def fit_lines(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    fix_blended_ratios: bool = True,
     continuum: np.ndarray | None = None,
     continuum_err: np.ndarray | None = None,
 ) -> MCMCResult | MCMCBroadFitResult:
@@ -262,6 +263,11 @@ def fit_lines(
     ciii_doublet_ratio : float or None
         If given, fix the C III] flux ratio ``F(1909) / F(1907)`` to this
         value; ``None`` (default) leaves the two amplitudes free.
+    fix_blended_ratios : bool
+        If ``True`` (default), a UV doublet closer than 4.71 sigma_inst
+        (2 x FWHM) has its flux ratio fixed to the low-density limit.  Set
+        ``False`` to keep both amplitudes free (kinematics stay tied).
+        Narrow-only fits.
     sigma_overrides : dict, optional
         Per-line width bounds ``{line_name: (sigma_lo, sigma_hi)}`` in
         Angstrom, overriding the automatic grating-based bounds.
@@ -332,6 +338,7 @@ def fit_lines(
             centroid_overrides=centroid_overrides,
             niv_doublet_ratio=niv_doublet_ratio,
             ciii_doublet_ratio=ciii_doublet_ratio,
+            fix_blended_ratios=fix_blended_ratios,
             continuum=continuum,
             continuum_err=continuum_err,
         )
@@ -339,6 +346,10 @@ def fit_lines(
     if continuum is not None:
         raise NotImplementedError(
             "An external continuum is only supported for narrow-only fits."
+        )
+    if not fix_blended_ratios:
+        raise NotImplementedError(
+            "fix_blended_ratios=False is only supported for narrow-only fits."
         )
     return _fit_with_broad_mcmc(
         spectrum, z,

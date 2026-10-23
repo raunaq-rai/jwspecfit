@@ -164,6 +164,7 @@ def _fit_lines_mcmc(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    fix_blended_ratios: bool = True,
     continuum: np.ndarray | None = None,
     continuum_err: np.ndarray | None = None,
 ) -> MCMCResult:
@@ -234,6 +235,10 @@ def _fit_lines_mcmc(
         Per-line sigma (width) bounds in Angstroms, keyed by line name.
         Each value is ``(sigma_lo, sigma_hi)``.  Overrides the automatic
         grating-based bounds for the specified lines.
+    fix_blended_ratios : bool
+        If ``True`` (default), a UV doublet closer than 4.71 sigma_inst
+        (2 x FWHM) has its flux ratio fixed to the low-density limit.  Set
+        ``False`` to keep both amplitudes free (kinematics stay tied).
     continuum : np.ndarray, optional
         External continuum in µJy on the input spectrum's pixel grid (e.g.
         an SPS fit with the lines masked).  Replaces the internal
@@ -439,7 +444,7 @@ def _fit_lines_mcmc(
 
     _BLEND_THRESHOLD = 4.71  # 2 × FWHM in sigma units
     _blended: set[str] = set()
-    if tie_uv_doublets:
+    if tie_uv_doublets and fix_blended_ratios:
         for (pri, sec) in _INTERCOM_LOW_DENSITY_RATIOS:
             if pri in line_names and sec in line_names:
                 lam_pri = REST_LINES_A[pri] * (1.0 + z)
@@ -607,6 +612,7 @@ def _fit_lines_mcmc(
             centroid_overrides=centroid_overrides,
             niv_doublet_ratio=niv_doublet_ratio,
             ciii_doublet_ratio=ciii_doublet_ratio,
+            fix_blended_ratios=fix_blended_ratios,
             lya_break=_lya_break,
             moving_average=moving_average,
             sigma_factor=sigma_factor,
