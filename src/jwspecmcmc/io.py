@@ -14,6 +14,7 @@ Example
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 from pathlib import Path
@@ -53,6 +54,25 @@ def _to_python(obj: Any) -> Any:
     if isinstance(obj, (list, tuple)):
         return [_to_python(v) for v in obj]
     return obj
+
+
+def _R_on_grid(spec: Spectrum) -> np.ndarray:
+    """The spectrum's resolving power per pixel, or an empty array if unset."""
+    if spec.R is None:
+        return np.array([])
+    from jwspecfit.resolution import resolve_R
+
+    return resolve_R(spec.wave_um, R=spec.R)
+
+
+def _R_from_saved(data: Any, wave_um: np.ndarray) -> Any:
+    """Rebuild ``Spectrum.R`` from ``R_values``: a float if constant, else a callable."""
+    if "R_values" not in data or data["R_values"].size == 0:
+        return None
+    R_vals = np.asarray(data["R_values"], dtype=float)
+    if np.allclose(R_vals, R_vals[0]):
+        return float(R_vals[0])
+    return lambda lam_um: np.interp(lam_um, wave_um, R_vals)
 
 
 def save_mcmc_result(
@@ -100,14 +120,11 @@ def save_mcmc_result(
 
     # --- Serialise constraints ---
     if mcmc.constraints is not None:
-        cs = mcmc.constraints
-        constraints_data = {
-            "line_names": cs.line_names,
-            "tie_nii": cs.tie_nii,
-            "tie_balmer_to_oiii": cs.tie_balmer_to_oiii,
-            "tie_uv_doublets": cs.tie_uv_doublets,
-        }
-        constraints_json = json.dumps(constraints_data)
+        # Every field, so the reloaded constraints are the ones that were fitted.
+        constraints_data = dataclasses.asdict(mcmc.constraints)
+        if constraints_data.get("blended_doublets") is not None:
+            constraints_data["blended_doublets"] = sorted(constraints_data["blended_doublets"])
+        constraints_json = json.dumps(_to_python(constraints_data))
     else:
         constraints_json = "null"
 
@@ -119,6 +136,8 @@ def save_mcmc_result(
         "err_ujy": mcmc.spectrum.err_ujy,
         "grating": np.array([mcmc.spectrum.grating or ""]),
         "z": np.array([mcmc.spectrum.z or 0.0]),
+        # Resolving power on the pixel grid (empty if the spectrum had none).
+        "R_values": _R_on_grid(mcmc.spectrum),
         # Core arrays
         "flat_chains": mcmc.flat_chains,
         "flat_chains_free": mcmc.flat_chains_free,
@@ -184,6 +203,7 @@ def load_mcmc_result(
         err_ujy=data["err_ujy"],
         grating=grating_str if grating_str else None,
         z=z_val if z_val != 0.0 else None,
+        R=_R_from_saved(data, data["wave_um"]),
     )
 
     # --- Lines ---
@@ -221,12 +241,14 @@ def load_mcmc_result(
         constraints = None
     else:
         cd = json.loads(constraints_str)
-        constraints = ConstraintSet(
-            line_names=cd["line_names"],
-            tie_nii=cd["tie_nii"],
-            tie_balmer_to_oiii=cd["tie_balmer_to_oiii"],
-            tie_uv_doublets=cd.get("tie_uv_doublets", False),
-        )
+        # Files written before every field was saved lack some keys; those
+        # fall back to the ConstraintSet defaults.
+        fields = {f.name for f in dataclasses.fields(ConstraintSet)}
+        cd = {k: v for k, v in cd.items() if k in fields}
+        cd.setdefault("tie_uv_doublets", False)
+        if cd.get("blended_doublets") is not None:
+            cd["blended_doublets"] = set(cd["blended_doublets"])
+        constraints = ConstraintSet(**cd)
 
     # --- Chains ---
     has_chains = bool(data["has_chains"][0])

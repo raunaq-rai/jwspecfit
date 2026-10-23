@@ -249,6 +249,39 @@ class TestSaveLoadMCMCResult:
         assert loaded.constraints.tie_balmer_to_oiii == original.constraints.tie_balmer_to_oiii
         assert loaded.constraints.line_names == original.constraints.line_names
 
+    def test_mcmc_every_constraint_field_preserved(self, tmp_path):
+        """Non-default tie flags must survive; they used to reload as defaults."""
+        import dataclasses
+
+        from jwspecmcmc import load_mcmc_result, save_mcmc_result
+
+        original = _make_synthetic_mcmc_result()
+        original.constraints = dataclasses.replace(
+            original.constraints, tie_uv_centroids=False, tie_uv_widths=False,
+            fix_branching_ratios=False, blended_doublets={"OIII_1661"},
+            niv_doublet_ratio=1.3, ciii_doublet_ratio=1.4,
+        )
+        save_mcmc_result(original, tmp_path / "mcmc.npz")
+        loaded = load_mcmc_result(tmp_path / "mcmc.npz")
+        assert dataclasses.asdict(loaded.constraints) == dataclasses.asdict(original.constraints)
+
+    @pytest.mark.parametrize("R", [1000.0, "callable"])
+    def test_mcmc_resolving_power_preserved(self, tmp_path, R):
+        import dataclasses
+
+        from jwspecmcmc import load_mcmc_result, save_mcmc_result
+
+        original = _make_synthetic_mcmc_result()
+        if R == "callable":
+            R = lambda lam_um: 300.0 * lam_um  # noqa: E731
+        original.spectrum = dataclasses.replace(original.spectrum, R=R)
+        save_mcmc_result(original, tmp_path / "mcmc.npz")
+        loaded = load_mcmc_result(tmp_path / "mcmc.npz").spectrum
+        w = original.spectrum.wave_um
+        expect = R(w) if callable(R) else np.full_like(w, R)
+        got = loaded.R(w) if callable(loaded.R) else np.full_like(w, loaded.R)
+        np.testing.assert_allclose(got, expect)
+
     def test_mcmc_chains_preserved(self, tmp_path):
         from jwspecmcmc import save_mcmc_result, load_mcmc_result
 
