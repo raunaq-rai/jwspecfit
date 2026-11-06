@@ -99,4 +99,4 @@ class TestLineResult:
             assert lr.flux > 0
             assert lr.sigma_A > 0
             assert lr.snr >= 0
-            assert np.isfinite(lr.ew_A)
+            assert np.isfinite(lr.ew0_A)

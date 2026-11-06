@@ -19,7 +19,15 @@ from typing import Any
 import numpy as np
 
 from jwspecfit.constraints import ConstraintSet
-from jwspecfit.fitter import FitResult, LineResult, _canonicalise_result_names
+from jwspecfit.fitter import (
+    FitResult,
+    LineResult,
+    _canonicalise_result_names,
+    _cont_snr,
+    _ew0_limit,
+    _ew_obs,
+    _renamed,
+)
 from jwspecfit.io import Spectrum, _ujy_to_flam, _flam_to_ujy
 from jwspecfit.lines import REST_LINES_A
 from jwspecfit.models import build_model
@@ -57,13 +65,16 @@ class MCMCLineResult:
         (lower, upper) 68% CI half-widths on flux.
     flux_posterior : np.ndarray
         Full flux posterior samples.
-    ew_A : float
-        Median rest-frame equivalent width (Angstrom).
-    ew_err : tuple of float or None
+    ew0_A : float
+        Median rest-frame equivalent width (Angstrom).  (``ew_A``,
+        ``ew_err`` and ``ew_posterior`` are the deprecated names of
+        ``ew0_A``, ``ew0_err`` and ``ew0_posterior``.)  Observed-frame
+        values are :attr:`ew_obs_A` and :attr:`ew_obs_err`.
+    ew0_err : tuple of float or None
         (lower, upper) 68% CI half-widths on the equivalent width.
         ``None`` when no posterior could be formed -- no continuum, or a
         continuum consistent with zero.
-    ew_posterior : np.ndarray or None
+    ew0_posterior : np.ndarray or None
         Full rest-frame equivalent-width posterior samples.  Carries both
         the line-flux and the continuum uncertainty; see
         :func:`jwspecmcmc._engine._ew_posterior` for how the continuum
@@ -80,7 +91,15 @@ class MCMCLineResult:
     sigma_assumed_A : float or None
         The assumed Gaussian σ (Angstrom) behind ``flux_err_cont``.
     ul_method : str or None
-        ``"matched_filter"`` or ``"matched_filter_analytic"``.
+        How ``flux_err_cont`` was obtained; see
+        :class:`jwspecfit.limits.FluxNoise`.
+    cont_flam : float or None
+        Continuum f_λ at the line that ``ew0_A`` is measured against and
+        :meth:`ew0_upper_limit` divides by.
+    cont_err_flam : float or None
+        Its 1σ uncertainty (NaN/None when the continuum model gives none).
+    z : float or None
+        Redshift used for the rest-frame conversion.
     """
 
     name: str
@@ -94,13 +113,67 @@ class MCMCLineResult:
     flux: float
     flux_err: tuple[float, float]
     flux_posterior: np.ndarray
-    ew_A: float
+    ew0_A: float
     snr: float
-    ew_err: tuple[float, float] | None = None
-    ew_posterior: np.ndarray | None = None
+    ew0_err: tuple[float, float] | None = None
+    ew0_posterior: np.ndarray | None = None
     flux_err_cont: float | None = None
     sigma_assumed_A: float | None = None
     ul_method: str | None = None
+    cont_flam: float | None = None
+    cont_err_flam: float | None = None
+    z: float | None = None
+
+    @property
+    def ew_obs_A(self) -> float:
+        """Observed-frame equivalent width (Å): ``ew0_A * (1 + z)``."""
+        return _ew_obs(self.ew0_A, self.z)
+
+    @property
+    def ew_obs_err(self) -> tuple[float, float] | None:
+        """Observed-frame EW 68 % half-widths: ``ew0_err * (1 + z)``."""
+        if self.ew0_err is None or self.z is None:
+            return None
+        return (self.ew0_err[0] * (1.0 + self.z), self.ew0_err[1] * (1.0 + self.z))
+
+    @property
+    def cont_snr(self) -> float | None:
+        """Continuum SNR at the line (``None`` without a continuum error)."""
+        return _cont_snr(self)
+
+    @property
+    def ew_A(self) -> float:
+        """Deprecated name of :attr:`ew0_A`."""
+        return _renamed(self, "ew_A", "ew0_A")
+
+    @property
+    def ew_err(self) -> tuple[float, float] | None:
+        """Deprecated name of :attr:`ew0_err`."""
+        return _renamed(self, "ew_err", "ew0_err")
+
+    @property
+    def ew_posterior(self) -> np.ndarray | None:
+        """Deprecated name of :attr:`ew0_posterior`."""
+        return _renamed(self, "ew_posterior", "ew0_posterior")
+
+    def ew0_upper_limit(self, n_sigma: float = 3.0) -> float:
+        """Return the n-sigma rest-frame equivalent-width upper limit.
+
+        ``upper_limit(n_sigma) / cont_flam / (1 + z)``; see
+        :meth:`jwspecfit.fitter.LineResult.ew0_upper_limit`.
+
+        Parameters
+        ----------
+        n_sigma : float
+            Number of sigma for the limit (default 3).
+
+        Returns
+        -------
+        float
+            Rest-frame EW upper limit (Å), NaN without a positive
+            continuum at the line.
+        """
+        return _ew0_limit(self.upper_limit(n_sigma), self.cont_flam, self.z)
 
     def upper_limit(self, n_sigma: float = 3.0) -> float:
         """Return the n-sigma flux upper limit.
@@ -220,7 +293,10 @@ class MCMCResult:
                 sigma_A=mlr.sigma_A,
                 flux=mlr.flux,
                 flux_err=flux_err_sym,
-                ew_A=mlr.ew_A,
+                ew0_A=mlr.ew0_A,
+                cont_flam=mlr.cont_flam,
+                cont_err_flam=mlr.cont_err_flam,
+                z=mlr.z,
                 snr_int_err=mlr.snr,
                 snr_int_cont=0.0,
                 snr_peak_err=0.0,
@@ -368,6 +444,38 @@ class MCMCResult:
             spec.wave_A, resid, np.isfinite(resid), lam_obs, sig_A,
             n_sigma=n_sigma, err=spec.err_flam,
         )
+
+    def ew0_upper_limit(
+        self,
+        line_name: str,
+        n_sigma: float = 3.0,
+        sigma_v_kms: float | None = None,
+    ) -> float:
+        """Rest-frame equivalent-width upper limit for a line.
+
+        :meth:`flux_upper_limit` divided by the continuum f_λ at the line
+        and by (1 + z), so it uses the same noise and the same assumed
+        width as the flux limit.
+
+        Parameters
+        ----------
+        line_name : str
+            Key into :attr:`lines`.
+        n_sigma : float
+            Number of sigma for the limit (default 3).
+        sigma_v_kms : float, optional
+            Override the assumed intrinsic velocity width, as for
+            :meth:`flux_upper_limit`.
+
+        Returns
+        -------
+        float
+            Rest-frame EW upper limit (Å); NaN without a positive
+            continuum at the line or a measurable flux limit.
+        """
+        flux_ul = self.flux_upper_limit(line_name, n_sigma, sigma_v_kms)
+        lr = self.lines[line_name]
+        return _ew0_limit(np.nan if flux_ul is None else flux_ul, lr.cont_flam, lr.z)
 
     def flux_upper_limits(
         self,
@@ -627,6 +735,18 @@ class MCMCBroadFitResult:
         return self.mcmc_result.flux_upper_limits(
             line_names=line_names, n_sigma=n_sigma, snr_threshold=snr_threshold,
             sigma_v_kms=sigma_v_kms,
+        )
+
+    def ew0_upper_limit(
+        self, line_name: str, n_sigma: float = 3.0,
+        sigma_v_kms: float | None = None,
+    ) -> float:
+        """Rest-frame EW upper limit.
+
+        Delegates to :meth:`MCMCResult.ew0_upper_limit`.
+        """
+        return self.mcmc_result.ew0_upper_limit(
+            line_name, n_sigma=n_sigma, sigma_v_kms=sigma_v_kms,
         )
 
     def flux_ratio_posterior(self, line_a: str, line_b: str) -> np.ndarray:

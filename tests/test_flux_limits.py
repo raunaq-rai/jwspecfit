@@ -209,7 +209,7 @@ class TestAssumedWidth:
             f"L{i}": LineResult(
                 name=f"L{i}", rest_wave_A=lam / 7.0, amplitude=1.0,
                 centroid_A=lam, sigma_A=0.5 * s_inst, flux=1.0, flux_err=0.01,
-                ew_A=1.0, snr_int_err=100.0, snr_int_cont=100.0,
+                ew0_A=1.0, snr_int_err=100.0, snr_int_cont=100.0,
                 snr_peak_err=100.0, snr_peak_cont=100.0,
             )
             for i in range(3)
@@ -225,7 +225,7 @@ class TestAssumedWidth:
             f"L{i}": LineResult(
                 name=f"L{i}", rest_wave_A=lam / 7.0, amplitude=1.0,
                 centroid_A=lam, sigma_A=wide, flux=1.0, flux_err=0.01,
-                ew_A=1.0, snr_int_err=100.0, snr_int_cont=100.0,
+                ew0_A=1.0, snr_int_err=100.0, snr_int_cont=100.0,
                 snr_peak_err=100.0, snr_peak_cont=100.0,
             )
             for i in range(3)
@@ -241,7 +241,7 @@ class TestAssumedWidth:
         def _lr(name, sig):
             return LineResult(
                 name=name, rest_wave_A=lam / 7.0, amplitude=1.0, centroid_A=lam,
-                sigma_A=sig, flux=1.0, flux_err=0.01, ew_A=1.0,
+                sigma_A=sig, flux=1.0, flux_err=0.01, ew0_A=1.0,
                 snr_int_err=100.0, snr_int_cont=100.0, snr_peak_err=100.0,
                 snr_peak_cont=100.0,
             )
@@ -317,7 +317,7 @@ class TestFitIntegration:
         """A hand-built LineResult keeps the old behaviour."""
         lr = LineResult(
             name="X", rest_wave_A=5007.0, amplitude=1.0, centroid_A=35000.0,
-            sigma_A=10.0, flux=1.0, flux_err=0.25, ew_A=1.0, snr_int_err=4.0,
+            sigma_A=10.0, flux=1.0, flux_err=0.25, ew0_A=1.0, snr_int_err=4.0,
             snr_int_cont=4.0, snr_peak_err=4.0, snr_peak_cont=4.0,
         )
         assert lr.upper_limit(3.0) == pytest.approx(0.75)
@@ -342,6 +342,34 @@ class TestFitIntegration:
     def test_unknown_line_raises(self, synthetic_fit):
         with pytest.raises(KeyError):
             synthetic_fit.flux_upper_limit("NOT_A_LINE")
+
+    def test_ew0_upper_limit_is_the_flux_limit_over_the_continuum(self, synthetic_fit):
+        for name, lr in synthetic_fit.lines.items():
+            assert lr.z == pytest.approx(6.0)
+            expected = lr.upper_limit(3.0) / lr.cont_flam / (1.0 + lr.z)
+            assert lr.ew0_upper_limit(3.0) == pytest.approx(expected, rel=1e-12, abs=0.0)
+            assert synthetic_fit.ew0_upper_limit(name) == pytest.approx(
+                lr.ew0_upper_limit(3.0), rel=1e-12, abs=0.0,
+            )
+            # The EW and its limit use the same continuum.
+            assert lr.ew0_A == pytest.approx(lr.flux / lr.cont_flam / 7.0, rel=1e-12)
+
+    def test_ew_frames_and_deprecated_name(self, synthetic_fit):
+        lr = synthetic_fit.lines["OIII_5007"]
+        assert lr.ew_obs_A == pytest.approx(7.0 * lr.ew0_A, rel=1e-12)
+        with pytest.warns(FutureWarning, match="ew_A was renamed to ew0_A"):
+            assert lr.ew_A == lr.ew0_A
+        assert lr.cont_snr is None  # least-squares fits carry no continuum error
+
+    def test_ew0_upper_limit_without_a_continuum_is_nan(self):
+        lr = LineResult(
+            name="X", rest_wave_A=5007.0, amplitude=1.0, centroid_A=35000.0,
+            sigma_A=10.0, flux=1.0, flux_err=0.25, ew0_A=np.nan, snr_int_err=4.0,
+            snr_int_cont=4.0, snr_peak_err=4.0, snr_peak_cont=4.0, z=6.0,
+        )
+        assert np.isnan(lr.ew0_upper_limit())
+        lr.cont_flam = -1e-21
+        assert np.isnan(lr.ew0_upper_limit())
 
     def test_limits_survive_a_save_load_round_trip(self, synthetic_fit, tmp_path):
         from jwspecfit.io import load_result, save_result
@@ -402,6 +430,16 @@ class TestBackfill:
         assert lr.ul_method == "error_spectrum"
         ratio = lr.flux_err_cont / _white_flux_err_at(legacy_result, lr)
         assert 0.8 < ratio < 1.25
+
+    def test_old_file_gets_the_ew_continuum_back(self, legacy_result, synthetic_fit):
+        """Files from before cont_flam existed: it is rebuilt from the saved
+        continuum at the centroid, so EW limits match a fresh fit."""
+        for name, lr in synthetic_fit.lines.items():
+            back = legacy_result.lines[name]
+            assert back.cont_flam == pytest.approx(lr.cont_flam, rel=1e-9, abs=0.0)
+            assert back.ew0_upper_limit() == pytest.approx(
+                lr.ew0_upper_limit(), rel=1e-9, abs=0.0,
+            )
 
     def test_result_method_works_on_an_old_file(self, legacy_result):
         assert legacy_result.flux_upper_limit("OIII_4363") is not None
@@ -639,6 +677,39 @@ class TestMCMCIntegration:
                 lr.flux_err_cont, rel=1e-12, abs=0.0,
             )
             assert converted.lines[name].ul_method == lr.ul_method
+
+    def test_ew0_upper_limit_and_continuum_snr(self, mcmc_fit):
+        for name, lr in mcmc_fit.lines.items():
+            expected = lr.upper_limit(3.0) / lr.cont_flam / (1.0 + lr.z)
+            assert lr.ew0_upper_limit(3.0) == pytest.approx(expected, rel=1e-12, abs=0.0)
+            assert mcmc_fit.ew0_upper_limit(name) == pytest.approx(
+                expected, rel=1e-12, abs=0.0,
+            )
+        lr = mcmc_fit.lines["OIII_5007"]
+        assert lr.ew_obs_A == pytest.approx(7.0 * lr.ew0_A, rel=1e-12)
+        assert lr.ew_obs_err[0] == pytest.approx(7.0 * lr.ew0_err[0], rel=1e-12)
+        with pytest.warns(FutureWarning):
+            assert lr.ew_err == lr.ew0_err
+        with pytest.warns(FutureWarning):
+            assert lr.ew_posterior is lr.ew0_posterior
+
+    def test_to_fit_result_carries_the_ew_continuum(self, mcmc_fit):
+        converted = mcmc_fit.to_fit_result()
+        for name, lr in mcmc_fit.lines.items():
+            assert converted.lines[name].ew0_upper_limit() == pytest.approx(
+                lr.ew0_upper_limit(), rel=1e-12, abs=0.0,
+            )
+
+    def test_ew_fields_survive_a_save_load_round_trip(self, mcmc_fit, tmp_path):
+        from jwspecmcmc.io import load_mcmc_result, save_mcmc_result
+
+        save_mcmc_result(mcmc_fit, tmp_path / "ew.npz")
+        loaded = load_mcmc_result(tmp_path / "ew.npz")
+        for name, lr in mcmc_fit.lines.items():
+            back = loaded.lines[name]
+            assert back.cont_flam == pytest.approx(lr.cont_flam, rel=1e-12)
+            assert back.z == lr.z
+            assert back.ew0_upper_limit() == pytest.approx(lr.ew0_upper_limit(), rel=1e-9)
 
     def test_limits_survive_a_save_load_round_trip(self, mcmc_fit, tmp_path):
         from jwspecmcmc.io import load_mcmc_result, save_mcmc_result

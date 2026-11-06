@@ -90,10 +90,26 @@ Each `LineResult` contains:
 | `flux`       | Integrated line flux (erg / s / cm²)                |
 | `flux_err`   | 1σ uncertainty from bootstrap                       |
 | `snr`        | Signal-to-noise ratio                               |
-| `ew_A`       | Rest-frame equivalent width (Å)                     |
+| `ew0_A`      | Rest-frame equivalent width (Å): flux / continuum / (1+z) |
+| `ew_obs_A`   | Observed-frame equivalent width (Å): `ew0_A × (1+z)` |
+| `cont_flam`  | Continuum f_λ at the line that the EW is measured against |
 | `amplitude`  | Peak amplitude                                      |
 | `centroid_A` | Observed centroid wavelength (Å)                    |
 | `sigma_A`    | Gaussian sigma (Å, incl. instrumental broadening)   |
+
+MCMC line results also carry `ew0_err` (68 % half-widths), `ew0_posterior`,
+`ew_obs_err`, `cont_err_flam` and `cont_snr`. The old names `ew_A`,
+`ew_err` and `ew_posterior` still work, with a `FutureWarning`.
+
+Upper limits, both from the same noise and the same assumed width (see
+below):
+
+```python
+lr = fit.lines["OIII_4363"]
+lr.upper_limit(n_sigma=3)        # flux, erg/s/cm²
+lr.ew0_upper_limit(n_sigma=3)    # rest-frame EW, Å (NaN without a continuum)
+fit.ew0_upper_limit("OIII_4363", n_sigma=3)   # same, from the result
+```
 
 ### Upper limits for undetected lines
 

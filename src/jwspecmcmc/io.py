@@ -107,16 +107,19 @@ def save_mcmc_result(
             "sigma_err": list(lr.sigma_err),
             "flux": lr.flux,
             "flux_err": list(lr.flux_err),
-            "ew_A": lr.ew_A,
-            "ew_err": list(lr.ew_err) if lr.ew_err is not None else None,
+            "ew0_A": lr.ew0_A,
+            "ew0_err": list(lr.ew0_err) if lr.ew0_err is not None else None,
+            "cont_flam": lr.cont_flam,
+            "cont_err_flam": lr.cont_err_flam,
+            "z": lr.z,
             "snr": lr.snr,
             "flux_err_cont": lr.flux_err_cont,
             "sigma_assumed_A": lr.sigma_assumed_A,
             "ul_method": lr.ul_method,
         }
         flux_posteriors[f"flux_post_{name}"] = lr.flux_posterior
-        if lr.ew_posterior is not None:
-            flux_posteriors[f"ew_post_{name}"] = lr.ew_posterior
+        if lr.ew0_posterior is not None:
+            flux_posteriors[f"ew_post_{name}"] = lr.ew0_posterior
 
     # --- Serialise constraints ---
     if mcmc.constraints is not None:
@@ -226,9 +229,12 @@ def load_mcmc_result(
             flux=ld["flux"],
             flux_err=tuple(ld["flux_err"]),
             flux_posterior=flux_posterior,
-            ew_A=ld["ew_A"],
-            ew_err=(tuple(ld["ew_err"]) if ld.get("ew_err") is not None else None),
-            ew_posterior=(data[ew_post_key] if ew_post_key in data else None),
+            ew0_A=ld.get("ew0_A", ld.get("ew_A")),
+            ew0_err=(tuple(_ew_err) if (_ew_err := ld.get("ew0_err", ld.get("ew_err"))) is not None else None),
+            ew0_posterior=(data[ew_post_key] if ew_post_key in data else None),
+            cont_flam=ld.get("cont_flam"),
+            cont_err_flam=ld.get("cont_err_flam"),
+            z=ld.get("z"),
             snr=ld["snr"],
             flux_err_cont=ld.get("flux_err_cont"),
             sigma_assumed_A=ld.get("sigma_assumed_A"),
@@ -283,9 +289,11 @@ def load_mcmc_result(
     # Results saved before continuum-noise limits existed carry none, and
     # upper_limit() would quietly fall back to the posterior width.  The
     # model and continuum are in the file, so measure them properly.
+    from jwspecfit.io import backfill_ew_continuum
     from jwspecfit.limits import backfill_flux_limits
 
     backfill_flux_limits(mcmc)
+    backfill_ew_continuum(mcmc)
 
     # --- MCMCBroadFitResult wrapper ---
     is_broad = bool(data["is_broad_fit"][0])

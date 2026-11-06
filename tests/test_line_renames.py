@@ -25,7 +25,7 @@ def _lr(name, flux=1.0):
     return LineResult(
         name=name, rest_wave_A=REST_LINES_A.get(name, 6564.6319),
         amplitude=1.0, centroid_A=6564.6, sigma_A=3.0,
-        flux=flux, flux_err=0.1, ew_A=10.0,
+        flux=flux, flux_err=0.1, ew0_A=10.0,
         snr_int_err=10.0, snr_int_cont=10.0, snr_peak_err=10.0, snr_peak_cont=10.0,
     )
 

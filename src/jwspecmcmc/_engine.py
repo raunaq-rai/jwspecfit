@@ -898,10 +898,13 @@ def _fit_lines_mcmc(
             flux=flux_med,
             flux_err=(flux_lo, flux_hi),
             flux_posterior=amp_samples,
-            ew_A=ew_rest,
-            ew_err=ew_err,
-            ew_posterior=ew_samples,
+            ew0_A=ew_rest,
+            ew0_err=ew_err,
+            ew0_posterior=ew_samples,
             snr=snr,
+            cont_flam=float(cont_at_line),
+            cont_err_flam=float(cont_err_at_line),
+            z=float(z),
         )
 
     # ------------------------------------------------------------------
@@ -963,10 +966,13 @@ def _fit_lines_mcmc(
             flux=flux_med,
             flux_err=(flux_lo, flux_hi),
             flux_posterior=flux_samples,
-            ew_A=ew_lya,
-            ew_err=ew_lya_err,
-            ew_posterior=ew_lya_samples,
+            ew0_A=ew_lya,
+            ew0_err=ew_lya_err,
+            ew0_posterior=ew_lya_samples,
             snr=snr_lya,
+            cont_flam=float(cont_at_lya),
+            cont_err_flam=float(cont_flam_err[idx_cont_lya]),
+            z=float(z),
         )
         line_names = ["Lya"] + line_names
 

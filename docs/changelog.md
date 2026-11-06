@@ -4,6 +4,27 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### Equivalent-width upper limits, and clearer EW names
+
+- **`ew0_upper_limit(n_sigma=3)`** on every line result (`lr.ew0_upper_limit()`)
+  and on the results (`fit.ew0_upper_limit(name)`, also on MCMC and MCMC
+  broad results). It is `upper_limit(n_sigma) / cont_flam / (1+z)`: the
+  same noise and assumed width as the flux limit, divided by the same
+  continuum the EW is measured against, so a line's EW and flux limits
+  always agree. NaN where the continuum at the line is not positive.
+- **Rest-frame EW fields renamed**: `ew_A` → `ew0_A` (both packages),
+  `ew_err` → `ew0_err` and `ew_posterior` → `ew0_posterior` (MCMC). The old
+  names still read, with a `FutureWarning`. Code that *builds* a
+  `LineResult` by keyword must pass `ew0_A=`.
+- **New**: `ew_obs_A` (observed frame, `ew0_A × (1+z)`), `cont_flam`
+  (continuum f_λ at the line), `z`, and on MCMC results `ew_obs_err`,
+  `cont_err_flam` and `cont_snr`. Saved files store the new fields, and
+  files from earlier versions load under the new names, with `cont_flam`
+  rebuilt from the saved continuum so their EW limits work without a refit.
+- `export_lines_txt` labels the EW column `EW0_A` (was `EW_A`).
+
 ## 1.1.13 — 2026-11-06
 
 ### Changed: upper limits use the error spectrum at the line

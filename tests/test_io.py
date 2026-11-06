@@ -100,7 +100,7 @@ class TestExportLinesTxt:
         lines = outfile.read_text().strip().split("\n")
         assert len(lines) >= 4  # 3 header + at least 1 line
         assert "flux" in lines[2]
-        assert "EW_A" in lines[2]
+        assert "EW0_A" in lines[2]
         assert "SNR_p_err" in lines[2]
         assert "erg/s/cm2" in lines[1]
 
@@ -143,7 +143,7 @@ def _make_synthetic_mcmc_result():
             flux=float(np.median(flux_post)),
             flux_err=(1e-18, 1.2e-18),
             flux_posterior=flux_post,
-            ew_A=50.0,
+            ew0_A=50.0,
             snr=10.0,
         )
 

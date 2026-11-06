@@ -37,6 +37,37 @@ logger = logging.getLogger(__name__)
 _SQRT2PI = sqrt(2.0 * pi)
 
 
+def _ew_obs(ew0: float, z: float | None) -> float:
+    """Observed-frame EW from the rest-frame one."""
+    return float("nan") if z is None else ew0 * (1.0 + z)
+
+
+def _ew0_limit(flux_limit: float, cont: float | None, z: float | None) -> float:
+    """Rest-frame EW limit for a flux limit against a continuum."""
+    if cont is None or z is None or not np.isfinite(cont) or cont <= 0:
+        return float("nan")
+    return flux_limit / cont / (1.0 + z)
+
+
+def _cont_snr(lr) -> float | None:
+    """Continuum SNR at a line, when its continuum error is known."""
+    if lr.cont_flam is None or not lr.cont_err_flam or not np.isfinite(lr.cont_err_flam):
+        return None
+    return lr.cont_flam / lr.cont_err_flam
+
+
+def _renamed(obj, old: str, new: str):
+    """Read *new* through its deprecated name *old*, with a warning."""
+    import warnings
+
+    warnings.warn(
+        f"{type(obj).__name__}.{old} was renamed to {new} in jwspecfit 1.1.14; "
+        "the old name will stop working in a future release.",
+        FutureWarning, stacklevel=3,
+    )
+    return getattr(obj, new)
+
+
 @dataclass
 class LineResult:
     """Fit result for a single emission line.
@@ -57,8 +88,10 @@ class LineResult:
         Integrated line flux (amplitude, since profile is area-normalised).
     flux_err : float
         Bootstrap uncertainty on flux.
-    ew_A : float
-        Rest-frame equivalent width (Å).
+    ew0_A : float
+        Rest-frame equivalent width (Å): flux / continuum f_λ / (1+z).
+        (``ew_A`` is the deprecated name.)  The observed-frame value is
+        :attr:`ew_obs_A`.
     snr_int_err : float
         Integrated SNR: flux / bootstrap flux error.
     snr_int_cont : float
@@ -80,9 +113,16 @@ class LineResult:
         the instrumental width broadened by the galaxy's intrinsic
         velocity width, measured from the detected lines.
     ul_method : str or None
-        How ``flux_err_cont`` was obtained: ``"matched_filter"`` when
-        measured from the scatter of recovered fluxes, or
-        ``"matched_filter_analytic"`` for the white-noise fallback.
+        How ``flux_err_cont`` was obtained; see
+        :class:`jwspecfit.limits.FluxNoise` (``"error_spectrum"`` normally).
+    cont_flam : float or None
+        Continuum f_λ (erg/s/cm²/Å) at the line that ``ew0_A`` was
+        computed with, and that :meth:`ew0_upper_limit` divides by.
+    cont_err_flam : float or None
+        1σ uncertainty on ``cont_flam``, when the fit supplies one (MCMC
+        results do; ``None`` otherwise).
+    z : float or None
+        Redshift used for the rest-frame conversion.
     """
 
     name: str
@@ -92,7 +132,7 @@ class LineResult:
     sigma_A: float
     flux: float
     flux_err: float
-    ew_A: float
+    ew0_A: float
     snr_int_err: float
     snr_int_cont: float
     snr_peak_err: float
@@ -100,6 +140,47 @@ class LineResult:
     flux_err_cont: float | None = None
     sigma_assumed_A: float | None = None
     ul_method: str | None = None
+    cont_flam: float | None = None
+    cont_err_flam: float | None = None
+    z: float | None = None
+
+    @property
+    def ew_obs_A(self) -> float:
+        """Observed-frame equivalent width (Å): ``ew0_A * (1 + z)``."""
+        return _ew_obs(self.ew0_A, self.z)
+
+    @property
+    def cont_snr(self) -> float | None:
+        """Continuum SNR at the line (``None`` without a continuum error)."""
+        return _cont_snr(self)
+
+    @property
+    def ew_A(self) -> float:
+        """Deprecated name of :attr:`ew0_A`."""
+        return _renamed(self, "ew_A", "ew0_A")
+
+    def ew0_upper_limit(self, n_sigma: float = 3.0) -> float:
+        """Return the n-sigma rest-frame equivalent-width upper limit.
+
+        ``upper_limit(n_sigma) / cont_flam / (1 + z)``: the flux limit
+        (same noise, same assumed width) divided by the continuum the EW
+        is measured against, so a line's EW limit and flux limit always
+        agree.
+
+        Parameters
+        ----------
+        n_sigma : float
+            Number of sigma for the limit (default 3).
+
+        Returns
+        -------
+        float
+            Rest-frame EW upper limit (Å); NaN when there is no positive
+            continuum at the line (an EW limit is then undefined).  Check
+            :attr:`cont_snr` where available: against a barely detected
+            continuum the limit is itself very uncertain.
+        """
+        return _ew0_limit(self.upper_limit(n_sigma), self.cont_flam, self.z)
 
     def upper_limit(self, n_sigma: float = 3.0) -> float:
         """Return the n-sigma flux upper limit.
@@ -249,6 +330,38 @@ class FitResult:
             spec.wave_A, resid_flam, np.isfinite(resid_flam),
             lam_obs, sig_A, n_sigma=n_sigma, err=spec.err_flam,
         )
+
+    def ew0_upper_limit(
+        self,
+        line_name: str,
+        n_sigma: float = 3.0,
+        sigma_v_kms: float | None = None,
+    ) -> float:
+        """Rest-frame equivalent-width upper limit for a line.
+
+        :meth:`flux_upper_limit` divided by the continuum f_λ at the line
+        and by (1 + z), so it uses the same noise and the same assumed
+        width as the flux limit.
+
+        Parameters
+        ----------
+        line_name : str
+            Key into :attr:`lines`.
+        n_sigma : float
+            Number of sigma for the limit (default 3).
+        sigma_v_kms : float, optional
+            Override the assumed intrinsic velocity width, as for
+            :meth:`flux_upper_limit`.
+
+        Returns
+        -------
+        float
+            Rest-frame EW upper limit (Å); NaN without a positive
+            continuum at the line or a measurable flux limit.
+        """
+        flux_ul = self.flux_upper_limit(line_name, n_sigma, sigma_v_kms)
+        lr = self.lines[line_name]
+        return _ew0_limit(np.nan if flux_ul is None else flux_ul, lr.cont_flam, lr.z)
 
     def flux_upper_limits(
         self,
@@ -1099,11 +1212,13 @@ def fit_lines(
             sigma_A=sig,
             flux=flux_line,
             flux_err=f_err,
-            ew_A=ew_rest,
+            ew0_A=ew_rest,
             snr_int_err=snr_int_err,
             snr_int_cont=snr_int_cont,
             snr_peak_err=snr_peak_err,
             snr_peak_cont=snr_peak_cont,
+            cont_flam=float(cont_at_line),
+            z=float(z),
         )
 
     # Add Lyα result if fitted.
@@ -1138,7 +1253,9 @@ def fit_lines(
             sigma_A=sig_lya,
             flux=flux_lya,
             flux_err=f_err_lya,
-            ew_A=ew_lya,
+            ew0_A=ew_lya,
+            cont_flam=float(cont_at_lya) if np.isfinite(cont_at_lya) else None,
+            z=float(z),
             snr_int_err=snr_lya,
             snr_int_cont=snr_lya,
             snr_peak_err=snr_lya,

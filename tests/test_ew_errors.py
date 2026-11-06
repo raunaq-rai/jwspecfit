@@ -172,15 +172,15 @@ class TestEWSummary:
 
 
 class TestSerialisation:
-    """ew_err and ew_posterior must survive a save/load round trip."""
+    """ew0_err and ew0_posterior must survive a save/load round trip."""
 
     def _result(self):
         from tests.test_io import _make_synthetic_mcmc_result
         res = _make_synthetic_mcmc_result()
         rng = np.random.default_rng(7)
         for lr in res.lines.values():
-            lr.ew_posterior = rng.normal(50.0, 5.0, len(lr.flux_posterior))
-            lr.ew_err = (4.8, 5.2)
+            lr.ew0_posterior = rng.normal(50.0, 5.0, len(lr.flux_posterior))
+            lr.ew0_err = (4.8, 5.2)
         return res
 
     def test_round_trip_preserves_ew_err(self, tmp_path):
@@ -191,7 +191,7 @@ class TestSerialisation:
         save_mcmc_result(original, out)
         loaded = load_mcmc_result(out)
         for name, lr in original.lines.items():
-            assert loaded.lines[name].ew_err == pytest.approx(lr.ew_err)
+            assert loaded.lines[name].ew0_err == pytest.approx(lr.ew0_err)
 
     def test_round_trip_preserves_ew_posterior(self, tmp_path):
         from jwspecmcmc import load_mcmc_result, save_mcmc_result
@@ -202,7 +202,7 @@ class TestSerialisation:
         loaded = load_mcmc_result(out)
         for name, lr in original.lines.items():
             np.testing.assert_allclose(
-                loaded.lines[name].ew_posterior, lr.ew_posterior, rtol=1e-10
+                loaded.lines[name].ew0_posterior, lr.ew0_posterior, rtol=1e-10
             )
 
     def test_a_result_without_ew_posterior_still_round_trips(self, tmp_path):
@@ -215,5 +215,5 @@ class TestSerialisation:
         save_mcmc_result(original, out)
         loaded = load_mcmc_result(out)
         for lr in loaded.lines.values():
-            assert lr.ew_posterior is None
-            assert lr.ew_err is None
+            assert lr.ew0_posterior is None
+            assert lr.ew0_err is None

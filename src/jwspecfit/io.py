@@ -562,7 +562,10 @@ def save_result(result: "FitResult", path: str | Path) -> None:
             "sigma_A": lr.sigma_A,
             "flux": lr.flux,
             "flux_err": lr.flux_err,
-            "ew_A": lr.ew_A,
+            "ew0_A": lr.ew0_A,
+            "cont_flam": lr.cont_flam,
+            "cont_err_flam": lr.cont_err_flam,
+            "z": lr.z,
             "snr_int_err": lr.snr_int_err,
             "snr_int_cont": lr.snr_int_cont,
             "snr_peak_err": lr.snr_peak_err,
@@ -636,7 +639,10 @@ def load_result(path: str | Path) -> "FitResult":
             sigma_A=ld["sigma_A"],
             flux=ld["flux"],
             flux_err=ld["flux_err"],
-            ew_A=ld["ew_A"],
+            ew0_A=ld.get("ew0_A", ld.get("ew_A")),
+            cont_flam=ld.get("cont_flam"),
+            cont_err_flam=ld.get("cont_err_flam"),
+            z=ld.get("z"),
             snr_int_err=ld.get("snr_int_err", old_snr),
             snr_int_cont=ld.get("snr_int_cont", 0.0),
             snr_peak_err=ld.get("snr_peak_err", 0.0),
@@ -666,13 +672,51 @@ def load_result(path: str | Path) -> "FitResult":
     from .limits import backfill_flux_limits
 
     backfill_flux_limits(result)
+    backfill_ew_continuum(result)
     return result
+
+
+def backfill_ew_continuum(result: Any) -> int:
+    """Fill ``cont_flam`` and ``z`` on lines saved before they existed.
+
+    The continuum the EW was measured against is the saved continuum at
+    the pixel nearest the fitted centroid, which is how the fitters set it,
+    so :meth:`ew0_upper_limit` works on older results without a refit.
+    Lines whose continuum there is not positive are left at ``None`` (the
+    fitter would have fallen back to a local median, which a saved result
+    cannot reproduce).
+
+    Parameters
+    ----------
+    result : FitResult or MCMCResult
+        A loaded result, modified in place.
+
+    Returns
+    -------
+    int
+        Number of lines filled in.
+    """
+    spec = getattr(result, "spectrum", None)
+    cont = getattr(result, "continuum", None)
+    if spec is None or cont is None:
+        return 0
+    cont_flam = _ujy_to_flam(np.asarray(cont, dtype=float), spec.wave_um)
+    n = 0
+    for lr in result.lines.values():
+        if lr.z is None and spec.z is not None:
+            lr.z = float(spec.z)
+        if lr.cont_flam is None:
+            c = float(cont_flam[np.argmin(np.abs(spec.wave_A - lr.centroid_A))])
+            if np.isfinite(c) and c > 0:
+                lr.cont_flam = c
+                n += 1
+    return n
 
 
 def export_lines_txt(result: "FitResult", path: str | Path, z: float | None = None) -> None:
     """Export per-line measurements to a text file.
 
-    Columns: name, rest_wave_A, centroid_A, flux, flux_err, ew_A,
+    Columns: name, rest_wave_A, centroid_A, flux, flux_err, ew0_A,
     sigma_v_kms, snr_integrated, snr_peak.
 
     Parameters
@@ -693,7 +737,7 @@ def export_lines_txt(result: "FitResult", path: str | Path, z: float | None = No
             f"# jwspecfit line measurements  z={z:.6f}\n"
             f"# flux units: erg/s/cm2  |  EW units: rest-frame Angstrom\n"
             f"# {'name':<18s} {'rest_A':>10s} {'centroid_A':>12s} "
-            f"{'flux':>14s} {'flux_err':>14s} {'EW_A':>10s} "
+            f"{'flux':>14s} {'flux_err':>14s} {'EW0_A':>10s} "
             f"{'sigma_v':>12s} {'SNR_i_err':>10s} {'SNR_i_cont':>10s} "
             f"{'SNR_p_err':>10s} {'SNR_p_cont':>10s}\n"
         )
@@ -702,7 +746,7 @@ def export_lines_txt(result: "FitResult", path: str | Path, z: float | None = No
 
             f.write(
                 f"  {name:<18s} {lr.rest_wave_A:10.3f} {lr.centroid_A:12.3f} "
-                f"{lr.flux:14.6e} {lr.flux_err:14.6e} {lr.ew_A:10.3f} "
+                f"{lr.flux:14.6e} {lr.flux_err:14.6e} {lr.ew0_A:10.3f} "
                 f"{sigma_v:12.2f} {lr.snr_int_err:10.2f} {lr.snr_int_cont:10.2f} "
                 f"{lr.snr_peak_err:10.2f} {lr.snr_peak_cont:10.2f}\n"
             )
