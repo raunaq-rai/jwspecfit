@@ -1777,6 +1777,21 @@ def _gate_nitrogen_ions(
 
 
 
+def _ne_mid_used(
+    ne_mid: float | None, ne_Opp: float | None, ne_low: float,
+) -> float:
+    """The intermediate-zone density the C2+/N2+/S2+/Ar2+ abundances use.
+
+    CIII] when measured, otherwise the O2+-zone density ([Ar IV], or the
+    Martinez+2025 z-fallback), matching
+    :func:`~jwspecabund.direct.compute_ionic_abundances`.  The upper limits
+    must use the same density as the detections they sit beside.
+    """
+    if ne_mid is not None:
+        return ne_mid
+    return ne_Opp if ne_Opp is not None else ne_low
+
+
 def _compute_ionic_upper_limits(
     ionic: dict[str, float],
     fluxes: dict[str, float],
@@ -2133,18 +2148,26 @@ def _build_diagnostics(
             "lower limit"
         )
 
-    # ne(mid)
+    # ne(mid).  Without a CIII] density the intermediate ions (C2+, N2+,
+    # S2+, Ar2+) take the O2+-zone density, as compute_ionic_abundances does:
+    # [Ar IV] when measured, otherwise the Martinez+2025 z-fallback.
     _has_ciii = "CIII]_1907" in fluxes and "CIII]_1909" in fluxes
     if ne_mid is not None:
         diag["ne(mid)"] = f"CIII] 1907/1909 doublet ratio -> {ne_mid:.0f} cm^-3"
-    elif _has_ciii:
-        diag["ne(mid)"] = (
-            f"fallback to ne(low) = {ne_low:.0f} cm^-3 — CIII] failed SNR cut or solve"
-        )
     else:
-        diag["ne(mid)"] = (
-            f"fallback to ne(low) = {ne_low:.0f} cm^-3 — no CIII] doublet available"
+        _why = (
+            "CIII] failed SNR cut or solve" if _has_ciii
+            else "no CIII] doublet available"
         )
+        _fb_mid = ne_zone_fallback("mid", z)
+        if ne_Opp is None or abs(ne_Opp - _fb_mid) <= 1e-6:
+            diag["ne(mid)"] = (
+                f"z-fallback ({_fb_mid:.0f} cm^-3, Martinez+2025) — {_why}"
+            )
+        else:
+            diag["ne(mid)"] = (
+                f"O2+-zone density ({ne_Opp:.0f} cm^-3, [Ar IV]) — {_why}"
+            )
 
     # ne(high) — NIV] (preferred) -> [Ar IV] -> z-fallback (Martinez+2025).
     _fb_high = ne_zone_fallback("high", z)
@@ -2525,7 +2548,7 @@ def _run_direct(
     # Compute 3σ upper limits for non-detected ions.
     ionic_upper_limits, ionic_ul_details = _compute_ionic_upper_limits(
         ionic, fluxes, errors, Te_high, Te_low, ne_low,
-        ne_mid if ne_mid is not None else ne_low,
+        _ne_mid_used(ne_mid, ne_Opp, ne_low),
         ne_high if ne_high is not None else ne_low,
         continuum_rms_limits=continuum_rms_limits,
         ne_Opp=ne_Opp, Te_int=Te_int,
@@ -3249,7 +3272,7 @@ def _run_direct_mcmc(
     if ionic_pt and np.isfinite(Te_high_pt) and np.isfinite(Te_low_pt):
         ionic_upper_limits, ionic_ul_details = _compute_ionic_upper_limits(
             ionic_pt, med_fluxes, med_errors, Te_high_pt, Te_low_pt, ne_low,
-            ne_mid if ne_mid is not None else ne_low,
+            _ne_mid_used(ne_mid, ne_Opp, ne_low),
             ne_high if ne_high is not None else ne_low,
             continuum_rms_limits=continuum_rms_limits,
             ne_Opp=ne_Opp, Te_int=Te_int_pt,

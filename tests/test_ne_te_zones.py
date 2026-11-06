@@ -419,6 +419,53 @@ class TestNeDiagnosticLabels:
         )
         assert "fallback" in out["diagnostics"]["ne(high)"].lower()
 
+    def test_ne_mid_labels_zfallback(self):
+        """No CIII] -> the intermediate zone uses the Martinez+25 z-fallback."""
+        from jwspecabund._core import _run_direct
+        from jwspecabund.direct import ne_zone_fallback
+
+        fluxes = self._oiii()
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=10, progress=False, seed=1, z=7.0,
+        )
+        s = out["diagnostics"]["ne(mid)"]
+        assert s.startswith("z-fallback")
+        assert f"{ne_zone_fallback('mid', 7.0):.0f} cm^-3" in s
+        assert "no CIII] doublet available" in s
+        assert "ne(low)" not in s
+
+    def test_ne_mid_labels_zfallback_when_ciii_fails_snr(self):
+        from jwspecabund._core import _run_direct
+
+        fluxes = {**self._oiii(), "CIII]_1907": 0.05, "CIII]_1909": 0.04}
+        errors = {k: v / 50.0 for k, v in fluxes.items()}
+        errors["CIII]_1907"] = errors["CIII]_1909"] = 1.0  # SNR << snr_ne
+        out = _run_direct(
+            fluxes, errors, "3_tier", n_mc=10, progress=False, seed=1, z=7.0,
+        )
+        s = out["diagnostics"]["ne(mid)"]
+        assert s.startswith("z-fallback")
+        assert "CIII] failed SNR cut or solve" in s
+
+    def test_ne_mid_labels_arIV_when_that_sets_the_opp_zone(self):
+        from jwspecabund._core import _build_diagnostics
+
+        diag = _build_diagnostics(
+            {"HBETA": 1.0}, None, "3_tier", ne_low=500.0, ne_mid=None,
+            ne_high=1e5, logU=None, logU_diag=None, icf_method=None,
+            NO_icf_name=None, ne_default=300.0, ne_Opp=2.5e4, z=7.0,
+        )
+        assert diag["ne(mid)"].startswith("O2+-zone density (25000 cm^-3, [Ar IV])")
+
+    def test_upper_limits_use_the_same_mid_density_as_abundances(self):
+        """C2+/N2+ limits sat at ne(low) while detections used the z-fallback."""
+        from jwspecabund._core import _ne_mid_used
+
+        assert _ne_mid_used(800.0, 6e4, 500.0) == 800.0   # CIII] measured
+        assert _ne_mid_used(None, 6e4, 500.0) == 6e4      # O2+ zone / z-fallback
+        assert _ne_mid_used(None, None, 500.0) == 500.0
+
 
 class TestMultiNeWiring:
     """_compute_multi_ne: [Ar IV] preference, He I deblend, z-fallbacks."""
