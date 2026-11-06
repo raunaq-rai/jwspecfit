@@ -4,7 +4,13 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
-## Unreleased
+## 1.1.11 — 2026-11-06
+
+### Compatibility
+
+- The full test suite passes with JAX 0.12 and NumPyro 0.22 (as well as
+  JAX 0.9 and NumPyro 0.20), with no deprecation warnings from the NUTS
+  sampler path.
 
 ### The resolution curve is read from the file
 
