@@ -4,7 +4,7 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
-## Unreleased
+## 1.1.10 — 2026-11-06
 
 ### The joint O²⁺ T_e–n_e solution can be kept under a density limit
 
