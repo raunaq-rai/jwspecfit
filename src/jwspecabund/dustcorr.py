@@ -5,8 +5,10 @@ dust-corrected fluxes, without running :func:`compute_abundances`.
 
 Assumptions (state these when quoting the numbers): Case B intrinsic
 Balmer ratios at T_e = 10^4 K, n_e = 100 cm^-3 (Osterbrock & Ferland
-2006), and by default the Salim+18 attenuation curve with the same
-parameters as :func:`jwspecabund.compute_abundances`.
+2006), and by default the Salim, Boquien & Lee (2018) attenuation curve
+for local analogues of high-redshift galaxies (delta = -0.45, B = 2.27,
+R_V = 2.64 from their Eq. 4), the same as
+:func:`jwspecabund.compute_abundances`.
 """
 
 from __future__ import annotations
@@ -77,17 +79,23 @@ class DustCorrectedFluxes:
         )
 
 
+def _usable(fluxes: dict, errors: dict, name: str, snr_min: float) -> bool:
+    """True if *name* is measured with positive flux and SNR >= *snr_min*."""
+    f, e = fluxes.get(name, 0.0), errors.get(name, 0.0)
+    return f > 0 and e > 0 and f / e >= snr_min
+
+
 def dust_correct(
     result: Any,
     dust_law: str = "salim",
     Av: float | None = None,
     Av_err: float | None = None,
     balmer_method: str = "anchored",
-    balmer_anchor: str = "HBETA",
+    balmer_anchor: str = "auto",
     balmer_pair: tuple[str, str] | None = None,
-    snr_balmer: float = 3.0,
-    Rv: float = 3.15,
-    delta: float = -0.35,
+    snr_balmer: float = 5.0,
+    Rv: float | None = None,
+    delta: float = -0.45,
     B_bump: float = 2.27,
     propagate_av_err: bool = True,
 ) -> DustCorrectedFluxes:
@@ -99,7 +107,8 @@ def dust_correct(
     are added to the narrow flux, as in :func:`compute_abundances`.
 
     Assumes Case B recombination (T_e = 10^4 K, n_e = 100 cm^-3) for
-    the intrinsic Balmer ratios.
+    the intrinsic Balmer ratios and, by default, the Salim+18 high-z
+    analogue attenuation curve.
 
     Parameters
     ----------
@@ -114,14 +123,21 @@ def dust_correct(
         ``"anchored"`` (default; GLS mean of decrements against
         *balmer_anchor*) or ``"joint"`` (fit the whole Balmer ladder).
     balmer_anchor : str
-        ``"HBETA"`` (default) or ``"HALPHA"``; anchored method only.
+        Denominator of the decrements (anchored method only).  ``"auto"``
+        (default) uses Hα when it is measured at SNR >= *snr_balmer*
+        (decrements Hβ/Hα, Hγ/Hα, ...), otherwise Hβ.  ``"HALPHA"`` or
+        ``"HBETA"`` force the choice.
     balmer_pair : tuple of str, optional
         Force a single decrement, e.g. ``("HALPHA", "HBETA")``.
     snr_balmer : float
-        Minimum SNR for a Balmer line to enter the A_V estimate.
-    Rv, delta, B_bump : float
-        Salim+18 curve parameters (ignored for Cardelli, which uses
-        R_V = 3.1).
+        Minimum SNR for a Balmer line to enter the A_V estimate
+        (default 5).
+    Rv : float or None
+        Salim R_V; ``None`` (default) derives it from *delta* via
+        Salim+18 Eq. 4.  Ignored for Cardelli (R_V = 3.1).
+    delta, B_bump : float
+        Salim+18 slope deviation and UV bump amplitude (defaults -0.45
+        and 2.27, the high-z analogue curve).  Ignored for Cardelli.
     propagate_av_err : bool
         Add the A_V uncertainty to the corrected flux errors in
         quadrature (default ``True``).
@@ -167,6 +183,9 @@ def dust_correct(
             )
         else:
             method = "anchored"
+            if balmer_anchor == "auto":
+                balmer_anchor = "HALPHA" if _usable(fluxes, errors, "HALPHA",
+                                                    snr_balmer) else "HBETA"
             info = compute_Av_multi_balmer(
                 fluxes, errors, law=dust_law, snr_min=snr_balmer,
                 anchor=balmer_anchor, **dust_kwargs,

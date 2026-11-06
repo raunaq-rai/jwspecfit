@@ -4,6 +4,41 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### Fixed: the Salim+18 attenuation curve now follows the paper
+
+- `salim_attenuation` now implements Salim, Boquien & Lee (2018) Eqs. 3-4:
+  R_V is derived from the slope deviation (new `salim_rv(delta)`; 2.64 at
+  δ = −0.45) and the bump amplitude `B` is in A_bump/E(B−V), as in the
+  paper. Before, the code divided by a fixed R_V = 3.15 (so A(5500 Å) was
+  1.30 × A_V, not A_V) and multiplied the bump by R_V, which made it about
+  2× too strong relative to the continuum.
+- **What changes in results:** optical corrections from a Balmer
+  decrement move by ≲0.005 dex, because the normalisation cancels. The
+  *reported* A_V is now the true A(V), about 30% higher than before. UV
+  lines near the 2175 Å bump were over-corrected: CIII] 1909 by ~0.08 dex
+  at A_V = 1, biasing UV C/O. A user-supplied `Av=` was applied about
+  1.3× too strongly.
+- **New Salim defaults** (everywhere, including `compute_abundances`):
+  δ = −0.45, B = 2.27, R_V from Eq. 4, i.e. the Salim+18 average curve for
+  local analogues of high-redshift galaxies (Table 1, Eq. 7 at
+  log M* = 10), which has an SMC-like far-UV slope. It was R_V = 3.15,
+  δ = −0.35, B = 2.27. Passing `Rv=` still overrides R_V.
+
+### Added: `dust_correct()` for dust-corrected fluxes without abundances
+
+- `jwspecfit.dust_correct(result)` (also `jwspecabund.dust_correct`)
+  derives A_V from the Balmer decrement of a `fit_lines` / `jwspecmcmc`
+  result and returns a `DustCorrectedFluxes` with corrected fluxes,
+  errors, correction factors and the A_V used. It assumes Case B
+  (T_e = 10⁴ K, n_e = 100 cm⁻³) and the Salim+18 high-z analogue curve.
+- Defaults: decrements anchored on Hα when Hα has SNR ≥ 5 (otherwise on
+  Hβ), Balmer SNR cut 5, and the A_V error added in quadrature to the
+  flux errors (`propagate_av_err=False` to turn this off). It also
+  accepts `balmer_method="joint"`, `balmer_pair=`, `Av=`/`Av_err=`, and
+  `dust_law="cardelli"`.
+
 ## 1.1.14 — 2026-11-06
 
 ### Equivalent-width upper limits, and clearer EW names

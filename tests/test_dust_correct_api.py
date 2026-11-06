@@ -71,3 +71,30 @@ def test_no_balmer_raises():
     res = _MockResult({"OIII_5007": _MockLine("OIII_5007", 1.0, 0.1)})
     with pytest.raises(ValueError, match="Balmer"):
         jwspecabund.dust_correct(res)
+
+
+def test_auto_anchor_prefers_halpha():
+    res, _ = _reddened_result(1.0)
+    dc = jwspecabund.dust_correct(res)
+    assert dc.balmer_info["anchor"] == "HALPHA"
+    used = {r["line"] for r in dc.balmer_info["individual"]}
+    assert "HBETA" in used
+
+
+def test_auto_anchor_falls_back_to_hbeta():
+    res, intrinsic = _reddened_result(1.0)
+    # Hα below the SNR-5 default -> anchor on Hβ.
+    ha = res.lines["HALPHA"]
+    res.lines["HALPHA"] = _MockLine("HALPHA", ha.flux, ha.flux / 4.0)
+    dc = jwspecabund.dust_correct(res)
+    assert dc.balmer_info["anchor"] == "HBETA"
+    assert dc.Av == pytest.approx(1.0, abs=2e-3)
+    assert dc.fluxes["OIII_5007"] == pytest.approx(5.0, rel=5e-3)
+
+
+def test_snr_balmer_default_is_5():
+    res, _ = _reddened_result(1.0)
+    hg = res.lines["HGAMMA"]
+    res.lines["HGAMMA"] = _MockLine("HGAMMA", hg.flux, hg.flux / 4.0)  # SNR 4
+    dc = jwspecabund.dust_correct(res)
+    assert "HGAMMA" not in {r["line"] for r in dc.balmer_info["individual"]}
