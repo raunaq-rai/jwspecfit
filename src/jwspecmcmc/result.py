@@ -366,7 +366,7 @@ class MCMCResult:
         sig_A = assumed_sigma_A(lam_obs, sigma_v_kms, grating=grating, R=R)
         return flux_upper_limit(
             spec.wave_A, resid, np.isfinite(resid), lam_obs, sig_A,
-            n_sigma=n_sigma,
+            n_sigma=n_sigma, err=spec.err_flam,
         )
 
     def flux_upper_limits(

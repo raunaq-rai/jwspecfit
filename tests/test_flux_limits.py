@@ -260,6 +260,20 @@ class TestAssumedWidth:
         assert both == pytest.approx(narrow_only)
 
 
+def _white_flux_err_at(result, lr):
+    """White-noise flux error of the assumed-width Gaussian at the line,
+    straight from the error spectrum.
+
+    For a unit-area template g/(sigma sqrt(2 pi)) the fitted flux has
+    variance sum(g^2 err^2) / sum(g^2)^2 times (sigma sqrt(2 pi))^2.
+    """
+    spec = result.spectrum
+    s = lr.sigma_assumed_A
+    d = spec.wave_A - lr.rest_wave_A * (1.0 + spec.z)
+    g = np.where(np.abs(d) < 4.0 * s, np.exp(-0.5 * (d / s) ** 2), 0.0)
+    return float(s * np.sqrt(2.0 * np.pi) * np.sqrt(np.sum(g**2 * spec.err_flam**2)) / np.sum(g**2))
+
+
 class TestFitIntegration:
     """What fit_lines actually attaches, and what upper_limit() returns."""
 
@@ -267,7 +281,7 @@ class TestFitIntegration:
         for name, lr in synthetic_fit.lines.items():
             assert lr.flux_err_cont is not None and lr.flux_err_cont > 0, name
             assert lr.sigma_assumed_A is not None and lr.sigma_assumed_A > 0, name
-            assert lr.ul_method in ("matched_filter", "matched_filter_analytic")
+            assert lr.ul_method == "error_spectrum", name
 
     def test_assumed_width_beats_a_collapsed_fitted_width(self, synthetic_fit):
         """[O III] 4363 is absent; its fitted σ falls below the instrument.
@@ -288,8 +302,10 @@ class TestFitIntegration:
         assert lr.upper_limit(3.0) == pytest.approx(
             3.0 * lr.flux_err_cont, rel=1e-12, abs=0.0,
         )
-        # Nothing of the bootstrap error survives in the answer.
-        assert abs(lr.upper_limit(3.0) - 3.0 * lr.flux_err) > 0.1 * lr.upper_limit(3.0)
+        # It is the error spectrum's flux error at the *assumed* width, at
+        # the line, times a correction factor that is ~1 for this white mock.
+        ratio = lr.flux_err_cont / _white_flux_err_at(synthetic_fit, lr)
+        assert 0.8 < ratio < 1.25
 
     def test_upper_limit_scales_with_n_sigma(self, synthetic_fit):
         lr = synthetic_fit.lines["OIII_4363"]
@@ -383,7 +399,9 @@ class TestBackfill:
         self, legacy_result,
     ):
         lr = legacy_result.lines["OIII_4363"]
-        assert abs(lr.upper_limit() - 3.0 * lr.flux_err) > 0.1 * lr.upper_limit()
+        assert lr.ul_method == "error_spectrum"
+        ratio = lr.flux_err_cont / _white_flux_err_at(legacy_result, lr)
+        assert 0.8 < ratio < 1.25
 
     def test_result_method_works_on_an_old_file(self, legacy_result):
         assert legacy_result.flux_upper_limit("OIII_4363") is not None

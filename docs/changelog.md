@@ -6,6 +6,31 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### Changed: upper limits use the error spectrum at the line
+
+- **The flux error behind every `upper_limit()` is now the error spectrum's
+  flux error for the assumed-width line at the line's own pixels, times a
+  correction factor measured from the residuals.** The error-spectrum term
+  is exactly local, so a limit follows the noise of whichever grating, and
+  whichever part of it, the line falls in. The factor (the RMS of
+  template fluxes slid across the residuals, each divided by the error
+  spectrum's prediction for it) absorbs pixel correlation and any
+  mis-scaling of the error array. It is measured over ±50σ blue- and
+  red-ward separately, keeping the larger, with a 5σ robust clip.
+- **Why:** the previous estimate (residual scatter in a ±12σ annulus) was
+  local but rested on ~6 independent samples. In simulations it was ~5%
+  low with ±25% object-to-object scatter, so pure noise beat its "3σ"
+  ~0.9% of the time instead of 0.13%. The new limit exceeds 0.05–0.30% of
+  the time and is never low on average, including next to a grating
+  boundary where both the noise level and the correlation change.
+- **Effect:** grating limits rise by a median of 14–24% on the test
+  spectra (correction factors 1.03–1.15). On PRISM the factor is ~3
+  (residuals scatter ~3× the error array at line scales), so limits rise
+  ~1.4×. `ul_method` reports `"error_spectrum"`, and `FluxNoise` gains
+  `corr_factor`. Without an error spectrum the old annulus estimate is
+  still used. Results saved by earlier versions keep their stored
+  limits until refitted.
+
 ### Fixes
 
 - **Ionic upper limits from MCMC results now use the continuum noise.**

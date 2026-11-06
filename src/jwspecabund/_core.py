@@ -328,6 +328,7 @@ def _compute_continuum_rms_limits(
             spec.wave_A, resid_flam, np.isfinite(resid_flam), z,
             grating=grating, R=R,
             sigma_v_kms=SIGMA_V_FALLBACK_KMS if sigma_v is None else sigma_v,
+            err=spec.err_flam,
         )
         sigma_flux.update({n: fn.sigma_flux for n, fn in noises.items()})
 

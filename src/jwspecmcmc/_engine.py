@@ -987,7 +987,7 @@ def _fit_lines_mcmc(
     _resid_flam = flam - model_flam_median
     _noises, _sigma_v = flux_noise_for_lines(
         line_results, spec.wave_A, _resid_flam, valid, z,
-        *resolution_of(spec),
+        *resolution_of(spec), err=spec.err_flam,
     )
     for _name, _noise in _noises.items():
         _lr = line_results[_name]

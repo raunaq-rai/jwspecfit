@@ -247,7 +247,7 @@ class FitResult:
         sig_A = assumed_sigma_A(lam_obs, sigma_v_kms, grating=grating, R=R)
         return flux_upper_limit(
             spec.wave_A, resid_flam, np.isfinite(resid_flam),
-            lam_obs, sig_A, n_sigma=n_sigma,
+            lam_obs, sig_A, n_sigma=n_sigma, err=spec.err_flam,
         )
 
     def flux_upper_limits(
@@ -1158,7 +1158,7 @@ def fit_lines(
     # error of an unconstrained fit.
     _noises, _sigma_v = flux_noise_for_lines(
         line_results, spec.wave_A, resid_flam, valid, z,
-        *resolution_of(spec),
+        *resolution_of(spec), err=spec.err_flam,
     )
     for _name, _noise in _noises.items():
         _lr = line_results[_name]

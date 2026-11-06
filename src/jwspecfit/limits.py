@@ -12,25 +12,38 @@ This module builds the limit the other way round, from the data:
    width of the galaxy — measured from the lines that *are* detected in
    the same spectrum (:func:`intrinsic_sigma_kms`), so the assumed
    profile matches the real ones.
-2. **Measure the noise with that profile.**  The assumed Gaussian is
-   slid across the line-free residuals either side of the expected
-   position and the scatter of the fluxes it recovers is taken as the
-   1σ flux uncertainty (:func:`matched_filter_flux_error`).
+2. **Measure the noise with that profile, at the line.**  The flux
+   error of that Gaussian is evaluated from the error spectrum at the
+   line's own pixels, ``sqrt(sum(g**2 err**2)) / sum(g**2)``, so it
+   follows the noise level wherever the line falls (a different grating,
+   or a different part of one, in a combined spectrum) with no sampling
+   scatter.  It is then multiplied by a correction factor measured from
+   the residuals: the same profile is slid across the line-free residuals
+   either side, each recovered flux is divided by the error spectrum's
+   prediction for it, and the RMS of those ratios is the factor
+   (:func:`matched_filter_flux_error`).  The factor is measured blue- and
+   red-ward separately and the larger kept, so a window reaching across a
+   grating boundary can only make the limit more conservative.
 
-Step 2 is an empirical matched filter.  For white noise it reduces
-exactly to the textbook result
+Why the factor matters: NIRSpec's 1D spectra have correlated adjacent
+pixels (the 2D extraction and resampling see to that), so the error
+spectrum's white-noise prediction is optimistic by a factor that depends
+on the extraction and cannot be written down, and pipeline error arrays
+can also be mis-scaled.  Measuring it from the residuals picks both up.
+Dividing by the error spectrum first removes the change in noise level
+across the spectrum, so the factor can be measured over a wide window
+(:data:`_FACTOR_OUTER`) and is precise.  An earlier version measured the
+whole noise from the residual scatter in a +/-12 sigma annulus; that was
+local but rested on only ~6 independent samples, which left it ~5% low
+on average with +/-25% scatter, so pure noise exceeded "3 sigma" ~1% of
+the time instead of 0.13%.  That estimator remains the fallback when no
+error spectrum is available.
+
+For white noise the error-spectrum term is exactly the textbook result
 
 .. math::
 
-    \\sigma_F = \\sigma_\\mathrm{rms}\\,\\sqrt{2\\sqrt{\\pi}\\,\\sigma\\,\\Delta\\lambda},
-
-which is what "integrate the error spectrum in quadrature over the line
-profile" evaluates to and what the literature normally quotes.  Measuring
-it rather than evaluating it matters because NIRSpec's 1D spectra have
-correlated adjacent pixels — the 2D extraction and resampling see to
-that — so the white-noise formula is optimistic by a factor that depends
-on the extraction and cannot be written down.  The sliding filter picks
-that correlation up for free.
+    \\sigma_F = \\sigma_\\mathrm{rms}\\,\\sqrt{2\\sqrt{\\pi}\\,\\sigma\\,\\Delta\\lambda}.
 
 Note what this is *not*: ``rms * sigma * sqrt(2 * pi)``, the form used in
 earlier versions of this package, assumes the noise is fully coherent
@@ -92,6 +105,19 @@ _TEMPLATE_COMPLETENESS: float = 0.8
 #: trusted over the analytic white-noise formula.
 _MIN_POSITIONS: int = 8
 
+#: Outer edge, in units of the assumed σ, of the window over which the
+#: residual-to-error-spectrum correction factor is measured.  It can be
+#: much wider than the annulus above because the residuals are divided by
+#: the error spectrum first, which removes the change in noise level from
+#: one grating (or one part of a grating) to the next; only the
+#: correlation and the error-spectrum scaling are measured here, and those
+#: vary slowly.
+_FACTOR_OUTER: float = 50.0
+
+#: Template fluxes more than this many robust sigma (1.4826 x median
+#: absolute value) from zero are dropped before the factor is measured.
+_FACTOR_CLIP: float = 5.0
+
 
 @dataclass(frozen=True)
 class FluxNoise:
@@ -106,14 +132,24 @@ class FluxNoise:
     sigma_A : float
         The assumed Gaussian σ (Angstrom) the filter was built with.
     method : str
-        ``"matched_filter"`` when measured from the scatter of recovered
-        fluxes, ``"matched_filter_analytic"`` when too few template
-        positions were available and the white-noise formula was used.
+        ``"error_spectrum"`` (the default whenever an error spectrum is
+        given): the white-noise flux error of the error spectrum at the
+        line, times *corr_factor* measured from the residuals.
+        ``"error_spectrum_white"``: the same without the correction, when
+        too few positions were usable to measure it.  Without an error
+        spectrum, ``"matched_filter"`` (the scatter of recovered fluxes in
+        a local annulus) or ``"matched_filter_analytic"`` (white-noise
+        formula from the residual RMS).
     n_positions : int
         Number of template positions the scatter was measured over
         (zero for the analytic fallback).
     rms : float
         Local RMS of the residuals in the annulus, in f_lam units.
+    corr_factor : float
+        For ``"error_spectrum"``: the measured ratio of the real flux
+        scatter to the white-noise prediction of the error spectrum, which
+        absorbs pixel correlation and any mis-scaling of the error array.
+        1.0 for the other methods.
     """
 
     sigma_flux: float
@@ -121,6 +157,7 @@ class FluxNoise:
     method: str
     n_positions: int
     rms: float
+    corr_factor: float = 1.0
 
 
 def intrinsic_sigma_kms(
@@ -265,6 +302,7 @@ def matched_filter_flux_error(
     valid: np.ndarray,
     lam_obs_A: float,
     sigma_A: float,
+    err: np.ndarray | None = None,
 ) -> FluxNoise | None:
     """1σ flux uncertainty for a Gaussian of assumed width at a given position.
 
@@ -288,6 +326,11 @@ def matched_filter_flux_error(
         Expected observed wavelength of the line (Angstrom).
     sigma_A : float
         Assumed Gaussian σ (Angstrom), from :func:`assumed_sigma_A`.
+    err : np.ndarray, optional
+        1σ error spectrum in the same units as *residuals*.  When given
+        (the normal case) the noise level is taken from it at the line
+        itself and only a correction factor is measured from the
+        residuals; see :func:`_error_spectrum_flux_error`.
 
     Returns
     -------
@@ -297,6 +340,12 @@ def matched_filter_flux_error(
     """
     if not (sigma_A > 0 and np.isfinite(sigma_A)):
         return None
+    if err is not None:
+        noise = _error_spectrum_flux_error(
+            wave_A, residuals, valid, lam_obs_A, sigma_A, err,
+        )
+        if noise is not None:
+            return noise
 
     wave_A = np.asarray(wave_A, dtype=float)
     resid = np.asarray(residuals, dtype=float)
@@ -357,6 +406,116 @@ def matched_filter_flux_error(
     )
 
 
+def _error_spectrum_flux_error(
+    wave_A: np.ndarray,
+    residuals: np.ndarray,
+    valid: np.ndarray,
+    lam_obs_A: float,
+    sigma_A: float,
+    err: np.ndarray,
+) -> FluxNoise | None:
+    """Error spectrum at the line, rescaled by the measured residual scatter.
+
+    The flux of a unit-area template ``g`` fitted to the residuals has the
+    white-noise variance ``sum(g**2 err**2) / sum(g**2)**2``.  Evaluated at
+    the line, that is exactly local: it follows the error spectrum pixel by
+    pixel, so it changes with the grating and with the position in it, and
+    has no sampling scatter of its own.  What it misses is pixel-to-pixel
+    correlation (and any mis-scaling of the error array), so the same
+    template is slid across the residuals in a window around the line, each
+    recovered flux is divided by its own white-noise prediction, and the
+    RMS of those ratios is the correction factor.  Dividing by the
+    prediction removes the noise *level*, so the window can be wide enough
+    for the factor to be precise without borrowing another grating's noise.
+
+    Parameters
+    ----------
+    wave_A, residuals, valid, lam_obs_A, sigma_A
+        As for :func:`matched_filter_flux_error`.
+    err : np.ndarray
+        1σ error spectrum, in the units of *residuals*.
+
+    Returns
+    -------
+    FluxNoise or None
+        ``None`` when the error spectrum is unusable at the line.
+    """
+    wave_A = np.asarray(wave_A, dtype=float)
+    resid = np.asarray(residuals, dtype=float)
+    err = np.asarray(err, dtype=float)
+    usable = (
+        np.asarray(valid, dtype=bool) & np.isfinite(resid)
+        & np.isfinite(err) & (err > 0)
+    )
+    near = np.abs(wave_A - lam_obs_A)
+    slab = near < (_FACTOR_OUTER + _TEMPLATE_RADIUS) * sigma_A
+    if int(np.sum(slab & usable)) < 3:
+        return None
+    lam_slab = wave_A[slab]
+    ok_slab = usable[slab]
+    r_slab = np.where(ok_slab, resid[slab], 0.0)
+    v_slab = np.where(ok_slab, err[slab], 0.0) ** 2
+    near_slab = near[slab]
+
+    # White-noise flux error at the line itself.
+    g_line = _gaussian_templates(lam_slab, np.array([lam_obs_A]), sigma_A, ok_slab)[0]
+    w_line = float(g_line @ g_line)
+    if w_line <= 0:
+        return None
+    sigma_white = float(np.sqrt(g_line**2 @ v_slab)) / w_line
+
+    # Correction factor from the residuals around it, the line itself excluded.
+    pos = ok_slab & (near_slab > _ANNULUS_INNER * sigma_A) & (
+        near_slab < _FACTOR_OUTER * sigma_A
+    )
+    g = _gaussian_templates(lam_slab, lam_slab[pos], sigma_A, ok_slab)
+    weight = np.sum(g * g, axis=1)
+    rms = float(np.sqrt(np.mean(r_slab[pos] ** 2))) if pos.any() else float("nan")
+    keep = weight >= _TEMPLATE_COMPLETENESS * w_line
+    # Measured separately blue- and red-ward and the larger kept: where the
+    # correlation changes (a grating boundary in a combined spectrum) the
+    # side that reaches across it can only raise the limit, never lower it.
+    blue = lam_slab[pos] < lam_obs_A
+    factors, n_used = [], 0
+    for side in (keep & blue, keep & ~blue):
+        if int(np.sum(side)) < _MIN_POSITIONS:
+            continue
+        gs, ws = g[side], weight[side]
+        z = ((gs @ r_slab) / ws) / (np.sqrt((gs * gs) @ v_slab) / ws)
+        # Clip at _FACTOR_CLIP times a median-based scale first: a single bad
+        # pixel or a runaway model component elsewhere in the window (seen
+        # on PRISM fits, |resid/err| ~ 1e3) would otherwise set the factor.
+        # Gaussian noise loses essentially nothing to a 5 sigma clip.
+        scale = 1.4826 * float(np.median(np.abs(z)))
+        if scale > 0:
+            z = z[np.abs(z) < _FACTOR_CLIP * scale]
+        if z.size < _MIN_POSITIONS:
+            continue
+        factors.append(float(np.sqrt(np.mean(z**2))))
+        n_used += int(z.size)
+    if factors:
+        factor = max(factors)
+        return FluxNoise(
+            sigma_flux=factor * sigma_white,
+            sigma_A=float(sigma_A),
+            method="error_spectrum",
+            n_positions=n_used,
+            rms=rms,
+            corr_factor=factor,
+        )
+    logger.debug(
+        "Too few template positions at %.1f Å to measure the correction "
+        "factor; using the error spectrum as it is.", lam_obs_A,
+    )
+    return FluxNoise(
+        sigma_flux=sigma_white,
+        sigma_A=float(sigma_A),
+        method="error_spectrum_white",
+        n_positions=0,
+        rms=rms,
+    )
+
+
 def flux_upper_limit(
     wave_A: np.ndarray,
     residuals: np.ndarray,
@@ -364,6 +523,7 @@ def flux_upper_limit(
     lam_obs_A: float,
     sigma_A: float,
     n_sigma: float = 3.0,
+    err: np.ndarray | None = None,
 ) -> float | None:
     """Convenience wrapper: ``n_sigma`` times :func:`matched_filter_flux_error`.
 
@@ -373,6 +533,8 @@ def flux_upper_limit(
         As for :func:`matched_filter_flux_error`.
     n_sigma : float
         Number of sigma for the limit (default 3).
+    err : np.ndarray, optional
+        Error spectrum, as for :func:`matched_filter_flux_error`.
 
     Returns
     -------
@@ -380,7 +542,7 @@ def flux_upper_limit(
         Integrated flux upper limit in f_lam × Angstrom, or ``None``.
     """
     noise = matched_filter_flux_error(
-        wave_A, residuals, valid, lam_obs_A, sigma_A,
+        wave_A, residuals, valid, lam_obs_A, sigma_A, err=err,
     )
     if noise is None:
         return None
@@ -418,6 +580,7 @@ def flux_noise_for_lines(
     grating: str | None = None,
     R: float | Callable[[np.ndarray], np.ndarray] | None = None,
     sigma_v_kms: float | None = None,
+    err: np.ndarray | None = None,
 ) -> tuple[dict[str, FluxNoise], float]:
     """Assumed-width flux uncertainties for every line in a fit.
 
@@ -453,6 +616,9 @@ def flux_noise_for_lines(
         Intrinsic velocity width to assume.  When ``None`` (the default)
         it is measured from the detected lines, falling back to
         :data:`SIGMA_V_FALLBACK_KMS`.
+    err : np.ndarray, optional
+        1σ error spectrum in the units of *residuals*; see
+        :func:`matched_filter_flux_error`.  Pass it whenever it exists.
 
     Returns
     -------
@@ -477,7 +643,9 @@ def flux_noise_for_lines(
         if lam_obs <= 0:
             continue
         sig_A = assumed_sigma_A(lam_obs, sigma_v_used, grating=grating, R=R)
-        noise = matched_filter_flux_error(wave_A, residuals, valid, lam_obs, sig_A)
+        noise = matched_filter_flux_error(
+            wave_A, residuals, valid, lam_obs, sig_A, err=err,
+        )
         if noise is not None:
             noises[name] = noise
 
@@ -548,7 +716,7 @@ def backfill_flux_limits(
     noises, _ = flux_noise_for_lines(
         missing, spec.wave_A, resid_flam, np.isfinite(resid_flam),
         getattr(spec, "z", None), grating=grating, R=R,
-        sigma_v_kms=sigma_v_kms,
+        sigma_v_kms=sigma_v_kms, err=spec.err_flam,
     )
     for name, noise in noises.items():
         lr = lines[name]
