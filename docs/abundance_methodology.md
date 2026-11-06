@@ -83,8 +83,8 @@ Two laws are implemented:
 
 - **Salim et al. (2018) / Noll et al. (2009):** Modified Calzetti et al.
   (2000) attenuation curve with a UV bump and power-law slope deviation.
-  Default parameters: R_V = 3.15, delta = -0.35, bump strength
-  B = 2.27.
+  Default parameters: delta = -0.45, bump strength B = 2.27, and
+  R_V = 2.64 from Salim+18 Eq. 4 (their high-z analogue curve).
 
 ### 2.3 Multi-Balmer A_V
 

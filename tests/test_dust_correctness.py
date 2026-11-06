@@ -86,38 +86,33 @@ class TestVBandNormalisation:
                 err_msg=f"Cardelli A(5500 Å) ≠ Av at Av={Av}",
             )
 
-    def test_salim_Av_is_a_model_parameter_not_A_at_5500(self):
-        """Salim+18 with non-zero ``delta`` does NOT satisfy A(5500 Å) = Av.
+    @pytest.mark.parametrize("delta", [-0.9, -0.45, -0.4, 0.0, 0.3])
+    def test_salim_A_at_V_equals_Av(self, delta):
+        """Salim+18 Eq. 3-4: the continuum has A(5500 Å) = A_V for any slope.
 
-        This is a real property of the law, not a bug: when the slope
-        deviation ``delta`` is non-zero the curve is "tilted" and the
-        V-band normalisation shifts.  The ``Av`` argument is a model
-        parameter used in the recovery.  The recovery is self-consistent
-        — same law derives Av and applies dust correction — so abundances
-        are unaffected.
-
-        For the default Salim parameters (Rv=3.15, delta=-0.35, B=2.27),
-        A(5500 Å) / Av ≈ 1.30.  This test pins that ratio so any future
-        change to the curve flags itself.
+        R_V,mod (Eq. 4) absorbs the slope change, so the V-band
+        normalisation must not drift with delta.  An earlier version
+        divided by a fixed R_V = 3.15 and returned A(5500)/A_V = 1.30.
+        (With B > 0 the Drude tail adds B * D(0.55 um) / R_V ~ 0.008 mag
+        at V, as in the paper's Eq. 3; covered by the bump test below.)
         """
         from jwspecabund.dust import salim_attenuation
-        ratios = []
-        for Av in (0.25, 0.5, 1.0, 2.0):
-            A = salim_attenuation(np.array([5500.0]), Av,
-                                  Rv=3.15, delta=-0.35, B=2.27)[0]
-            ratios.append(A / Av)
-        ratios = np.array(ratios)
+        A = salim_attenuation(np.array([5500.0]), 1.0, delta=delta, B=0.0)[0]
+        np.testing.assert_allclose(A, 1.0, rtol=2e-3)
 
-        # Linearity in Av: ratio must be the same for every Av.
-        np.testing.assert_allclose(ratios, ratios[0], rtol=1e-12)
+    def test_salim_rv_matches_paper_example(self):
+        """Salim+18 below Eq. 4: delta = -0.5 gives R_V,mod = 2.54."""
+        from jwspecabund.dust import salim_rv
+        assert salim_rv(-0.5) == pytest.approx(2.54, abs=5e-3)
+        assert salim_rv(0.0) == pytest.approx(4.05)
 
-        # Pin the value (~1.298) — flags any change to k_Calzetti, delta,
-        # or the bump.  Loose 1 % tolerance to allow harmless re-derivations.
-        np.testing.assert_allclose(
-            ratios[0], 1.298, rtol=1e-2,
-            err_msg=(f"A(5500 Å)/Av for Salim default params = {ratios[0]:.4f}; "
-                     f"expected ≈ 1.298.  Curve definition may have changed."),
-        )
+    def test_salim_bump_amplitude_in_ebv_units(self):
+        """B is A_bump / E(B-V): the bump adds B * E(B-V) at 2175 Å."""
+        from jwspecabund.dust import salim_attenuation, salim_rv
+        w = np.array([2175.0])
+        dA = (salim_attenuation(w, 1.0, delta=-0.45, B=2.27)
+              - salim_attenuation(w, 1.0, delta=-0.45, B=0.0))[0]
+        assert dA == pytest.approx(2.27 / salim_rv(-0.45), rel=1e-6)
 
     @pytest.mark.parametrize("law", ["salim", "cardelli"])
     def test_A_lambda_proportional_to_Av(self, law):
@@ -151,7 +146,7 @@ class TestAvRecovery:
         from jwspecabund.dust import compute_Av_multi_balmer
 
         if law == "salim":
-            dust_kwargs = {"Rv": 3.15, "delta": -0.35, "B": 2.27}
+            dust_kwargs = {"Rv": None, "delta": -0.45, "B": 2.27}
         else:
             dust_kwargs = {}
 
@@ -211,7 +206,7 @@ class TestAvBalmerPair:
         """compute_Av_balmer_pair recovers a known Av from exactly one pair."""
         from jwspecabund.dust import compute_Av_balmer_pair
 
-        dust_kwargs = ({"Rv": 3.15, "delta": -0.35, "B": 2.27}
+        dust_kwargs = ({"Rv": None, "delta": -0.45, "B": 2.27}
                        if law == "salim" else {})
         fluxes, errors = _build_full_balmer_observed(Av_true, law, **dust_kwargs)
         out = compute_Av_balmer_pair(fluxes, errors, pair, law=law, **dust_kwargs)
@@ -350,7 +345,7 @@ def test_dust_correction_preserves_snr():
     snr_in = {n: f / e for n, (f, e, _) in line_data.items()}
 
     out = dust_correct_fluxes(line_data, Av=1.5, law="salim",
-                              Rv=3.15, delta=-0.35, B=2.27)
+                              delta=-0.45, B=2.27)
     snr_out = {n: f / e for n, (f, e) in out.items()}
 
     for name in line_data:
@@ -422,7 +417,7 @@ def test_salim_and_cardelli_give_similar_A_at_5500_on_synthetic_data():
     )
 
     Av_true = 0.8
-    salim_kw = {"Rv": 3.15, "delta": -0.35, "B": 2.27}
+    salim_kw = {"Rv": None, "delta": -0.45, "B": 2.27}
     waves = {"HALPHA": 6562.8, "HBETA": 4861.3, "HGAMMA": 4340.5, "HDELTA": 4101.7}
     case_b = {"HALPHA": 2.86, "HBETA": 1.00, "HGAMMA": 0.468, "HDELTA": 0.259}
     A_lam = salim_attenuation(

@@ -90,48 +90,81 @@ def _drude(wave_um: np.ndarray, x0: float = 0.2175, gamma: float = 0.035) -> np.
     )
 
 
+def salim_rv(delta: float, Rv_cal: float = 4.05) -> float:
+    """R_V of the modified Calzetti law as a function of slope deviation.
+
+    Salim, Boquien & Lee (2018), Eq. 4::
+
+        R_V,mod = R_V,Cal / [(R_V,Cal + 1) (4400/5500)^delta - R_V,Cal]
+
+    Parameters
+    ----------
+    delta : float
+        Power-law slope deviation from Calzetti.
+    Rv_cal : float
+        Calzetti+00 R_V (4.05).
+
+    Returns
+    -------
+    float
+        R_V,mod (e.g. 2.54 for ``delta = -0.5``).
+    """
+    return Rv_cal / ((Rv_cal + 1.0) * (4400.0 / 5500.0) ** delta - Rv_cal)
+
+
 def salim_attenuation(
     wave_A: np.ndarray,
     Av: float,
-    Rv: float = 3.15,
-    delta: float = -0.35,
+    delta: float = -0.45,
     B: float = 2.27,
+    Rv: float | None = None,
 ) -> np.ndarray:
-    """Salim+18/Noll+09 modified Calzetti attenuation curve.
+    """Salim+18 (Noll+09) modified Calzetti attenuation curve.
 
-    A(lambda) = E(B-V) * [k'_Calzetti * (lambda/0.55)^delta + D_bump * B]
+    Salim, Boquien & Lee (2018), Eqs. 3, 4 and 9::
+
+        k_mod(lambda) = k_Cal(lambda) (R_V,mod / R_V,Cal) (lambda / 5500 A)^delta
+                        + D_lambda(B)
+        A(lambda) = A_V k_mod(lambda) / R_V,mod
+
+    with R_V,Cal = 4.05, R_V,mod from Eq. 4 (:func:`salim_rv`), and a
+    Drude bump centred at 2175 A with width 350 A whose amplitude *B* is
+    in units of A_bump / E(B-V).  By construction A(5500 A) = A_V.
+
+    The defaults are the Salim+18 average curve for local analogues of
+    high-redshift galaxies (Delta log SSFR > 0.5; Table 1: B = 2.27,
+    n = 1.24; their Eq. 7 gives delta = -0.45 at log M* = 10), which has an
+    SMC-like far-UV slope.  The paper's star-forming average is
+    ``delta=-0.4, B=1.3``.
 
     Parameters
     ----------
     wave_A : np.ndarray
         Rest-frame wavelength in Angstroms.
     Av : float
-        V-band attenuation A_V.
-    Rv : float
-        Total-to-selective ratio (default 3.15).
+        V-band attenuation A_V = A(5500 A).
     delta : float
-        Power-law slope deviation (default -0.35).
+        Power-law slope deviation from Calzetti (default -0.45).
     B : float
-        UV bump strength (default 2.27).
+        UV bump amplitude in units of A_bump / E(B-V) (default 2.27).
+    Rv : float, optional
+        Override R_V,mod.  Default ``None`` derives it from *delta* via
+        Eq. 4, as in Salim+18.  A(5500 A) = A_V holds either way; *Rv*
+        only sets how strong the bump is relative to the continuum.
 
     Returns
     -------
     np.ndarray
         A(lambda) in magnitudes at each wavelength.
     """
+    rv_cal = 4.05
+    rv_mod = salim_rv(delta, rv_cal) if Rv is None else float(Rv)
     wave_um = np.asarray(wave_A, dtype=float) * 1e-4
-    k_cal = _calzetti_base(wave_um)
-    Ebv = Av / Rv
-
-    # Slope modification
-    k_mod = k_cal * (wave_um / 0.55) ** delta
-
-    # UV bump
-    D = _drude(wave_um)
-    k_mod = k_mod + B * D * Rv
-
-    A_lambda = Ebv * k_mod
-    return np.clip(A_lambda, 0.0, None)
+    k_mod = (
+        _calzetti_base(wave_um) * (rv_mod / rv_cal) * (wave_um / 0.55) ** delta
+        + B * _drude(wave_um)
+    )
+    return np.clip(Av * k_mod / rv_mod, 0.0, None)
 
 
 def cardelli_extinction(

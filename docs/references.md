@@ -260,20 +260,27 @@ Modified Calzetti et al. (2000) attenuation with a UV bump and
 power-law slope deviation (Noll et al. 2009; Salim et al. 2018):
 
 $$
-A(\lambda) = E(B{-}V) \left[ k'_\mathrm{Calz}(\lambda) \left(\frac{\lambda}{0.55\,\mu\mathrm{m}}\right)^\delta + B \cdot D(\lambda) \cdot R_V \right]
+A(\lambda) = \frac{A_V}{R_{V,\mathrm{mod}}} \left[ k'_\mathrm{Calz}(\lambda) \, \frac{R_{V,\mathrm{mod}}}{R_{V,\mathrm{Cal}}} \left(\frac{\lambda}{0.55\,\mu\mathrm{m}}\right)^\delta + B \cdot D(\lambda) \right],
+\qquad
+R_{V,\mathrm{mod}} = \frac{R_{V,\mathrm{Cal}}}{(R_{V,\mathrm{Cal}} + 1)(4400/5500)^\delta - R_{V,\mathrm{Cal}}}
 $$
 
-where:
-- k′<sub>Calz</sub>(λ) is the Calzetti et al. (2000) starburst curve,
-- D(λ) is a Drude profile at 2175 Å modelling the UV bump:
-  D(λ) = (λγ)<sup>2</sup> / [(λ<sup>2</sup> − λ<sub>0</sub><sup>2</sup>)<sup>2</sup> + (λγ)<sup>2</sup>],
-- δ is the slope deviation (default −0.35),
-- *B* is the UV bump strength (default 2.27),
-- R<sub>V</sub> = A<sub>V</sub> / E(B−V) (default 3.15).
+(Salim et al. 2018, Eqs. 3–4), where:
+- k′<sub>Calz</sub>(λ) is the Calzetti et al. (2000) starburst curve and
+  R<sub>V,Cal</sub> = 4.05,
+- D(λ) is a Drude profile at 2175 Å with width 350 Å, modelling the UV bump:
+  D(λ) = (λγ)<sup>2</sup> / [(λ<sup>2</sup> − λ<sub>0</sub><sup>2</sup>)<sup>2</sup> + (λγ)<sup>2</sup>]
+  (the paper's Eq. 9 prints the width as 0.35 µm; its text gives 350 Å),
+- δ is the slope deviation (default −0.45),
+- *B* is the bump amplitude in units of A<sub>bump</sub>/E(B−V) (default 2.27),
+- R<sub>V,mod</sub> follows from δ (2.64 at δ = −0.45), so the continuum has
+  A(5500 Å) = A<sub>V</sub>.
 
-**Default parameters** (R<sub>V</sub> = 3.15, δ = −0.35, *B* = 2.27)
-follow the median values for star-forming galaxies from
-Salim et al. (2018).
+**Default parameters** (δ = −0.45, *B* = 2.27) are the Salim et al. (2018)
+average curve for local analogues of high-redshift galaxies
+(Δ log SSFR > 0.5): *B* from their Table 1, and δ from their Eq. 7 at
+log M<sub>*</sub> = 10, which matches the SMC slope (δ ≈ −0.45).  Their
+star-forming average is δ = −0.4, *B* = 1.3.
 
 **References:**
 - Calzetti, D. et al. 2000, ApJ, 533, 682

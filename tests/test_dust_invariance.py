@@ -174,10 +174,10 @@ def test_auto_av_invariance(law, Av_true, anchor):
     from jwspecabund._core import _LINE_WAVES
     from jwspecabund.dust import compute_Av_multi_balmer, dust_correct_fluxes
 
-    # Salim defaults match compute_abundances defaults (Rv=3.15, delta=-0.35,
+    # Salim defaults match compute_abundances defaults (Rv from delta, delta=-0.45,
     # B_bump=2.27).  Cardelli takes no extra args.
     if law == "salim":
-        dust_kwargs = {"Rv": 3.15, "delta": -0.35, "B": 2.27}
+        dust_kwargs = {"Rv": None, "delta": -0.45, "B": 2.27}
     else:
         dust_kwargs = {}
 
@@ -256,7 +256,7 @@ def test_user_supplied_av_invariance(law, Av_user):
     from jwspecabund.dust import dust_correct_fluxes
 
     if law == "salim":
-        dust_kwargs = {"Rv": 3.15, "delta": -0.35, "B": 2.27}
+        dust_kwargs = {"Rv": None, "delta": -0.45, "B": 2.27}
     else:
         dust_kwargs = {}
 
@@ -307,7 +307,7 @@ def test_av_zero_is_a_perfect_noop():
     }
 
     out = dust_correct_fluxes(line_data, Av=0.0, law="salim",
-                              Rv=3.15, delta=-0.35, B=2.27)
+                              delta=-0.45, B=2.27)
 
     for name, (flux_in, err_in, _wave) in line_data.items():
         flux_out, err_out = out[name]
@@ -316,7 +316,7 @@ def test_av_zero_is_a_perfect_noop():
 
     # Sanity-check the underlying attenuation curve.
     waves = np.array([3000.0, 5000.0, 7000.0, 10000.0])
-    A = salim_attenuation(waves, Av=0.0, Rv=3.15, delta=-0.35, B=2.27)
+    A = salim_attenuation(waves, Av=0.0, delta=-0.45, B=2.27)
     np.testing.assert_allclose(A, 0.0, atol=1e-15)
 
 
@@ -331,7 +331,7 @@ def test_dereddening_recovers_intrinsic_fluxes():
 
     Av = 1.2
     law = "salim"
-    dk = {"Rv": 3.15, "delta": -0.35, "B": 2.27}
+    dk = {"Rv": None, "delta": -0.45, "B": 2.27}
 
     intrinsic = _synthetic_intrinsic_fluxes()
     fluxes_obs, errors_obs = _build_observed(intrinsic, Av, law, **dk)

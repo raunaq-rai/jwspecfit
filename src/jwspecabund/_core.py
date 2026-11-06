@@ -3824,8 +3824,8 @@ def compute_abundances(
     marginalize_logU: bool = True,
     n_mc: int = 1000,
     Te_relation: str = "3_tier",
-    Rv: float = 3.15,
-    delta: float = -0.35,
+    Rv: float | None = None,
+    delta: float = -0.45,
     B_bump: float = 2.27,
     icf_method: str = "auto",
     co_icf_method: str = "auto",
@@ -4047,12 +4047,15 @@ def compute_abundances(
         ``"garnett"`` are aliases.  ``"desi"`` uses the DESI DR2 low
         relation (T_low = 0.648*T_high + 3270) with no intermediate zone
         (S²⁺/Ar²⁺ then fall back to the T_high/T_low midpoint).
-    Rv : float
-        Total-to-selective ratio for Salim law (default 3.15).
+    Rv : float or None
+        R_V for the Salim law.  Default ``None`` derives it from *delta*
+        via Salim+18 Eq. 4 (2.64 for the default delta).
     delta : float
-        Slope deviation for Salim law (default -0.35).
+        Slope deviation for the Salim law (default -0.45, Salim+18
+        high-z analogues).
     B_bump : float
-        UV bump strength for Salim law (default 2.27).
+        UV bump amplitude for the Salim law, in A_bump / E(B-V)
+        (default 2.27, Salim+18 high-z analogues).
     icf_method : str
         ICF scheme for the direct method.
         ``"auto"`` (default): use Martinez+25 when logU is available,

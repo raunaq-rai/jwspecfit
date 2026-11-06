@@ -423,7 +423,7 @@ def _apply_dust_correction(
         A_lambda = cardelli_extinction(wave_A, Av, Rv=Rv)
     elif dust_law == "salim":
         from jwspecabund.dust import salim_attenuation
-        A_lambda = salim_attenuation(wave_A, Av, Rv=Rv)
+        A_lambda = salim_attenuation(wave_A, Av)  # R_V from delta (Salim+18 Eq. 4)
     else:
         raise ValueError(f"Unknown dust_law: {dust_law!r}. Use 'cardelli' or 'salim'.")
 
@@ -1009,6 +1009,7 @@ def fit_NHI(
         emission lines are then implicitly removed.
     Av, dust_law, Rv : float, str, float
         Optional foreground dust correction applied before fitting.
+        *Rv* applies to Cardelli only; Salim derives R_V from its slope.
     R : float or None
         Spectral resolving power for LSF convolution.
     mask_lines : bool
