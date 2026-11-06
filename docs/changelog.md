@@ -4,6 +4,48 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## 1.1.12 — 2026-11-06
+
+### Changed: the joint O²⁺ solve now reports what Hsiao+26 and Arellano-Córdova+26 report
+
+- **`self_consistent_point="intersection"` is the default** (was
+  `"median"`). The adopted T_e and n_e are the crossing of the curves from
+  the measured ratios, or their closest approach where they do not cross
+  (Hsiao+26 §IV.3, Arellano-Córdova+26 §3). The 16th–84th percentile
+  errors and the abundance posteriors still come from the per-draw
+  solutions. `"median"` restores the separate posterior medians, which can
+  fall off the curves.
+- **`self_consistent_ne_limits=True` is the default** (was `False`). The
+  joint T_e is kept when n_e(O²⁺) is only an upper limit, and when the
+  curves do not cross, as both papers do (Hsiao+26 Table 2, Arellano-Córdova+26
+  Table 1). Previously these objects fell back to the single-ratio T_e at a
+  borrowed density. **This changes O/H for such objects**: on mocks, −0.03
+  dex in the density-flat regime and about −0.1 dex where the curves do not
+  cross, in both cases moving T_e towards the input value. Pass
+  `self_consistent_ne_limits=False` for the previous behaviour.
+- `plot_te_ne_diagnostic` no longer draws the posterior contours by default;
+  pass `show_posterior=True` to add them.
+
+### Fixes
+
+- **The (5007+4959)/1666 curve in `plot_te_ne_diagnostic` was drawn in the
+  wrong place**, up to ~20% too cool, so it missed the blue-red crossing it
+  must pass through (it is the product of the other two ratios). The curve
+  inversion assumed every ratio rises with T_e, and this one falls. The
+  green curve and its band are plotted only. The joint solve intersects
+  the 4363 and 1666/4363 curves, so no T_e, n_e or abundance changes.
+- **`ne(mid)` now reports the density it actually uses.** Without a C III]
+  density, the C²⁺/N²⁺/S²⁺/Ar²⁺ abundances already used the O²⁺-zone
+  density (the Martinez+2025 mid-zone z-fallback, or [Ar IV] when
+  measured). The diagnostic wrongly said "fallback to ne(low)", and those
+  ions' 3σ upper limits were computed at ne(low), about 0.02 dex off at
+  z ≈ 6. Both now match the abundances.
+
+### Plotting
+
+- The joint T_e–n_e posterior contours in `plot_te_ne_diagnostic` are
+  labelled in the legend ("posterior 68 %", "posterior 95 %").
+
 ## 1.1.11 — 2026-11-06
 
 ### Compatibility
