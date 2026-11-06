@@ -6,6 +6,22 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### The joint O²⁺ T_e–n_e solution can be kept under a density limit
+
+- **`self_consistent_ne_limits=` on `compute_abundances`** (default `False`).
+  When the Hsiao+26 joint solve bounds n_e(O²⁺) only from above, T_e(O²⁺)
+  normally falls back to the single-ratio diagnostic. With the switch on, the
+  joint temperature is adopted, as Hsiao+26 and Arellano-Cordova+26 do. That
+  temperature is the posterior median over per-draw solutions, so the density
+  uncertainty is marginalised, and the density is still reported as a limit.
+- **`self_consistent_point=`** (`"median"` default, or `"intersection"`).
+  Sets which (T_e, n_e) the joint solve reports: either the separate
+  posterior medians, or the crossing of the measured-ratio curves (their
+  closest approach where they do not cross), which lies on the curves. For a
+  clean crossing the two agree. Under an n_e limit the separate medians can
+  fall a few hundred K below both curves. Either way, the errors and the
+  abundance posteriors come from the per-draw solutions.
+
 ### N/O can measure O²⁺ from the rest-UV O III] lines
 
 - **`no_oxygen_tracer=` on `compute_abundances`.** The Martinez+25 ICFs 2

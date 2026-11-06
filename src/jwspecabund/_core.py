@@ -701,6 +701,8 @@ def _solve_Te_high(
     errors: dict[str, float] | None = None,
     snr_auroral: float = 3.0,
     oiii_coll_file: str | None = None,
+    adopt_ne_limit: bool = False,
+    te_ne_point: str = "median",
 ) -> tuple[float | None, str | None, Any]:
     """Solve T_e(O++), jointly with n_e when the UV auroral line allows it.
 
@@ -710,7 +712,11 @@ def _solve_Te_high(
     :func:`~jwspecabund.direct.compute_Te_ne_OIII`) — the only route that is
     valid once n_e approaches the [OIII] 5007 critical density.  Otherwise,
     or when that solve leaves n_e as an upper limit, T_e falls back to the
-    single-ratio diagnostic evaluated at the supplied *ne*.
+    single-ratio diagnostic evaluated at the supplied *ne*.  With
+    *adopt_ne_limit* set the joint solution is adopted in that case too,
+    as Hsiao et al. (2026) and Arellano-Cordova et al. (2026) do: T_e is
+    then the posterior median over draws whose densities are bounded only
+    from above, and *sc* still records the limit.
 
     Returns ``(Te_high, diagnostic, sc)`` where *diagnostic* is
     ``"self_consistent"``, ``"4363"`` or ``"1666"``, and *sc* is the
@@ -743,6 +749,7 @@ def _solve_Te_high(
                 err_5007=errors.get("OIII_5007"),
                 err_4959=errors.get("OIII_4959"),
                 coll_file=oiii_coll_file or OIII_1666_COLL_FILE,
+                point=te_ne_point,
             )
         except (ValueError, RuntimeError) as exc:
             logger.warning(
@@ -750,7 +757,7 @@ def _solve_Te_high(
                 "falling back to the single-ratio diagnostic.", exc,
             )
 
-    if sc is not None and not sc.ne_is_upper_limit:
+    if sc is not None and (adopt_ne_limit or not sc.ne_is_upper_limit):
         return sc.Te, "self_consistent", sc
 
     # Try each single-ratio diagnostic in turn.  An auroral line whose ratio
@@ -1157,6 +1164,8 @@ def _solve_densities_refined(
     ne_mid_override: float | None = None,
     ne_high_override: float | None = None,
     self_consistent_OIII: bool = False,
+    self_consistent_ne_limits: bool = False,
+    self_consistent_point: str = "median",
     snr_auroral: float = 3.0,
     oiii_coll_file: str | None = None,
 ) -> tuple[
@@ -1211,6 +1220,8 @@ def _solve_densities_refined(
     Te_high, diag, sc = _solve_Te_high(
         fluxes, nopp, self_consistent=self_consistent_OIII, errors=errors,
         snr_auroral=snr_auroral, oiii_coll_file=oiii_coll_file,
+        adopt_ne_limit=self_consistent_ne_limits,
+        te_ne_point=self_consistent_point,
     )
     if Te_high is None:
         return nl, nm, nh, nopp, None, None, None, None, fail, sc, nopp
@@ -2359,6 +2370,8 @@ def _run_direct(
     ne_high_override: float | None = None,
     z: float = 0.0,
     self_consistent_OIII: bool = False,
+    self_consistent_ne_limits: bool = False,
+    self_consistent_point: str = "median",
     snr_auroral: float = 3.0,
     oiii_coll_file: str | None = None,
     Av: float | None = None,
@@ -2433,6 +2446,8 @@ def _run_direct(
         ne_mid_override=ne_mid_override,
         ne_high_override=ne_high_override,
         self_consistent_OIII=self_consistent_OIII,
+        self_consistent_ne_limits=self_consistent_ne_limits,
+        self_consistent_point=self_consistent_point,
         snr_auroral=snr_auroral,
         oiii_coll_file=oiii_coll_file,
     )
@@ -3027,6 +3042,8 @@ def _run_direct_mcmc(
     ne_high_override: float | None = None,
     z: float = 0.0,
     self_consistent_OIII: bool = False,
+    self_consistent_ne_limits: bool = False,
+    self_consistent_point: str = "median",
     snr_auroral: float = 3.0,
     oiii_coll_file: str | None = None,
     # Per-draw dust resampling (when Av_err is set).
@@ -3157,6 +3174,8 @@ def _run_direct_mcmc(
             ne_mid_override=ne_mid_override,
             ne_high_override=ne_high_override,
             self_consistent_OIII=self_consistent_OIII,
+            self_consistent_ne_limits=self_consistent_ne_limits,
+            self_consistent_point=self_consistent_point,
             snr_auroral=snr_auroral,
             oiii_coll_file=oiii_coll_file,
         )
@@ -3762,6 +3781,8 @@ def compute_abundances(
     Av_prior: str = "gaussian",
     method: str = "auto",
     self_consistent_OIII: bool | str = "auto",
+    self_consistent_ne_limits: bool = False,
+    self_consistent_point: str = "median",
     oiii_coll_file: str | None = None,
     snr_auroral: float = 3.0,
     snr_line: float = 2.0,
@@ -3911,7 +3932,28 @@ def compute_abundances(
         overestimates T_e and underestimates O/H — by up to 1.1 dex in the
         Hsiao et al. sample.  When the solve leaves n_e as an upper limit
         (the density-insensitive regime), the single-ratio result is adopted
-        instead and the limit is reported.
+        instead and the limit is reported, unless
+        *self_consistent_ne_limits* is set.
+    self_consistent_ne_limits : bool
+        Adopt the joint T_e-n_e solution even when it bounds n_e(O++) only
+        from above (default ``False``).  This follows Hsiao et al. (2026)
+        and Arellano-Cordova et al. (2026), who keep the joint temperature
+        for such objects and quote the density as a limit.  T_e(O++) is then
+        the posterior median over the per-draw joint solutions, so the
+        density uncertainty is marginalised rather than fixed at a value
+        borrowed from another ion.  Where the curves do not cross at all,
+        each draw takes the point of closest approach, as Hsiao et al. do.
+    self_consistent_point : str
+        Which (T_e, n_e) the joint solve reports.  ``"median"`` (default)
+        takes the posterior medians of T_e and n_e separately.
+        ``"intersection"`` takes the crossing of the curves built from the
+        measured ratios, or their closest approach where they do not cross,
+        as Hsiao et al. (2026) and Arellano-Cordova et al. (2026) describe,
+        so the point lies on the curves.  The two agree for a clean
+        crossing; where the draws spread along the curves (an n_e upper
+        limit) the separate medians can fall a few hundred K below both.
+        The errors and the O/H, N/O and C/O posteriors come from the
+        per-draw solutions either way.
 
         The single-ratio answers are always reported alongside, in
         ``alt_results["direct_4363"]`` / ``alt_results["direct_1666"]``.
@@ -4569,6 +4611,11 @@ def compute_abundances(
         _self_consistent = True
     else:
         _self_consistent = bool(self_consistent_OIII)
+    if self_consistent_point not in ("median", "intersection"):
+        raise ValueError(
+            f"self_consistent_point must be 'median' or 'intersection', "
+            f"got {self_consistent_point!r}."
+        )
 
     if use_direct:
         try:
@@ -4589,6 +4636,8 @@ def compute_abundances(
                     ne_high_override=ne_high_override,
                     z=_z_ne,
                     self_consistent_OIII=_self_consistent,
+                    self_consistent_ne_limits=self_consistent_ne_limits,
+                    self_consistent_point=self_consistent_point,
                     snr_auroral=snr_auroral,
                     oiii_coll_file=oiii_coll_file,
                     Av=Av_derived, Av_err=Av_err,
@@ -4612,6 +4661,8 @@ def compute_abundances(
                     ne_high_override=ne_high_override,
                     z=_z_ne,
                     self_consistent_OIII=_self_consistent,
+                    self_consistent_ne_limits=self_consistent_ne_limits,
+                    self_consistent_point=self_consistent_point,
                     snr_auroral=snr_auroral,
                     oiii_coll_file=oiii_coll_file,
                     Av=Av_derived,
@@ -4802,6 +4853,8 @@ def compute_abundances(
                             ne_high_override=ne_high_override,
                             z=_z_ne,
                             self_consistent_OIII=_self_consistent,
+                            self_consistent_ne_limits=self_consistent_ne_limits,
+                            self_consistent_point=self_consistent_point,
                             snr_auroral=snr_auroral,
                             oiii_coll_file=oiii_coll_file,
                             Av=Av_derived, Av_err=Av_err,
@@ -4824,6 +4877,8 @@ def compute_abundances(
                             ne_high_override=ne_high_override,
                             z=_z_ne,
                             self_consistent_OIII=_self_consistent,
+                            self_consistent_ne_limits=self_consistent_ne_limits,
+                            self_consistent_point=self_consistent_point,
                             snr_auroral=snr_auroral,
                             oiii_coll_file=oiii_coll_file,
                             Av=Av_derived,

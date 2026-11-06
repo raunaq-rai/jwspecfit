@@ -245,6 +245,40 @@ class TestComputeAbundancesIntegration:
         # The adopted density may not exceed the bound the O III lines set.
         assert res.ne_Opp <= sc.ne_upper_limit + 1.0
 
+    def test_ne_limits_switch_adopts_joint_solution(self):
+        """Hsiao+26 / Arellano-Cordova+26: keep the joint T_e under a limit."""
+        truth = 12.0 + np.log10(1e-4)
+        res = self._run(_mock_result(25000, 1e3), self_consistent_ne_limits=True)
+        sc = res.Te_ne_selfconsistent
+        assert sc is not None and sc.ne_is_upper_limit
+        assert res.Te_diagnostic == "self_consistent"
+        assert res.Te_high == pytest.approx(sc.Te, rel=1e-9)
+        assert res.Te_high == pytest.approx(25000, rel=0.1)
+        assert res.OH == pytest.approx(truth, abs=0.1)
+
+    def test_intersection_point_lies_on_the_curves(self):
+        """point="intersection" reports the crossing, inside its own errors."""
+        res = self._run(_mock_result(25000, 1e3), self_consistent_ne_limits=True,
+                        self_consistent_point="intersection")
+        sc = res.Te_ne_selfconsistent
+        assert sc.Te == pytest.approx(sc.Te_intersection, rel=1e-12)
+        assert sc.ne == pytest.approx(sc.ne_intersection, rel=1e-12)
+        assert res.Te_high == pytest.approx(sc.Te, rel=1e-9)
+        lne = np.log10(sc.ne)
+        blue = np.interp(lne, sc.logne_grid, sc.Te_curve_4363)
+        assert sc.Te == pytest.approx(blue, rel=0.02)
+        assert min(sc.Te_err) >= 0.0
+
+    def test_rejects_bad_point_value(self):
+        with pytest.raises(ValueError):
+            self._run(_mock_result(13000, 1e6), self_consistent_point="mode")
+
+    def test_ne_limits_switch_inert_when_bounded(self):
+        """A bounded density is adopted either way; the switch changes nothing."""
+        on = self._run(_mock_result(13000, 1e6), self_consistent_ne_limits=True)
+        assert on.Te_diagnostic == "self_consistent"
+        assert not on.Te_ne_selfconsistent.ne_is_upper_limit
+
     def test_non_converged_solve_does_not_cap_density(self):
         """A non-crossing solve must not override a measured density.
 

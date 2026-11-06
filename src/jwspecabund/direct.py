@@ -1082,6 +1082,7 @@ def compute_Te_ne_OIII(
     coll_file: str = OIII_1666_COLL_FILE,
     n_draws: int = 500,
     seed: int = 42,
+    point: str = "median",
 ) -> SelfConsistentOIII:
     """Solve T_e and n_e simultaneously in the O++ zone (Hsiao et al. 2026).
 
@@ -1123,6 +1124,13 @@ def compute_Te_ne_OIII(
         Posterior draws for the uncertainties (default 500).
     seed : int
         RNG seed for the posterior draws.
+    point : str
+        The (T_e, n_e) reported as the solution: ``"median"`` (default), the
+        posterior medians of T_e and n_e taken separately, or
+        ``"intersection"``, the crossing of the curves from the measured
+        ratios (their closest approach where they do not cross), which lies
+        on the curves by construction.  The errors are the posterior's
+        16th-84th percentiles either way, measured from the reported point.
 
     Returns
     -------
@@ -1240,8 +1248,22 @@ def compute_Te_ne_OIII(
     # log n_e = 4.26 against a truth of 4.48 where the raw crossing lands at
     # 1.44).  This is also what Hsiao et al. mean by propagating through the
     # posterior samples.
-    out.Te, out.ne = float(tmed), float(nmed)
-    log_Te_med = float(np.log10(tmed))
+    #
+    # With point="intersection" the crossing of the curves from the measured
+    # ratios is kept instead (the closest approach where they do not cross),
+    # as Hsiao et al. and Arellano-Cordova et al. describe, so the reported
+    # point lies on the curves.  The errors are still the posterior's 16th
+    # and 84th percentiles, measured from that point.
+    if point == "intersection":
+        Te_pt, ne_pt = out.Te_intersection, out.ne_intersection
+        out.Te_err = (float(max(Te_pt - tlo, 0.0)), float(max(thi - Te_pt, 0.0)))
+        out.ne_err = (float(max(ne_pt - nlo, 0.0)), float(max(nhi - ne_pt, 0.0)))
+        out.Te, out.ne = float(Te_pt), float(ne_pt)
+    elif point == "median":
+        out.Te, out.ne = float(tmed), float(nmed)
+    else:
+        raise ValueError(f"point must be 'median' or 'intersection', got {point!r}.")
+    log_Te_med = float(np.log10(out.Te))
 
     # Below the density at which lambda5007 starts to be collisionally
     # de-excited, the auroral/nebular ratio is flat and any lower density
