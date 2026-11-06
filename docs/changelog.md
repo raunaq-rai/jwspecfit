@@ -4,6 +4,19 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### Fixes
+
+- **Ionic upper limits from MCMC results now use the continuum noise.**
+  `compute_abundances` gave up on the noise-based flux limits whenever the
+  result had no `residuals` attribute, which `MCMCResult` never has, and
+  fell back to 3 × the posterior error. So an ion's limit (e.g. N⁺/H⁺) came
+  from a different, typically smaller, flux than its line's
+  `upper_limit(3)`. The cached `flux_err_cont` on each line is now used
+  directly, and any line without one is measured from the median-model
+  residuals. jwspecfit results were not affected.
+
 ## 1.1.12 — 2026-11-06
 
 ### Changed: the joint O²⁺ solve now reports what Hsiao+26 and Arellano-Córdova+26 report

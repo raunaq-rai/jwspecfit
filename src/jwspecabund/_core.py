@@ -263,7 +263,9 @@ def _compute_continuum_rms_limits(
     Parameters
     ----------
     result : FitResult or MCMCResult
-        Fitting result with ``spectrum``, ``residuals``, and ``continuum``.
+        Fitting result with ``spectrum`` and ``lines``; ``residuals`` (or
+        ``to_fit_result()`` for MCMC results) are used only for lines whose
+        noise was not cached at fit time.
     z : float
         Source redshift.
     Av : float or None
@@ -294,8 +296,6 @@ def _compute_continuum_rms_limits(
     if not hasattr(result, "spectrum") or result.spectrum is None:
         return {}
     spec = result.spectrum
-    if not hasattr(result, "residuals") or result.residuals is None:
-        return {}
 
     lines = getattr(result, "lines", None) or {}
 
@@ -309,8 +309,15 @@ def _compute_continuum_rms_limits(
         n for n in result.line_names
         if n not in sigma_flux and "_BROAD" not in n and n in REST_LINES_A
     ]
-    if missing:
-        resid_flam = _ujy_to_flam(result.residuals, spec.wave_um)
+    # Only the gaps need residuals.  MCMC results carry none of their own
+    # (every line is cached at fit time, so this is rare); take them from
+    # the median model rather than giving up, which used to drop an MCMC
+    # result onto 3x the posterior error instead of the continuum noise.
+    residuals = getattr(result, "residuals", None)
+    if missing and residuals is None and hasattr(result, "to_fit_result"):
+        residuals = result.to_fit_result().residuals
+    if missing and residuals is not None:
+        resid_flam = _ujy_to_flam(residuals, spec.wave_um)
         grating, R = resolution_of(spec)
         # Measure the velocity width from *every* line, not just the ones
         # being filled in: those are the undetected ones by construction,

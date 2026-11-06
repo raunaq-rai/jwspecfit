@@ -584,6 +584,36 @@ class TestMCMCIntegration:
                 3.0 * lr.flux_err_cont, rel=1e-12, abs=0.0,
             )
 
+    def test_abundance_limits_use_the_same_noise_as_the_lines(self, mcmc_fit):
+        """MCMCResult has no ``residuals``; the abundance code used to give up
+        on that and fall back to 3x the posterior error, so an ion's limit
+        came from a different number than its line's upper_limit(3)."""
+        from jwspecabund._core import _compute_continuum_rms_limits
+
+        assert not hasattr(mcmc_fit, "residuals")
+        limits = _compute_continuum_rms_limits(
+            mcmc_fit, z=6.0, Av=None, dust_law="salim",
+        )
+        assert set(limits) == set(mcmc_fit.lines)
+        for name, lr in mcmc_fit.lines.items():
+            assert limits[name] == pytest.approx(lr.upper_limit(3.0), rel=1e-12)
+
+    def test_missing_cached_noise_is_measured_from_the_model(self, mcmc_fit):
+        """A result without cached noise (e.g. built by hand) still gets
+        continuum limits, from the residuals of the median model."""
+        import copy
+
+        from jwspecabund._core import _compute_continuum_rms_limits
+
+        bare = copy.deepcopy(mcmc_fit)
+        for lr in bare.lines.values():
+            lr.flux_err_cont = None
+        limits = _compute_continuum_rms_limits(
+            bare, z=6.0, Av=None, dust_law="salim",
+        )
+        for name, lr in mcmc_fit.lines.items():
+            assert limits[name] == pytest.approx(lr.upper_limit(3.0), rel=1e-6)
+
     def test_to_fit_result_carries_the_limits(self, mcmc_fit):
         converted = mcmc_fit.to_fit_result()
         for name, lr in mcmc_fit.lines.items():
