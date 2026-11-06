@@ -867,7 +867,9 @@ def _te_curve(log_ratio: np.ndarray, log_obs: float, logTe: np.ndarray) -> np.nd
     Parameters
     ----------
     log_ratio : ndarray, shape (n_T, n_n)
-        log10 model ratio, strictly increasing down the temperature axis.
+        log10 model ratio, strictly monotone down the temperature axis.
+        Ratios that fall with T_e, such as (5007+4959)/1666, are inverted
+        on the reversed axis.
     log_obs : float
         log10 of the observed ratio.
     logTe : ndarray, shape (n_T,)
@@ -879,6 +881,11 @@ def _te_curve(log_ratio: np.ndarray, log_obs: float, logTe: np.ndarray) -> np.nd
         log T_e reproducing *log_obs* at each density, or NaN where the
         observed ratio lies outside the model range at that density.
     """
+    # The bracketing search below needs the ratio to rise with T_e; counting
+    # rows below log_obs on a falling ratio picks the wrong pair of rows and
+    # extrapolates (up to 20% off in T_e for the 5007/1666 curve).
+    if np.nanmedian(log_ratio[-1] - log_ratio[0]) < 0:
+        log_ratio, logTe = log_ratio[::-1], logTe[::-1]
     n_T = log_ratio.shape[0]
     idx = np.sum(log_ratio < log_obs, axis=0)
     out = np.full(log_ratio.shape[1], np.nan)

@@ -128,6 +128,20 @@ class TestModelGrid:
         grid = _oiii_te_ne_grid()
         for key in ("log_R_4363", "log_R_1666_4363"):
             assert np.all(np.diff(grid[key], axis=0) > 0), key
+        # The plotted third curve falls with T_e; _te_curve must handle it.
+        assert np.all(np.diff(grid["log_R_5007_1666"], axis=0) < 0)
+
+    @pytest.mark.parametrize("Te, ne", _CONSTRAINED)
+    def test_third_curve_passes_through_the_crossing(self, Te, ne):
+        """(5007+4959)/1666 is the product of the other two ratios, so its
+        curve must meet theirs at the solution.  It is not used in the solve,
+        only plotted, and it used to be inverted as if it rose with T_e,
+        drawing it up to ~20% too cool."""
+        sc = compute_Te_ne_OIII(*_oiii_fluxes(Te, ne))
+        assert sc.converged
+        lne = np.log10(sc.ne_intersection)
+        green = np.interp(lne, sc.logne_grid, sc.Te_curve_5007_1666)
+        assert green == pytest.approx(sc.Te_intersection, rel=2e-3)
 
     def test_interpolated_grid_matches_direct_build(self):
         """The 141-node build must reproduce a full 1,000-node one.
