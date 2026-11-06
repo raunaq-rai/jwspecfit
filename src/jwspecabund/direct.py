@@ -1091,7 +1091,7 @@ def compute_Te_ne_OIII(
     coll_file: str = OIII_1666_COLL_FILE,
     n_draws: int = 500,
     seed: int = 42,
-    point: str = "median",
+    point: str = "intersection",
 ) -> SelfConsistentOIII:
     """Solve T_e and n_e simultaneously in the O++ zone (Hsiao et al. 2026).
 
@@ -1134,11 +1134,12 @@ def compute_Te_ne_OIII(
     seed : int
         RNG seed for the posterior draws.
     point : str
-        The (T_e, n_e) reported as the solution: ``"median"`` (default), the
-        posterior medians of T_e and n_e taken separately, or
-        ``"intersection"``, the crossing of the curves from the measured
-        ratios (their closest approach where they do not cross), which lies
-        on the curves by construction.  The errors are the posterior's
+        The (T_e, n_e) reported as the solution: ``"intersection"``
+        (default), the crossing of the curves from the measured ratios
+        (their closest approach where they do not cross), which lies on the
+        curves by construction and is what Hsiao et al. (2026) and
+        Arellano-Cordova et al. (2026) report; or ``"median"``, the
+        posterior medians of T_e and n_e taken separately.  The errors are the posterior's
         16th-84th percentiles either way, measured from the reported point.
 
     Returns
@@ -1250,19 +1251,17 @@ def compute_Te_ne_OIII(
     nlo, nmed, nhi = np.percentile(out.ne_posterior, [16, 50, 84])
     out.ne_err = (float(nmed - nlo), float(nhi - nmed))
 
-    # Adopt the posterior median rather than the intersection of the
-    # unperturbed curves.  In the density-sensitive regime the two agree to
-    # well under a grid step; in the flat regime the single intersection is
-    # placed by sub-grid noise and the median is far more stable (recovering
-    # log n_e = 4.26 against a truth of 4.48 where the raw crossing lands at
-    # 1.44).  This is also what Hsiao et al. mean by propagating through the
-    # posterior samples.
+    # Report the intersection of the curves from the measured ratios, as
+    # Hsiao et al. (2026, Sec. IV.3: "the best n_e and T_e are determined from
+    # the intersection of the curves, with uncertainties propagated through
+    # the MCMC posterior samples") and Arellano-Cordova et al. (2026, Sec. 3)
+    # do; the errors are the posterior's 16th-84th percentiles about it.
     #
-    # With point="intersection" the crossing of the curves from the measured
-    # ratios is kept instead (the closest approach where they do not cross),
-    # as Hsiao et al. and Arellano-Cordova et al. describe, so the reported
-    # point lies on the curves.  The errors are still the posterior's 16th
-    # and 84th percentiles, measured from that point.
+    # point="median" takes the separate posterior medians instead.  In the
+    # density-flat regime the crossing is placed by sub-grid noise (a raw
+    # crossing at log n_e = 1.44 against a truth of 4.48, where the median
+    # gave 4.26), but n_e is then reported only as an upper limit anyway,
+    # and T_e is well set because the curves are flat in n_e there.
     if point == "intersection":
         Te_pt, ne_pt = out.Te_intersection, out.ne_intersection
         out.Te_err = (float(max(Te_pt - tlo, 0.0)), float(max(thi - Te_pt, 0.0)))

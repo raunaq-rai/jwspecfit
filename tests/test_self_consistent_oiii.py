@@ -250,8 +250,9 @@ class TestComputeAbundancesIntegration:
         assert on.Te_high == pytest.approx(off.Te_high, abs=1e-12)
 
     def test_low_density_falls_back_and_caps(self):
-        """An unconstrained density still bounds the borrowed one."""
-        res = self._run(_mock_result(25000, 1e3))
+        """Opted out of the joint T_e, an unconstrained density still bounds
+        the borrowed one."""
+        res = self._run(_mock_result(25000, 1e3), self_consistent_ne_limits=False)
         assert res.Te_diagnostic == "4363"
         assert res.ne_Opp_is_upper_limit
         sc = res.Te_ne_selfconsistent
@@ -260,9 +261,11 @@ class TestComputeAbundancesIntegration:
         assert res.ne_Opp <= sc.ne_upper_limit + 1.0
 
     def test_ne_limits_switch_adopts_joint_solution(self):
-        """Hsiao+26 / Arellano-Cordova+26: keep the joint T_e under a limit."""
+        """Hsiao+26 / Arellano-Cordova+26: keep the joint T_e under a limit.
+
+        This is the default."""
         truth = 12.0 + np.log10(1e-4)
-        res = self._run(_mock_result(25000, 1e3), self_consistent_ne_limits=True)
+        res = self._run(_mock_result(25000, 1e3))
         sc = res.Te_ne_selfconsistent
         assert sc is not None and sc.ne_is_upper_limit
         assert res.Te_diagnostic == "self_consistent"
@@ -294,7 +297,8 @@ class TestComputeAbundancesIntegration:
         assert not on.Te_ne_selfconsistent.ne_is_upper_limit
 
     def test_non_converged_solve_does_not_cap_density(self):
-        """A non-crossing solve must not override a measured density.
+        """Opted out of the joint T_e, a non-crossing solve must not override
+        a measured density.
 
         Regression: when the two O III ratios are not mutually consistent,
         the curves never cross and the reported "upper limit" is only where
@@ -308,7 +312,7 @@ class TestComputeAbundancesIntegration:
         # (T_e, n_e) pair can produce alongside the observed lambda4363.
         result.lines["OIII_1666"].flux *= 1.2
 
-        on = self._run(result)
+        on = self._run(result, self_consistent_ne_limits=False)
         off = self._run(result, self_consistent_OIII=False)
         sc = on.Te_ne_selfconsistent
         assert sc is not None and not sc.converged
@@ -318,6 +322,17 @@ class TestComputeAbundancesIntegration:
         assert on.ne_Opp == pytest.approx(off.ne_Opp, rel=1e-12)
         assert on.OH == pytest.approx(off.OH, abs=1e-12)
         assert on.Te_high == pytest.approx(off.Te_high, abs=1e-12)
+
+    def test_non_converged_solve_adopts_closest_approach_by_default(self):
+        """Hsiao+26: "When no converged result is found, we determine the
+        best n_e and T_e as the closest values"."""
+        result = _mock_result(17000, 1e3)
+        result.lines["OIII_1666"].flux *= 1.2
+        res = self._run(result)
+        sc = res.Te_ne_selfconsistent
+        assert not sc.converged
+        assert res.Te_diagnostic == "self_consistent"
+        assert res.Te_high == pytest.approx(sc.Te_intersection, rel=1e-9)
 
     def test_rejects_bad_flag_value(self):
         with pytest.raises(ValueError, match="self_consistent_OIII"):
@@ -345,7 +360,7 @@ def test_plot_te_ne_diagnostic_renders():
         },
         n_draws=200,
     )
-    fig = plot_te_ne_diagnostic(sol)
+    fig = plot_te_ne_diagnostic(sol, show_posterior=True)
     ax = fig.axes[0]
     # Three ratio curves plus the adopted-solution marker.
     labelled = [
@@ -357,6 +372,11 @@ def test_plot_te_ne_diagnostic_renders():
     # The shaded joint posterior is named in the legend.
     texts = [t.get_text() for t in ax.get_legend().get_texts()]
     assert "posterior 68 %" in texts and "posterior 95 %" in texts
+
+    # The posterior is opt-in: by default only the curves and the solution.
+    default = plot_te_ne_diagnostic(sol).axes[0]
+    texts = [t.get_text() for t in default.get_legend().get_texts()]
+    assert not any(t.startswith("posterior") for t in texts)
 
 
 def test_plot_requires_a_solution():

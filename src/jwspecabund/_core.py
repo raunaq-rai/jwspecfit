@@ -703,8 +703,8 @@ def _solve_Te_high(
     errors: dict[str, float] | None = None,
     snr_auroral: float = 3.0,
     oiii_coll_file: str | None = None,
-    adopt_ne_limit: bool = False,
-    te_ne_point: str = "median",
+    adopt_ne_limit: bool = True,
+    te_ne_point: str = "intersection",
 ) -> tuple[float | None, str | None, Any]:
     """Solve T_e(O++), jointly with n_e when the UV auroral line allows it.
 
@@ -715,10 +715,9 @@ def _solve_Te_high(
     valid once n_e approaches the [OIII] 5007 critical density.  Otherwise,
     or when that solve leaves n_e as an upper limit, T_e falls back to the
     single-ratio diagnostic evaluated at the supplied *ne*.  With
-    *adopt_ne_limit* set the joint solution is adopted in that case too,
-    as Hsiao et al. (2026) and Arellano-Cordova et al. (2026) do: T_e is
-    then the posterior median over draws whose densities are bounded only
-    from above, and *sc* still records the limit.
+    *adopt_ne_limit* set (the default) the joint solution is adopted in
+    that case too, as Hsiao et al. (2026) and Arellano-Cordova et al.
+    (2026) do, and *sc* still records the limit.
 
     Returns ``(Te_high, diagnostic, sc)`` where *diagnostic* is
     ``"self_consistent"``, ``"4363"`` or ``"1666"``, and *sc* is the
@@ -1166,8 +1165,8 @@ def _solve_densities_refined(
     ne_mid_override: float | None = None,
     ne_high_override: float | None = None,
     self_consistent_OIII: bool = False,
-    self_consistent_ne_limits: bool = False,
-    self_consistent_point: str = "median",
+    self_consistent_ne_limits: bool = True,
+    self_consistent_point: str = "intersection",
     snr_auroral: float = 3.0,
     oiii_coll_file: str | None = None,
 ) -> tuple[
@@ -2395,8 +2394,8 @@ def _run_direct(
     ne_high_override: float | None = None,
     z: float = 0.0,
     self_consistent_OIII: bool = False,
-    self_consistent_ne_limits: bool = False,
-    self_consistent_point: str = "median",
+    self_consistent_ne_limits: bool = True,
+    self_consistent_point: str = "intersection",
     snr_auroral: float = 3.0,
     oiii_coll_file: str | None = None,
     Av: float | None = None,
@@ -3067,8 +3066,8 @@ def _run_direct_mcmc(
     ne_high_override: float | None = None,
     z: float = 0.0,
     self_consistent_OIII: bool = False,
-    self_consistent_ne_limits: bool = False,
-    self_consistent_point: str = "median",
+    self_consistent_ne_limits: bool = True,
+    self_consistent_point: str = "intersection",
     snr_auroral: float = 3.0,
     oiii_coll_file: str | None = None,
     # Per-draw dust resampling (when Av_err is set).
@@ -3806,8 +3805,8 @@ def compute_abundances(
     Av_prior: str = "gaussian",
     method: str = "auto",
     self_consistent_OIII: bool | str = "auto",
-    self_consistent_ne_limits: bool = False,
-    self_consistent_point: str = "median",
+    self_consistent_ne_limits: bool = True,
+    self_consistent_point: str = "intersection",
     oiii_coll_file: str | None = None,
     snr_auroral: float = 3.0,
     snr_line: float = 2.0,
@@ -3956,27 +3955,28 @@ def compute_abundances(
         both T_e and n_e and solving it at an assumed low density
         overestimates T_e and underestimates O/H — by up to 1.1 dex in the
         Hsiao et al. sample.  When the solve leaves n_e as an upper limit
-        (the density-insensitive regime), the single-ratio result is adopted
-        instead and the limit is reported, unless
-        *self_consistent_ne_limits* is set.
+        (the density-insensitive regime), the joint T_e is still adopted and
+        the density is reported as a limit, unless
+        *self_consistent_ne_limits* is ``False``.
     self_consistent_ne_limits : bool
         Adopt the joint T_e-n_e solution even when it bounds n_e(O++) only
-        from above (default ``False``).  This follows Hsiao et al. (2026)
-        and Arellano-Cordova et al. (2026), who keep the joint temperature
-        for such objects and quote the density as a limit.  T_e(O++) is then
-        the posterior median over the per-draw joint solutions, so the
-        density uncertainty is marginalised rather than fixed at a value
-        borrowed from another ion.  Where the curves do not cross at all,
-        each draw takes the point of closest approach, as Hsiao et al. do.
+        from above (default ``True``).  This follows Hsiao et al. (2026,
+        Table 2) and Arellano-Cordova et al. (2026, Table 1), who keep the
+        joint temperature for such objects and quote the density as a
+        limit, so the density uncertainty is carried by the per-draw
+        solutions rather than fixed at a value borrowed from another ion.
+        Where the curves do not cross at all, the point of closest approach
+        is taken, as Hsiao et al. do.  ``False`` falls back to the
+        single-ratio T_e at the supplied density in that case.
     self_consistent_point : str
-        Which (T_e, n_e) the joint solve reports.  ``"median"`` (default)
-        takes the posterior medians of T_e and n_e separately.
-        ``"intersection"`` takes the crossing of the curves built from the
-        measured ratios, or their closest approach where they do not cross,
-        as Hsiao et al. (2026) and Arellano-Cordova et al. (2026) describe,
-        so the point lies on the curves.  The two agree for a clean
-        crossing; where the draws spread along the curves (an n_e upper
-        limit) the separate medians can fall a few hundred K below both.
+        Which (T_e, n_e) the joint solve reports.  ``"intersection"``
+        (default) takes the crossing of the curves built from the measured
+        ratios, or their closest approach where they do not cross, as Hsiao
+        et al. (2026, Sec. IV.3) and Arellano-Cordova et al. (2026, Sec. 3)
+        do, so the point lies on the curves.  ``"median"`` takes the
+        posterior medians of T_e and n_e separately instead; the two agree
+        for a clean crossing, but where the draws spread along the curves
+        (an n_e upper limit) the separate medians fall off the curves.
         The errors and the O/H, N/O and C/O posteriors come from the
         per-draw solutions either way.
 

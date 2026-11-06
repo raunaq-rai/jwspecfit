@@ -55,7 +55,7 @@ def plot_te_ne_diagnostic(
     *,
     ax: Any = None,
     show_bands: bool = True,
-    show_posterior: bool = True,
+    show_posterior: bool = False,
     ne_range: tuple[float, float] | None = None,
     Te_range: tuple[float, float] | None = None,
     legend: bool = True,
@@ -82,8 +82,8 @@ def plot_te_ne_diagnostic(
         Shade the 1 sigma band around each curve, from the flux errors
         (default ``True``; ignored when no errors were supplied).
     show_posterior : bool
-        Overlay the 1 sigma and 2 sigma posterior contours (default
-        ``True``; ignored when no posterior was run).
+        Overlay the 1 sigma and 2 sigma contours of the per-draw joint
+        solutions (default ``False``; ignored when no posterior was run).
     ne_range, Te_range : tuple of float, optional
         Axis limits as ``(min, max)`` in cm^-3 and K.  Default to the
         model grid.
