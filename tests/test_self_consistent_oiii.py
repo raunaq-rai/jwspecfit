@@ -366,7 +366,7 @@ class TestUVCarbonOxygen:
         }
         c = {
             "CIII]_1907": cpp_opp * c3.getEmissivity(Te, ne, wave=1907),
-            "CIII]": cpp_opp * c3.getEmissivity(Te, ne, wave=1909),
+            "CIII]_1909": cpp_opp * c3.getEmissivity(Te, ne, wave=1909),
         }
         return {**o, **c}
 
@@ -377,7 +377,7 @@ class TestUVCarbonOxygen:
         Te, ne = 16000.0, 1e4
         f = self._uv_fluxes(Te, ne, cpp_opp)
         got, note = compute_CppOpp_uv(
-            f["CIII]_1907"], f["CIII]"], Te, ne,
+            f["CIII]_1907"], f["CIII]_1909"], Te, ne,
             flux_1661=f["OIII_1661"], flux_1666=f["OIII_1666"],
         )
         assert got == pytest.approx(cpp_opp, rel=1e-6)
@@ -390,14 +390,14 @@ class TestUVCarbonOxygen:
         Te, ne = 16000.0, 1e4
         f = self._uv_fluxes(Te, ne, 0.2)
         both, _ = compute_CppOpp_uv(
-            f["CIII]_1907"], f["CIII]"], Te, ne,
+            f["CIII]_1907"], f["CIII]_1909"], Te, ne,
             flux_1661=f["OIII_1661"], flux_1666=f["OIII_1666"],
         )
         only_1666, note = compute_CppOpp_uv(
-            f["CIII]_1907"], f["CIII]"], Te, ne, flux_1666=f["OIII_1666"],
+            f["CIII]_1907"], f["CIII]_1909"], Te, ne, flux_1666=f["OIII_1666"],
         )
         only_1661, _ = compute_CppOpp_uv(
-            f["CIII]_1907"], f["CIII]"], Te, ne, flux_1661=f["OIII_1661"],
+            f["CIII]_1907"], f["CIII]_1909"], Te, ne, flux_1661=f["OIII_1661"],
         )
         assert only_1666 == pytest.approx(both, rel=1e-6)
         assert only_1661 == pytest.approx(both, rel=1e-6)
@@ -418,10 +418,10 @@ class TestUVCarbonOxygen:
         Te_int = Te_int_from_high(Te_hi)
         f = self._uv_fluxes(Te_hi, ne, 0.2)
         same, _ = compute_CppOpp_uv(
-            f["CIII]_1907"], f["CIII]"], Te_hi, ne,
+            f["CIII]_1907"], f["CIII]_1909"], Te_hi, ne,
             flux_1661=f["OIII_1661"], flux_1666=f["OIII_1666"])
         zoned, note = compute_CppOpp_uv(
-            f["CIII]_1907"], f["CIII]"], Te_hi, ne,
+            f["CIII]_1907"], f["CIII]_1909"], Te_hi, ne,
             flux_1661=f["OIII_1661"], flux_1666=f["OIII_1666"],
             Te_C=Te_int, ne_C=ne)
         assert "C2+ at Te=" in note
@@ -442,7 +442,7 @@ class TestUVCarbonOxygen:
                          ("OIII_1666", dict(lev_i=6, lev_j=3))):
             v = scale * o3.getEmissivity(Te, ne, **kw)
             result.lines[name] = _Line(v, 0.05 * v)
-        for name, w in (("CIII]_1907", 1907), ("CIII]", 1909)):
+        for name, w in (("CIII]_1907", 1907), ("CIII]_1909", 1909)):
             v = 0.2 * scale * c3.getEmissivity(Te, ne, wave=w)
             result.lines[name] = _Line(v, 0.05 * v)
 
@@ -451,7 +451,7 @@ class TestUVCarbonOxygen:
         # Reproduce it by hand at the zone the pipeline reports.
         f = {n: lr.flux for n, lr in result.lines.items()}
         expect, _ = compute_CppOpp_uv(
-            f["CIII]_1907"], f["CIII]"], res.Te_high, res.ne_Opp,
+            f["CIII]_1907"], f["CIII]_1909"], res.Te_high, res.ne_Opp,
             flux_1661=f["OIII_1661"], flux_1666=f["OIII_1666"],
             Te_C=res.Te_mid, ne_C=res.ne_mid or res.ne_Opp)
         icf = (res.icf_values or {}).get("C/O", {}).get("icf", 1.0)
@@ -462,7 +462,7 @@ class TestUVCarbonOxygen:
 
         f = self._uv_fluxes(16000.0, 1e4, 0.2)
         with pytest.raises(ValueError, match="O III]"):
-            compute_CppOpp_uv(f["CIII]_1907"], f["CIII]"], 16000.0, 1e4)
+            compute_CppOpp_uv(f["CIII]_1907"], f["CIII]_1909"], 16000.0, 1e4)
         with pytest.raises(ValueError, match="C III]"):
             compute_CppOpp_uv(0.0, 0.0, 16000.0, 1e4, flux_1666=f["OIII_1666"])
 
@@ -473,7 +473,7 @@ class TestUVCarbonOxygen:
         Te, ne = 16000.0, 1e4
         f = self._uv_fluxes(Te, ne, 0.2)
         waves = {"OIII_1661": 1660.809, "OIII_1666": 1666.15,
-                 "CIII]_1907": 1906.68, "CIII]": 1908.73, "OIII_5007": 5006.84}
+                 "CIII]_1907": 1906.68, "CIII]_1909": 1908.73, "OIII_5007": 5006.84}
         f["OIII_5007"] = 1.0
         vals = []
         for av in (0.0, 1.0):
@@ -483,7 +483,7 @@ class TestUVCarbonOxygen:
             )
             g = {k: v[0] for k, v in d.items()}
             vals.append(np.log10(compute_CppOpp_uv(
-                g["CIII]_1907"], g["CIII]"], Te, ne,
+                g["CIII]_1907"], g["CIII]_1909"], Te, ne,
                 flux_1661=g["OIII_1661"], flux_1666=g["OIII_1666"])[0]))
             # For contrast, the UV-to-optical pairing over the same A_V.
         assert abs(vals[1] - vals[0]) < 0.10, "UV C/O should be ~dust-free"
@@ -546,7 +546,7 @@ class TestOIIIUVDoublet:
                          ("OIII_1666", dict(lev_i=6, lev_j=3))):
             f = scale * o3.getEmissivity(Te, ne, **kw)
             result.lines[name] = _Line(f, 0.05 * f)
-        for name, w in (("CIII]_1907", 1907), ("CIII]", 1909)):
+        for name, w in (("CIII]_1907", 1907), ("CIII]_1909", 1909)):
             f = 0.2 * scale * c3.getEmissivity(Te, ne, wave=w)
             result.lines[name] = _Line(f, 0.05 * f)
 

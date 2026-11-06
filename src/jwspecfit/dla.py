@@ -35,7 +35,7 @@ from typing import Any
 import numpy as np
 from scipy.special import wofz
 
-from .lines import REST_LINES_A
+from .lines import REST_LINES_A, canonical_line_names
 
 # NumPy 2.0 renamed ``np.trapz`` to ``np.trapezoid`` and removed the old
 # name.  Resolve once at import so the package works under both old and
@@ -371,7 +371,7 @@ def _mask_emission_lines(
         Boolean array (True = keep, False = masked).
     """
     keep = np.ones(len(wave_A), dtype=bool)
-    skip = exclude or set()
+    skip = set(canonical_line_names(list(exclude or ())))
     for name, lam_rest in REST_LINES_A.items():
         if name in skip:
             continue

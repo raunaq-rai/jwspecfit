@@ -6,7 +6,7 @@ import logging
 
 import numpy as np
 
-from .lines import REST_LINES_A
+from .lines import REST_LINES_A, canonical_line_names
 from .resolution import sigma_inst_A
 
 logger = logging.getLogger(__name__)
@@ -98,6 +98,7 @@ def fit_continuum(
     not zero.  The same applies when there are too few unmasked pixels to
     estimate a covariance at all (numpy needs more than ``deg + 2``).
     """.format(default_win=_DEFAULT_MOVING_AVERAGE_WINDOW)
+    line_names = canonical_line_names(line_names)
     wave_A = wave_um * 1e4
     valid = np.isfinite(flux_ujy) & np.isfinite(err_ujy) & (err_ujy > 0)
 

@@ -17,7 +17,7 @@ from .constraints import ConstraintSet
 from .continuum import fit_continuum
 from .fitter import FitResult, LineResult, _grating_bounds, fit_lines
 from .io import Spectrum, _flam_to_ujy, _ujy_to_flam
-from .lines import REST_LINES_A, get_line_list, observable_lines
+from .lines import REST_LINES_A, canonical_line_names, get_line_list, observable_lines
 from .models import build_model, pixel_weight
 from .resolution import resolve_R, sigma_inst_A
 
@@ -48,11 +48,11 @@ BIC_DELTA_THRESHOLD = 6.0
 # NII_6549 and NII_6585 are included in the Ha complex so that the
 # BIC comparison accounts for the full blend and prevents broad Ha
 # from absorbing narrow NII flux.
-BROAD_CANDIDATES = ["Ha", "HBETA", "HDELTA", "HGAMMA"]
+BROAD_CANDIDATES = ["HALPHA", "HBETA", "HDELTA", "HGAMMA"]
 
 # Lines whose narrow kinematics are tied to Ha during broad fitting
 # to guard against the broad component leaking into NII.
-HA_NII_COMPLEX = ["Ha", "NII_6549", "NII_6585"]
+HA_NII_COMPLEX = ["HALPHA", "NII_6549", "NII_6585"]
 
 # Forbidden [OIII] lines eligible for an independent broad (outflow)
 # component.  Independent of the Balmer BIC test: an outflow can be
@@ -234,6 +234,7 @@ def _resolve_balmer_broad_lines(
     """
     if balmer_broad_lines is None:
         return list(BROAD_CANDIDATES)
+    balmer_broad_lines = canonical_line_names(balmer_broad_lines)
     unknown = [n for n in balmer_broad_lines if n not in BROAD_CANDIDATES]
     if unknown:
         raise ValueError(
@@ -252,7 +253,7 @@ def _balmer_pixel_mask(
     wave_um: np.ndarray,
     z: float,
     dv: float = _BALMER_MASK_DV,
-    lines: tuple[str, ...] | list[str] = ("Ha", "HBETA"),
+    lines: tuple[str, ...] | list[str] = ("HALPHA", "HBETA"),
 ) -> np.ndarray:
     """Boolean mask selecting pixels within ±dv km/s of Balmer lines.
 
@@ -805,8 +806,8 @@ def fit_with_broad(
         outflow signature on Hα/Hβ.
     balmer_broad_lines : list of str, optional
         Balmer lines that get the broad component, chosen from
-        :data:`BROAD_CANDIDATES` (``"Ha"``, ``"HBETA"``, ``"HDELTA"``,
-        ``"HGAMMA"``); e.g. ``["Ha"]`` tests a broad Hα alone.  ``None``
+        :data:`BROAD_CANDIDATES` (``"HALPHA"``, ``"HBETA"``, ``"HDELTA"``,
+        ``"HGAMMA"``); e.g. ``["HALPHA"]`` tests a broad Hα alone.  ``None``
         (default) uses all four.  The bootstrap BIC is scored on the
         Hα/Hβ windows among them, or on their own windows if neither is
         included.
@@ -840,6 +841,7 @@ def fit_with_broad(
     -------
     BroadFitResult
     """
+    lines = canonical_line_names(lines)
     balmer_broad_lines = _resolve_balmer_broad_lines(balmer_broad_lines)
     grating = grating or spectrum.grating
     R = R or spectrum.R
@@ -925,7 +927,7 @@ def fit_with_broad(
 
     # Gate on the strongest requested Balmer line (Hα unless excluded).
     gate_line = next(
-        n for n in ("Ha", "HBETA", "HGAMMA", "HDELTA")
+        n for n in ("HALPHA", "HBETA", "HGAMMA", "HDELTA")
         if n in balmer_broad_lines
     )
     gate_snr = 0.0
@@ -956,7 +958,7 @@ def fit_with_broad(
         # Score on the Hα/Hβ windows among the requested lines; Hγ/Hδ
         # set the window only when neither is requested.
         bic_lines = [
-            n for n in ("Ha", "HBETA") if n in balmer_broad_lines
+            n for n in ("HALPHA", "HBETA") if n in balmer_broad_lines
         ] or balmer_broad_lines
         balmer_mask = _balmer_pixel_mask(spectrum.wave_um, z, lines=bic_lines)
         rng = np.random.default_rng()

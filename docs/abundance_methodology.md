@@ -126,7 +126,7 @@ for a typical four-line ladder anchored on Halpha.
 **Single-pair option.** Passing `balmer_pair=(numerator, denominator)`
 to `compute_abundances` (or calling `compute_Av_balmer_pair()` directly)
 restricts the derivation to one chosen decrement — e.g.
-`("Ha", "HBETA")` for Hα/Hβ — bypassing the SNR-weighted multi-line fit.
+`("HALPHA", "HBETA")` for Hα/Hβ — bypassing the SNR-weighted multi-line fit.
 This is useful when only one Balmer ratio is high-SNR and the fainter
 lines would otherwise bias or inflate the A_V error.  The intrinsic
 Case-B ratio is taken from the ladder above (extended with Hα = 2.86 and

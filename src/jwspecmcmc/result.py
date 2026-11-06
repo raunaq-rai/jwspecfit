@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 
 from jwspecfit.constraints import ConstraintSet
-from jwspecfit.fitter import FitResult, LineResult
+from jwspecfit.fitter import FitResult, LineResult, _canonicalise_result_names
 from jwspecfit.io import Spectrum, _ujy_to_flam, _flam_to_ujy
 from jwspecfit.lines import REST_LINES_A
 from jwspecfit.models import build_model
@@ -178,6 +178,9 @@ class MCMCResult:
     sampler_name: str = ""
     sampler_meta: dict[str, Any] = field(default_factory=dict)
     lya_params: np.ndarray | None = None  # [A_peak, mu, sigma, alpha]
+
+    def __post_init__(self) -> None:
+        _canonicalise_result_names(self)
 
     def to_fit_result(self) -> FitResult:
         """Convert to a :class:`jwspecfit.fitter.FitResult`.

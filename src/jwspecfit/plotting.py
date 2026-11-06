@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 # and plot_2d_1d so labels stay consistent.
 _DEFAULT_MARKER_NAMES: list[str] = [
     "Lya", "NV_doublet", "NIV_doublet", "CIV_doublet", "HEII_1640",
-    "NIII_doublet", "CIII]",
+    "NIII_doublet", "CIII]_1909",
     "OII_doublet", "NeIII_3869",
     "HEI_4027", "HDELTA", "HEI_4145", "HEII_4200", "HGAMMA", "OIII_4363",
     "FeII_4584", "NIII_4642", "FeIII_4660", "HeII_4687",
@@ -29,7 +29,7 @@ _DEFAULT_MARKER_NAMES: list[str] = [
     "HBETA", "OIII_4959", "OIII_5007",
     "CIV_5803", "CIV_5814",
     "HEI_5877", "OI_6302",
-    "Ha", "NII_6585", "HEI_6680",
+    "HALPHA", "NII_6585", "HEI_6680",
     "SIII_6314", "SII_6718", "SII_6732",
     "HEI_7067", "ArIII_7138",
     "SIII_9071", "SIII_9533",
@@ -39,7 +39,7 @@ _DEFAULT_MARKER_LABELS: dict[str, str] = {
     "Lya": "Lyα", "NV_doublet": "NV", "NIV_doublet": "NIV",
     "CIV_doublet": "CIV",
     "HEII_1640": "HeII 1640",
-    "NIII_doublet": "NIII 1750", "CIII]": "CIII]",
+    "NIII_doublet": "NIII 1750", "CIII]_1909": "CIII]",
     "OII_doublet": "[OII]", "NeIII_3869": "[NeIII]",
     "HEI_4027": "HeI 4027",
     "HDELTA": "Hδ",
@@ -56,7 +56,7 @@ _DEFAULT_MARKER_LABELS: dict[str, str] = {
     "CIV_5803": "CIV 5803", "CIV_5814": "CIV 5814",
     "HEI_5877": "HeI 5877",
     "OI_6302": "[OI] 6302",
-    "Ha": "Hα", "NII_6585": "[NII] 6585",
+    "HALPHA": "Hα", "NII_6585": "[NII] 6585",
     "HEI_6680": "HeI 6680",
     "SIII_6314": "[SIII]6312",
     "SII_6718": "[SII]6716", "SII_6732": "[SII]6731",
@@ -633,7 +633,7 @@ def _draw_emission_line_markers(
     if z_for_lines is None or x_lo is None or x_hi is None:
         return
 
-    from .lines import REST_LINES_A
+    from .lines import REST_LINES_A, canonical_line_names
 
     default_names = _DEFAULT_MARKER_NAMES
     display = _DEFAULT_MARKER_LABELS
@@ -641,7 +641,7 @@ def _draw_emission_line_markers(
     markers: list[tuple[float, str]] = []
 
     if lines is not False:
-        names = default_names if lines is None else list(lines)
+        names = default_names if lines is None else canonical_line_names(list(lines))
         for nm in names:
             rest_A = REST_LINES_A.get(nm)
             if rest_A is None:
@@ -655,7 +655,7 @@ def _draw_emission_line_markers(
             add_items = list(add_lines.items())
         else:
             add_items = []
-            for nm in add_lines:
+            for nm in canonical_line_names(list(add_lines)):
                 rest_A = REST_LINES_A.get(nm)
                 if rest_A is None:
                     continue

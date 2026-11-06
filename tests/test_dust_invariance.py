@@ -68,7 +68,7 @@ def _synthetic_intrinsic_fluxes() -> dict[str, float]:
     """
     return {
         # Balmer ladder (Case B for Te ~ 1.4e4 K is close to standard).
-        "Ha":         2.86,
+        "HALPHA":         2.86,
         "HBETA":      1.00,
         "HGAMMA":     0.468,
         "HDELTA":     0.259,
@@ -159,7 +159,7 @@ def _compare_centrals(a: dict, b: dict, *, rtol: float, atol: float):
 
 @pytest.mark.parametrize("law", ["salim", "cardelli"])
 @pytest.mark.parametrize("Av_true", [0.0, 1.0])
-@pytest.mark.parametrize("anchor", ["HBETA", "Ha"])
+@pytest.mark.parametrize("anchor", ["HBETA", "HALPHA"])
 def test_auto_av_invariance(law, Av_true, anchor):
     """Path A (auto-derive Av) ≡ Path B (external derive + deredden).
 

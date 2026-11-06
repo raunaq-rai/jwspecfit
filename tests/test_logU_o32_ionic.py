@@ -70,7 +70,7 @@ def _result(Te=18000.0, ne=1000.0, O_pp=3.0e-5, O_p=2.0e-6, N_p=1.0e-7,
         "OIII_1666": _f(O_pp, o3.getEmissivity(Te, ne, lev_i=6, lev_j=3)),
         "NII_6585": _f(N_p, n2.getEmissivity(Te, ne, wave=6584)),
         "CIII]_1907": _f(C_pp, c3.getEmissivity(Te, ne, wave=1907)),
-        "CIII]": _f(C_pp, c3.getEmissivity(Te, ne, wave=1909)),
+        "CIII]_1909": _f(C_pp, c3.getEmissivity(Te, ne, wave=1909)),
     }
     if with_oii:
         fluxes["OII_3726"] = _f(O_p, o2.getEmissivity(Te, ne, wave=3726))

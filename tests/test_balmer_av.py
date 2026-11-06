@@ -39,8 +39,8 @@ LAW = "cardelli"
 LAW_KW = {"Rv": RV}
 
 # A four-line ladder at the SNRs of a real JWST/NIRSpec object (OMEGA 77).
-SNR = {"Ha": 31.5, "HBETA": 39.7, "HGAMMA": 18.3, "HDELTA": 10.5}
-NAMES = ["HDELTA", "HGAMMA", "HBETA", "Ha"]
+SNR = {"HALPHA": 31.5, "HBETA": 39.7, "HGAMMA": 18.3, "HDELTA": 10.5}
+NAMES = ["HDELTA", "HGAMMA", "HBETA", "HALPHA"]
 
 
 def make_ladder(Av: float, hbeta: float = 1.0e-18) -> tuple[dict, dict]:
@@ -71,8 +71,8 @@ class TestDecrementsAreNotIndependent:
         # Additivity is a property of the fluxes, so it must survive noise.
         noisy = {k: v + rng.normal(0.0, errors[k]) for k, v in fluxes.items()}
         for a, m, b in [
-            ("HGAMMA", "HBETA", "Ha"),
-            ("HDELTA", "HGAMMA", "Ha"),
+            ("HGAMMA", "HBETA", "HALPHA"),
+            ("HDELTA", "HGAMMA", "HALPHA"),
             ("HDELTA", "HBETA", "HGAMMA"),
         ]:
             assert _D(noisy, a, b) == pytest.approx(
@@ -85,11 +85,11 @@ class TestDecrementsAreNotIndependent:
         kap = {n: float(_kappa(np.array([_BALMER_LADDER[n][0]]), LAW, **LAW_KW)[0])
                for n in NAMES}
         av = {}
-        for a, b in [("HGAMMA", "HBETA"), ("HBETA", "Ha"), ("HGAMMA", "Ha")]:
+        for a, b in [("HGAMMA", "HBETA"), ("HBETA", "HALPHA"), ("HGAMMA", "HALPHA")]:
             av[(a, b)] = _D(fluxes, a, b) / (kap[a] - kap[b])
         # All three are the same number; the "extra" pair is redundant.
-        assert av[("HGAMMA", "Ha")] == pytest.approx(av[("HGAMMA", "HBETA")], abs=1e-8)
-        assert av[("HGAMMA", "Ha")] == pytest.approx(av[("HBETA", "Ha")], abs=1e-8)
+        assert av[("HGAMMA", "HALPHA")] == pytest.approx(av[("HGAMMA", "HBETA")], abs=1e-8)
+        assert av[("HGAMMA", "HALPHA")] == pytest.approx(av[("HBETA", "HALPHA")], abs=1e-8)
 
 
 class TestAnchoredEstimator:
@@ -116,7 +116,7 @@ class TestAnchoredEstimator:
         for _ in range(600):
             noisy = {k: v + rng.normal(0.0, errors[k]) for k, v in fluxes.items()}
             out = compute_Av_multi_balmer(
-                noisy, errors, law=LAW, anchor="Ha", **LAW_KW
+                noisy, errors, law=LAW, anchor="HALPHA", **LAW_KW
             )
             # Read the unclipped GLS mean back off the individual values.
             ind = out["individual"]
@@ -131,7 +131,7 @@ class TestAnchoredEstimator:
         """Every decrement divides by Ha, so their errors are correlated."""
         fluxes, errors = make_ladder(0.3)
         out = compute_Av_multi_balmer(
-            fluxes, errors, law=LAW, anchor="Ha", **LAW_KW
+            fluxes, errors, law=LAW, anchor="HALPHA", **LAW_KW
         )
         ind = out["individual"]
         assert len(ind) == 3
@@ -148,12 +148,12 @@ class TestAnchoredEstimator:
         draws = [
             compute_Av_multi_balmer(
                 {k: v + rng.normal(0.0, errors[k]) for k, v in fluxes.items()},
-                errors, law=LAW, anchor="Ha", **LAW_KW,
+                errors, law=LAW, anchor="HALPHA", **LAW_KW,
             )["Av"]
             for _ in range(800)
         ]
         quoted = compute_Av_multi_balmer(
-            fluxes, errors, law=LAW, anchor="Ha", **LAW_KW
+            fluxes, errors, law=LAW, anchor="HALPHA", **LAW_KW
         )["Av_err"]
         assert np.std(draws) == pytest.approx(quoted, rel=0.15)
 
@@ -180,13 +180,13 @@ class TestJointEstimator:
     def test_two_lines_reproduce_that_single_decrement(self):
         """With two lines the fit is exact: dof = 0 and it is the decrement."""
         fluxes, errors = make_ladder(0.45)
-        pair = {k: fluxes[k] for k in ("HGAMMA", "Ha")}
-        perr = {k: errors[k] for k in ("HGAMMA", "Ha")}
+        pair = {k: fluxes[k] for k in ("HGAMMA", "HALPHA")}
+        perr = {k: errors[k] for k in ("HGAMMA", "HALPHA")}
         out = compute_Av_joint_balmer(pair, perr, law=LAW, **LAW_KW)
         wave_g, r_g = _BALMER_LADDER["HGAMMA"]
-        wave_a, r_a = _BALMER_LADDER["Ha"]
+        wave_a, r_a = _BALMER_LADDER["HALPHA"]
         direct, _ = compute_Av_from_balmer(
-            pair["HGAMMA"], pair["Ha"], perr["HGAMMA"], perr["Ha"],
+            pair["HGAMMA"], pair["HALPHA"], perr["HGAMMA"], perr["HALPHA"],
             law=LAW, intrinsic_ratio=r_g / r_a,
             wave_num_A=wave_g, wave_den_A=wave_a, **LAW_KW,
         )
@@ -220,7 +220,7 @@ class TestJointEstimator:
 
     def test_needs_at_least_two_lines(self):
         fluxes, errors = make_ladder(0.3)
-        one = {"Ha": fluxes["Ha"]}, {"Ha": errors["Ha"]}
+        one = {"HALPHA": fluxes["HALPHA"]}, {"HALPHA": errors["HALPHA"]}
         out = compute_Av_joint_balmer(*one, law=LAW, **LAW_KW)
         assert out["n_lines"] == 0
         assert out["Av"] == 0.0
@@ -275,7 +275,7 @@ def _synthetic_result(Av_true: float, law: str = "cardelli",
     from jwspecabund.dust import cardelli_extinction, salim_attenuation
 
     intrinsic = {
-        "Ha": 2.86, "HBETA": 1.00, "HGAMMA": 0.468, "HDELTA": 0.259,
+        "HALPHA": 2.86, "HBETA": 1.00, "HGAMMA": 0.468, "HDELTA": 0.259,
         "OIII_4363": 0.05, "OIII_4959": 1.65, "OIII_5007": 4.95,
         "OII_3726": 0.85, "OII_3729": 1.20, "NII_6585": 0.30,
     }
@@ -310,7 +310,7 @@ class TestComputeAbundancesIntegration:
         result = _synthetic_result(0.5, **LAW_KW)
         joint = compute_abundances(result, balmer_method="joint", **kw)
         anch = compute_abundances(result, balmer_method="anchored",
-                                  balmer_anchor="Ha", **kw)
+                                  balmer_anchor="HALPHA", **kw)
         assert joint.Av == pytest.approx(anch.Av, abs=0.02)
         assert joint.OH == pytest.approx(anch.OH, abs=0.02)
 

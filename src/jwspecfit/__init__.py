@@ -27,7 +27,15 @@ from .limits import (
     intrinsic_sigma_kms,
     matched_filter_flux_error,
 )
-from .lines import REST_LINES_A, get_line_list, observable_lines, show_lines
+from .lines import (
+    LEGACY_LINE_NAMES,
+    REST_LINES_A,
+    canonical_line_name,
+    canonical_line_names,
+    get_line_list,
+    observable_lines,
+    show_lines,
+)
 from .lyman_alpha import igm_transmission, lya_model
 from .plotting import (
     plot_2d_1d,
@@ -45,7 +53,9 @@ __all__ = [
     "FitResult",
     "LineResult",
     "Peak",
+    "LEGACY_LINE_NAMES",
     "REST_LINES_A",
+    "canonical_line_name",
     "R_from_pixels",
     "R_prism",
     "RedshiftResult",
@@ -245,8 +255,8 @@ def fit_lines(
         If ``True``, run BIC selection for Balmer broad components.
         Default ``False`` (narrow-only).
     balmer_broad_lines : list of str, optional
-        Balmer lines that get the broad component, chosen from ``"Ha"``,
-        ``"HBETA"``, ``"HDELTA"``, ``"HGAMMA"``; e.g. ``["Ha"]`` tests a
+        Balmer lines that get the broad component, chosen from ``"HALPHA"``,
+        ``"HBETA"``, ``"HDELTA"``, ``"HGAMMA"``; e.g. ``["HALPHA"]`` tests a
         broad Hα alone.  ``None`` (default) uses all four.
     fit_oiii_broad : bool
         If ``True``, run independent BIC test for [OIII] outflow
@@ -307,6 +317,8 @@ def fit_lines(
         When both broad flags are False, or when *wave_windows_A* is
         specified (merged result).
     """
+    lines = canonical_line_names(lines)
+    balmer_broad_lines = canonical_line_names(balmer_broad_lines)
     if not fix_blended_ratios and (fit_balmer_broad or fit_oiii_broad or fit_hei_broad):
         raise NotImplementedError(
             "fix_blended_ratios=False is only supported for narrow-only fits."

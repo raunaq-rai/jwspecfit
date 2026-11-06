@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 
 # Rest-frame vacuum wavelengths in Angstroms.
@@ -33,7 +35,7 @@ REST_LINES_A: dict[str, float] = {
     "SiIII_1": 1882.71,
     "SiIII_2": 1892.03,
     "CIII]_1907": 1906.683,
-    "CIII]": 1908.734,
+    "CIII]_1909": 1908.734,
     "CII]_2324": 2324.21346335,
     "CII]_2326": 2325.40372661,
     # UV absorption lines (low- and high-ionisation interstellar; Morton 2003)
@@ -89,7 +91,7 @@ REST_LINES_A: dict[str, float] = {
     "OI_6302": 6302.046,
     "OI_6366": 6365.533,         # [O I] 6363.78 air; tied to 6302
     "NII_6549": 6549.8589,
-    "Ha": 6564.6319,
+    "HALPHA": 6564.6319,
     "NII_6585": 6585.2784,
     "HEI_6680": 6680.000,
     # Sulphur
@@ -143,7 +145,7 @@ _PRISM_LINES = [
     "abs_AlIII1854",
     "abs_AlIII1862",
     "NIII_doublet",
-    "CIII]",
+    "CIII]_1909",
     # Semi-forbidden / weak UV
     "OIII]_2331",       # OIII]_2321/2331 blended at prism R; keep brighter 2331
     "OII]_2471",
@@ -165,7 +167,7 @@ _PRISM_LINES = [
     "NII_5756",
     "HEI_5877",
     "NII_6549",
-    "Ha",
+    "HALPHA",
     "NII_6585",
     "SII_6718",
     "SII_6732",
@@ -202,7 +204,7 @@ _GRATING_LINES = [
     "SiIII_1",
     "SiIII_2",
     "CIII]_1907",
-    "CIII]",
+    "CIII]_1909",
     # CII] intercombination doublet
     "CII]_2324",
     "CII]_2326",
@@ -247,7 +249,7 @@ _GRATING_LINES = [
     "OI_6302",
     "OI_6366",
     "NII_6549",
-    "Ha",
+    "HALPHA",
     "NII_6585",
     "HEI_6680",
     "SII_6718",
@@ -255,6 +257,134 @@ _GRATING_LINES = [
     "HEI_7067",
     "ArIII_7138",
 ]
+
+
+#: Line keys renamed in v1.1.11, mapped to their current names.  Hα now
+#: follows the other Balmer keys (HBETA, HGAMMA, ...), and the C III]
+#: 1908.73 component is named by its wavelength like its 1906.68 partner.
+LEGACY_LINE_NAMES: dict[str, str] = {
+    "Ha": "HALPHA",
+    "Ha_BROAD": "HALPHA_BROAD",
+    "Ha_BROAD2": "HALPHA_BROAD2",
+    "CIII]": "CIII]_1909",
+}
+
+
+def _warn_renamed(old: str, new: str, stacklevel: int) -> None:
+    warnings.warn(
+        f"Line name {old!r} was renamed to {new!r} in jwspecfit 1.1.11; "
+        f"the old name will stop working in a future release.",
+        FutureWarning,
+        stacklevel=stacklevel + 1,
+    )
+
+
+def canonical_line_name(name: str, *, warn: bool = True) -> str:
+    """Return the current key for a line name, mapping renamed ones.
+
+    Parameters
+    ----------
+    name : str
+        A line name, possibly one listed in :data:`LEGACY_LINE_NAMES`.
+    warn : bool
+        Issue a :class:`FutureWarning` when *name* is a renamed key.
+
+    Returns
+    -------
+    str
+        *name* itself, or its replacement.
+    """
+    new = LEGACY_LINE_NAMES.get(name)
+    if new is None:
+        return name
+    if warn:
+        _warn_renamed(name, new, stacklevel=2)
+    return new
+
+
+def canonical_line_names(names, *, warn: bool = True):
+    """Map every renamed key in a collection of line names.
+
+    Parameters
+    ----------
+    names : iterable of str, str or None
+        Line names.  A single string is mapped on its own; ``None`` is
+        returned unchanged.
+    warn : bool
+        Issue a :class:`FutureWarning` for each renamed key.
+
+    Returns
+    -------
+    Same container type as *names* (list for other iterables).
+    """
+    if names is None:
+        return None
+    if isinstance(names, str):
+        return canonical_line_name(names, warn=warn)
+    out = [canonical_line_name(n, warn=warn) for n in names]
+    if isinstance(names, (tuple, set, frozenset)):
+        return type(names)(out)
+    return out
+
+
+def canonical_line_keys(mapping, *, warn: bool = True):
+    """Return a :class:`LineDict` copy of *mapping* under current line keys.
+
+    Parameters
+    ----------
+    mapping : mapping or None
+        A ``{line_name: value}`` mapping, e.g. user-supplied fluxes.
+        ``None`` is returned unchanged.
+    warn : bool
+        Issue a :class:`FutureWarning` for each renamed key.
+
+    Returns
+    -------
+    LineDict or None
+    """
+    if mapping is None:
+        return None
+    if warn:
+        for key in mapping:
+            if key in LEGACY_LINE_NAMES:
+                _warn_renamed(key, LEGACY_LINE_NAMES[key], stacklevel=2)
+    return LineDict(mapping)
+
+
+class LineDict(dict):
+    """A ``dict`` of per-line results that still answers to renamed keys.
+
+    Keys are stored under their current names.  Looking up a key from
+    :data:`LEGACY_LINE_NAMES` (``res.lines["Ha"]``) returns the entry for
+    its replacement and issues a :class:`FutureWarning`.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__()
+        for key, value in dict(*args, **kwargs).items():
+            self[key] = value
+
+    def __setitem__(self, key, value) -> None:
+        super().__setitem__(canonical_line_name(key, warn=False), value)
+
+    def __missing__(self, key):
+        new = LEGACY_LINE_NAMES.get(key)
+        if new is None or not dict.__contains__(self, new):
+            raise KeyError(key)
+        _warn_renamed(key, new, stacklevel=2)
+        return dict.__getitem__(self, new)
+
+    def __contains__(self, key) -> bool:
+        return dict.__contains__(self, canonical_line_name(key, warn=False))
+
+    def get(self, key, default=None):
+        if dict.__contains__(self, key):
+            return dict.__getitem__(self, key)
+        new = LEGACY_LINE_NAMES.get(key)
+        if new is not None and dict.__contains__(self, new):
+            _warn_renamed(key, new, stacklevel=2)
+            return dict.__getitem__(self, new)
+        return default
 
 
 def get_line_list(grating: str = "prism") -> list[str]:

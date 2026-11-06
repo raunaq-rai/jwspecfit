@@ -401,7 +401,7 @@ def _uv_nitrogen_object(Te=2.0e4, ne=1000.0, O_pp=1.5e-5, O_p=1.8e-6,
         "NIV_1483": _f(N_ppp, n4.getEmissivity(Te, ne, wave=1483)),
         "NIV_1486": _f(N_ppp, n4.getEmissivity(Te, ne, wave=1486)),
         "CIII]_1907": _f(C_pp, c3.getEmissivity(Te, ne, wave=1907)),
-        "CIII]": _f(C_pp, c3.getEmissivity(Te, ne, wave=1909)),
+        "CIII]_1909": _f(C_pp, c3.getEmissivity(Te, ne, wave=1909)),
     }
     return _MockFitResult(fluxes, {k: frac * v for k, v in fluxes.items()})
 

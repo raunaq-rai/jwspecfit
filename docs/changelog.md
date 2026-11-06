@@ -4,6 +4,25 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### Hα and C III] 1909 line keys renamed
+
+- **`Ha` → `HALPHA`** (and `Ha_BROAD` / `Ha_BROAD2` → `HALPHA_BROAD` /
+  `HALPHA_BROAD2`), matching `HBETA`, `HGAMMA`, `HDELTA` and the other
+  Balmer keys.
+- **`CIII]` → `CIII]_1909`** for the 1908.73 Å intercombination line, so
+  both C III] components are named by wavelength (`CIII]_1907` is the
+  1906.68 Å forbidden line, unchanged).
+- Results, saved files and constraints are always keyed by the new names.
+  The old names are still accepted, with a `FutureWarning`, wherever a line
+  name goes in (`lines=`, `balmer_broad_lines=`, `balmer_anchor=`,
+  `balmer_pair=`, `prior_overrides=` keys, flux dicts passed to the dust and
+  ionic-abundance functions, plot markers), and `result.lines["Ha"]` still
+  resolves. Files saved by earlier versions load under the new names. The
+  old names will be removed in a future release; `jwspecfit.LEGACY_LINE_NAMES`
+  lists them.
+
 ## 1.1.10 — 2026-11-06
 
 ### The joint O²⁺ T_e–n_e solution can be kept under a density limit

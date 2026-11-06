@@ -139,7 +139,7 @@ class TestVBandNormalisation:
 class TestAvRecovery:
 
     @pytest.mark.parametrize("law", ["salim", "cardelli"])
-    @pytest.mark.parametrize("anchor", ["HBETA", "Ha"])
+    @pytest.mark.parametrize("anchor", ["HBETA", "HALPHA"])
     @pytest.mark.parametrize("Av_true", [0.0, 0.25, 0.5, 1.0, 2.0, 3.0])
     def test_recover_av_from_clean_balmer(self, law, anchor, Av_true):
         """compute_Av_multi_balmer recovers a known Av from clean fluxes.
@@ -185,7 +185,7 @@ class TestMultiBalmerBluerThanAnchor:
             fluxes, errors, law="cardelli", snr_min=3.0, anchor="HBETA",
         )
         used = {r["line"] for r in out["individual"]}
-        assert "Ha" not in used
+        assert "HALPHA" not in used
         assert used == {"HGAMMA", "HDELTA", "H9", "H10"}
 
     def test_ha_anchor_includes_all_bluer(self):
@@ -193,7 +193,7 @@ class TestMultiBalmerBluerThanAnchor:
         from jwspecabund.dust import compute_Av_multi_balmer
         fluxes, errors = _build_full_balmer_observed(0.5, "cardelli")
         out = compute_Av_multi_balmer(
-            fluxes, errors, law="cardelli", snr_min=3.0, anchor="Ha",
+            fluxes, errors, law="cardelli", snr_min=3.0, anchor="HALPHA",
         )
         used = {r["line"] for r in out["individual"]}
         assert used == {"HBETA", "HGAMMA", "HDELTA", "H9", "H10"}
@@ -205,7 +205,7 @@ class TestMultiBalmerBluerThanAnchor:
 class TestAvBalmerPair:
 
     @pytest.mark.parametrize("law", ["salim", "cardelli"])
-    @pytest.mark.parametrize("pair", [("Ha", "HBETA"), ("HGAMMA", "HBETA")])
+    @pytest.mark.parametrize("pair", [("HALPHA", "HBETA"), ("HGAMMA", "HBETA")])
     @pytest.mark.parametrize("Av_true", [0.0, 0.5, 1.5, 3.0])
     def test_recover_av_from_single_pair(self, law, pair, Av_true):
         """compute_Av_balmer_pair recovers a known Av from exactly one pair."""
@@ -225,20 +225,20 @@ class TestAvBalmerPair:
 
         fluxes, errors = _build_full_balmer_observed(1.0, "cardelli")
         # Corrupt a line NOT in the pair — result must be unchanged.
-        ref = compute_Av_balmer_pair(fluxes, errors, ("Ha", "HBETA"), law="cardelli")
+        ref = compute_Av_balmer_pair(fluxes, errors, ("HALPHA", "HBETA"), law="cardelli")
         fluxes["HGAMMA"] *= 5.0
-        out = compute_Av_balmer_pair(fluxes, errors, ("Ha", "HBETA"), law="cardelli")
+        out = compute_Av_balmer_pair(fluxes, errors, ("HALPHA", "HBETA"), law="cardelli")
         np.testing.assert_allclose(out["Av"], ref["Av"], atol=1e-10)
 
     def test_missing_line_returns_no_detection(self):
         from jwspecabund.dust import compute_Av_balmer_pair
-        out = compute_Av_balmer_pair({"HBETA": 100.0}, {"HBETA": 2.0}, ("Ha", "HBETA"))
+        out = compute_Av_balmer_pair({"HBETA": 100.0}, {"HBETA": 2.0}, ("HALPHA", "HBETA"))
         assert out["n_lines"] == 0 and out["Av"] == 0.0
 
     def test_invalid_line_name_raises(self):
         from jwspecabund.dust import compute_Av_balmer_pair
         with pytest.raises(ValueError):
-            compute_Av_balmer_pair({"Ha": 1, "HBETA": 1}, {}, ("Halpha", "HBETA"))
+            compute_Av_balmer_pair({"HALPHA": 1, "HBETA": 1}, {}, ("Halpha", "HBETA"))
 
 
 # ---------------------------------------------------------------------------
@@ -300,8 +300,8 @@ class TestMonotonicity:
 
         Av_seq = []
         for ratio in np.linspace(2.86, 6.0, 12):
-            fluxes = {"Ha": ratio, "HBETA": 1.0}
-            errors = {"Ha": 0.01, "HBETA": 0.01}
+            fluxes = {"HALPHA": ratio, "HBETA": 1.0}
+            errors = {"HALPHA": 0.01, "HBETA": 0.01}
             out = compute_Av_multi_balmer(fluxes, errors, law="salim",
                                           snr_min=3.0, anchor="HBETA")
             Av_seq.append(out["Av"])
@@ -343,7 +343,7 @@ def test_dust_correction_preserves_snr():
 
     line_data = {
         "HBETA":      (1.00, 0.05, _LINE_WAVES["HBETA"]),
-        "Ha":         (3.50, 0.10, _LINE_WAVES["Ha"]),
+        "HALPHA":         (3.50, 0.10, _LINE_WAVES["HALPHA"]),
         "OIII_5007":  (5.00, 0.10, _LINE_WAVES["OIII_5007"]),
         "OII_doublet":(2.00, 0.20, _LINE_WAVES["OII_doublet"]),
     }
@@ -368,14 +368,14 @@ class TestSignConvention:
     def test_red_balmer_excess_gives_positive_av(self):
         """Observed Hα/Hβ > 2.86 means dust-reddened => Av > 0.
 
-        Uses anchor="Ha" so the Hα/Hβ decrement is actually exercised
+        Uses anchor="HALPHA" so the Hα/Hβ decrement is actually exercised
         (the Hβ anchor only uses lines bluer than Hβ).
         """
         from jwspecabund.dust import compute_Av_multi_balmer
         out = compute_Av_multi_balmer(
-            {"Ha": 4.0, "HBETA": 1.0},
-            {"Ha": 0.01, "HBETA": 0.01},
-            law="salim", snr_min=3.0, anchor="Ha",
+            {"HALPHA": 4.0, "HBETA": 1.0},
+            {"HALPHA": 0.01, "HBETA": 0.01},
+            law="salim", snr_min=3.0, anchor="HALPHA",
         )
         assert out["Av"] > 0, (
             f"Red Balmer excess (Hα/Hβ = 4.0) gave Av = {out['Av']}; "
@@ -388,9 +388,9 @@ class TestSignConvention:
         a negative dust value)."""
         from jwspecabund.dust import compute_Av_multi_balmer
         out = compute_Av_multi_balmer(
-            {"Ha": 2.5, "HBETA": 1.0},
-            {"Ha": 0.01, "HBETA": 0.01},
-            law="salim", snr_min=3.0, anchor="Ha",
+            {"HALPHA": 2.5, "HBETA": 1.0},
+            {"HALPHA": 0.01, "HBETA": 0.01},
+            law="salim", snr_min=3.0, anchor="HALPHA",
         )
         assert out["Av"] >= 0, (
             f"Blue Balmer excess produced negative Av = {out['Av']}."
@@ -423,8 +423,8 @@ def test_salim_and_cardelli_give_similar_A_at_5500_on_synthetic_data():
 
     Av_true = 0.8
     salim_kw = {"Rv": 3.15, "delta": -0.35, "B": 2.27}
-    waves = {"Ha": 6562.8, "HBETA": 4861.3, "HGAMMA": 4340.5, "HDELTA": 4101.7}
-    case_b = {"Ha": 2.86, "HBETA": 1.00, "HGAMMA": 0.468, "HDELTA": 0.259}
+    waves = {"HALPHA": 6562.8, "HBETA": 4861.3, "HGAMMA": 4340.5, "HDELTA": 4101.7}
+    case_b = {"HALPHA": 2.86, "HBETA": 1.00, "HGAMMA": 0.468, "HDELTA": 0.259}
     A_lam = salim_attenuation(
         np.array([waves[k] for k in case_b]), Av_true, **salim_kw,
     )

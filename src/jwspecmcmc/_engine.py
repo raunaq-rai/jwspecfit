@@ -19,7 +19,13 @@ from jwspecfit.continuum import fit_continuum
 from jwspecfit.fitter import _grating_bounds
 from jwspecfit.io import Spectrum, _flam_to_ujy, _ujy_to_flam
 from jwspecfit.limits import flux_noise_for_lines, resolution_of
-from jwspecfit.lines import REST_LINES_A, get_line_list, observable_lines
+from jwspecfit.lines import (
+    REST_LINES_A,
+    canonical_line_name,
+    canonical_line_names,
+    get_line_list,
+    observable_lines,
+)
 from jwspecfit.models import asymmetric_gaussian, build_model, pixel_weight
 from jwspecfit.resolution import resolve_R, sigma_inst_A
 
@@ -252,6 +258,7 @@ def _fit_lines_mcmc(
     -------
     MCMCResult
     """
+    lines = canonical_line_names(lines)
     if continuum is not None:
         continuum = np.asarray(continuum, dtype=float)
         if continuum.shape != spectrum.flux_ujy.shape:
@@ -680,23 +687,23 @@ def _fit_lines_mcmc(
 
     if prior_overrides:
         for pname, prior_obj in prior_overrides.items():
-            # Parse names like "A_OIII_5007", "mu_Ha", "sigma_OIII_5007".
+            # Parse names like "A_OIII_5007", "mu_HALPHA", "sigma_OIII_5007".
             if pname.startswith("A_"):
-                line_key = pname[2:]
+                line_key = canonical_line_name(pname[2:])
                 if line_key in idx_map:
                     full_idx = idx_map[line_key]
                 else:
                     logger.warning("Unknown line in prior override: %s", pname)
                     continue
             elif pname.startswith("mu_"):
-                line_key = pname[3:]
+                line_key = canonical_line_name(pname[3:])
                 if line_key in idx_map:
                     full_idx = nL + idx_map[line_key]
                 else:
                     logger.warning("Unknown line in prior override: %s", pname)
                     continue
             elif pname.startswith("sigma_"):
-                line_key = pname[6:]
+                line_key = canonical_line_name(pname[6:])
                 if line_key in idx_map:
                     full_idx = 2 * nL + idx_map[line_key]
                 else:
@@ -1095,7 +1102,7 @@ def _fit_with_broad_mcmc(
         If ``True`` (default), run BIC selection for a broad Balmer
         component (narrow vs. intermediate vs. very-broad vs. both).
     balmer_broad_lines : list of str, optional
-        Balmer lines that get the broad component, chosen from ``"Ha"``,
+        Balmer lines that get the broad component, chosen from ``"HALPHA"``,
         ``"HBETA"``, ``"HDELTA"``, ``"HGAMMA"`` (default ``None``: all
         four).
     fit_oiii_broad : bool
@@ -1140,6 +1147,9 @@ def _fit_with_broad_mcmc(
     MCMCBroadFitResult
     """
     from jwspecfit.broad import fit_with_broad as _fit_with_broad_mle
+
+    lines = canonical_line_names(lines)
+    balmer_broad_lines = canonical_line_names(balmer_broad_lines)
 
     # ------------------------------------------------------------------
     # Phase 1: BIC model selection via fast least-squares

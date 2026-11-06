@@ -123,18 +123,18 @@ class TestBalmerAnchor:
         return fluxes, errors
 
     def test_ha_anchor_recovers_av(self):
-        """compute_Av_multi_balmer with anchor='Ha' recovers known A_V."""
+        """compute_Av_multi_balmer with anchor='HALPHA' recovers known A_V."""
         from jwspecabund.dust import compute_Av_multi_balmer
 
         Av_true = 0.6
         fluxes, errors = self._synthesise_balmer_fluxes(Av_true)
 
-        out = compute_Av_multi_balmer(fluxes, errors, anchor="Ha")
+        out = compute_Av_multi_balmer(fluxes, errors, anchor="HALPHA")
 
-        assert out["anchor"] == "Ha"
+        assert out["anchor"] == "HALPHA"
         assert out["n_lines"] >= 3
         # Hα itself is the anchor, so not in numerator list.
-        assert all(r["line"] != "Ha" for r in out["individual"])
+        assert all(r["line"] != "HALPHA" for r in out["individual"])
         np.testing.assert_allclose(out["Av"], Av_true, atol=1e-3)
 
     def test_hbeta_anchor_recovers_av(self):
@@ -159,7 +159,7 @@ class TestBalmerAnchor:
         fluxes, errors = self._synthesise_balmer_fluxes(Av_true)
 
         out_hb = compute_Av_multi_balmer(fluxes, errors, anchor="HBETA")
-        out_ha = compute_Av_multi_balmer(fluxes, errors, anchor="Ha")
+        out_ha = compute_Av_multi_balmer(fluxes, errors, anchor="HALPHA")
 
         np.testing.assert_allclose(out_hb["Av"], out_ha["Av"], atol=2e-3)
 
@@ -180,11 +180,11 @@ class TestBalmerAnchor:
 
         fluxes = {"HBETA": 1.0, "HGAMMA": 0.4}
         errors = {"HBETA": 0.01, "HGAMMA": 0.01}
-        out = compute_Av_multi_balmer(fluxes, errors, anchor="Ha")
+        out = compute_Av_multi_balmer(fluxes, errors, anchor="HALPHA")
 
         assert out["Av"] == 0.0
         assert out["n_lines"] == 0
-        assert out["anchor"] == "Ha"
+        assert out["anchor"] == "HALPHA"
 
     def test_numerator_ratios_are_anchor_relative(self):
         """Intrinsic ratios in `individual` should be numerator/anchor."""
@@ -193,8 +193,8 @@ class TestBalmerAnchor:
         # No dust → observed ratios equal intrinsic.
         fluxes, errors = self._synthesise_balmer_fluxes(Av_true=0.0)
 
-        out = compute_Av_multi_balmer(fluxes, errors, anchor="Ha")
-        _, ha_ratio = _BALMER_LADDER["Ha"]
+        out = compute_Av_multi_balmer(fluxes, errors, anchor="HALPHA")
+        _, ha_ratio = _BALMER_LADDER["HALPHA"]
 
         for r in out["individual"]:
             _, num_ratio_over_Hb = _BALMER_LADDER[r["line"]]
@@ -202,7 +202,7 @@ class TestBalmerAnchor:
             np.testing.assert_allclose(r["intrinsic_ratio"], expected, rtol=1e-12)
 
     def test_compute_abundances_threads_anchor(self):
-        """compute_abundances(balmer_anchor='Ha') reaches derivation and logs it."""
+        """compute_abundances(balmer_anchor='HALPHA') reaches derivation and logs it."""
         from dataclasses import dataclass
 
         from jwspecabund import compute_abundances
@@ -244,7 +244,7 @@ class TestBalmerAnchor:
 
         abund = compute_abundances(
             result, z=2.0, method="strong_line",
-            balmer_anchor="Ha", n_mc=50,
+            balmer_anchor="HALPHA", n_mc=50,
         )
 
         # Av should be recovered to within a few percent — this confirms the
@@ -713,7 +713,7 @@ class TestComputeAbundances:
         result = self._make_mock_fit_result({
             "OIII_5007": (5.0, 0.1),
             "HBETA": (1.0, 0.02),
-            "Ha": (2.86, 0.05),  # no dust
+            "HALPHA": (2.86, 0.05),  # no dust
             "OII_doublet": (2.0, 0.1),
         })
 
@@ -730,7 +730,7 @@ class TestComputeAbundances:
         result = self._make_mock_fit_result({
             "OIII_5007": (5.0, 0.1),
             "HBETA": (1.0, 0.02),
-            "Ha": (2.86, 0.05),
+            "HALPHA": (2.86, 0.05),
         })
 
         abund = compute_abundances(result, z=2.0, method="auto", n_mc=50)
@@ -754,7 +754,7 @@ class TestComputeAbundances:
             "OIII_4959": (3.0, 0.10),
             "OIII_5007": (9.0, 0.50),
             "HBETA": (1.0, 0.03),
-            "Ha": (2.86, 0.05),
+            "HALPHA": (2.86, 0.05),
             "OII_doublet": (2.0, 0.20),
         })
         common = dict(z=2.0, method="direct", dust_correct=False,
@@ -784,7 +784,7 @@ class TestComputeAbundances:
             "OIII_5007": (3.0, 0.05),
             "OIII_4959": (1.0, 0.05),
             "HBETA": (1.0, 0.02),
-            "Ha": (2.86, 0.05),
+            "HALPHA": (2.86, 0.05),
             "NII_6585": (0.1, 0.01),
             "OII_doublet": (1.0, 0.05),
         })
@@ -818,7 +818,7 @@ class TestComputeAbundances:
         result = self._make_mock_fit_result({
             "OIII_5007": (5.0, 0.1),
             "HBETA": (1.0, 0.02),
-            "Ha": (2.86, 0.05),
+            "HALPHA": (2.86, 0.05),
         })
 
         abund = compute_abundances(result, z=2.0, method="strong_line", n_mc=200)
@@ -942,16 +942,16 @@ class TestBroadComponentSummation:
         from jwspecabund._core import _extract_fluxes
 
         result = self._make_mock_result({
-            "Ha": (3.0, 0.1),
-            "Ha_BROAD": (1.0, 0.2),
+            "HALPHA": (3.0, 0.1),
+            "HALPHA_BROAD": (1.0, 0.2),
             "HBETA": (1.0, 0.05),
             "OIII_5007": (5.0, 0.1),
         })
 
         fluxes, errors, _ = _extract_fluxes(result)
 
-        assert fluxes["Ha"] == pytest.approx(4.0)
-        assert errors["Ha"] == pytest.approx(np.sqrt(0.1**2 + 0.2**2))
+        assert fluxes["HALPHA"] == pytest.approx(4.0)
+        assert errors["HALPHA"] == pytest.approx(np.sqrt(0.1**2 + 0.2**2))
         # Non-Balmer lines unaffected.
         assert fluxes["OIII_5007"] == pytest.approx(5.0)
 
@@ -960,14 +960,14 @@ class TestBroadComponentSummation:
         from jwspecabund._core import _extract_fluxes
 
         result = self._make_mock_result({
-            "Ha_BROAD": (1.0, 0.2),
+            "HALPHA_BROAD": (1.0, 0.2),
             "HBETA": (1.0, 0.05),
         })
 
         fluxes, _, _ = _extract_fluxes(result)
 
-        assert "Ha" not in fluxes
-        assert "Ha_BROAD" not in fluxes
+        assert "HALPHA" not in fluxes
+        assert "HALPHA_BROAD" not in fluxes
 
     def test_non_balmer_broad_ignored(self):
         """Broad component of non-Balmer lines should not be summed."""
@@ -1178,13 +1178,13 @@ class TestSNRGating:
             "OIII_5007": 5.0,
             "HBETA": 1.0,
             "SII_6718": 0.01,    # SNR = 0.01/0.1 = 0.1 → excluded
-            "Ha": 0.05,          # SNR = 0.05/0.025 = 2.0 → kept
+            "HALPHA": 0.05,          # SNR = 0.05/0.025 = 2.0 → kept
         }
         errors = {
             "OIII_5007": 0.1,
             "HBETA": 0.02,
             "SII_6718": 0.1,
-            "Ha": 0.025,
+            "HALPHA": 0.025,
         }
 
         filt_f, filt_e, excluded = _filter_low_snr(fluxes, errors, snr_thresh=2.0)
@@ -1192,7 +1192,7 @@ class TestSNRGating:
         assert "SII_6718" in excluded
         assert "SII_6718" not in filt_f
         assert "SII_6718" not in filt_e
-        assert "Ha" in filt_f  # SNR = 2.0, exactly at threshold
+        assert "HALPHA" in filt_f  # SNR = 2.0, exactly at threshold
         assert "OIII_5007" in filt_f
         assert "HBETA" in filt_f
 
@@ -1200,13 +1200,13 @@ class TestSNRGating:
         """Lines with SNR exactly at threshold are kept (>=)."""
         from jwspecabund._core import _filter_low_snr
 
-        fluxes = {"Ha": 2.0, "HBETA": 1.0}
-        errors = {"Ha": 1.0, "HBETA": 0.02}
+        fluxes = {"HALPHA": 2.0, "HBETA": 1.0}
+        errors = {"HALPHA": 1.0, "HBETA": 0.02}
 
         filt_f, _, excluded = _filter_low_snr(fluxes, errors, snr_thresh=2.0)
 
-        assert "Ha" in filt_f  # SNR = 2.0 exactly
-        assert "Ha" not in excluded
+        assert "HALPHA" in filt_f  # SNR = 2.0 exactly
+        assert "HALPHA" not in excluded
 
     def test_filter_low_snr_protects_auroral(self):
         """OIII_4363 is never filtered, even at very low SNR."""
@@ -1243,7 +1243,7 @@ class TestSNRGating:
             "OIII_4959": 0.001,
             "HBETA": 0.001,
             "NII_6585": 0.001,  # protected (nitrogen gating handles it)
-            "Ha": 0.001,        # not protected
+            "HALPHA": 0.001,        # not protected
         }
         errors = {k: 1.0 for k in fluxes}  # all SNR = 0.001
 
@@ -1254,18 +1254,18 @@ class TestSNRGating:
         assert "OIII_4959" in filt_f
         assert "HBETA" in filt_f
         assert "NII_6585" in filt_f  # protected from general filter
-        assert "Ha" in excluded
+        assert "HALPHA" in excluded
 
     def test_filter_low_snr_zero_error_kept(self):
         """Lines with zero error (SNR=inf) are always kept."""
         from jwspecabund._core import _filter_low_snr
 
-        fluxes = {"Ha": 1.0, "HBETA": 1.0}
-        errors = {"Ha": 0.0, "HBETA": 0.0}
+        fluxes = {"HALPHA": 1.0, "HBETA": 1.0}
+        errors = {"HALPHA": 0.0, "HBETA": 0.0}
 
         filt_f, _, excluded = _filter_low_snr(fluxes, errors, snr_thresh=5.0)
 
-        assert "Ha" in filt_f
+        assert "HALPHA" in filt_f
         assert len(excluded) == 0
 
     def test_excluded_lines_in_summary(self):
@@ -1545,7 +1545,7 @@ class TestDoubletCompleteness:
 
         fluxes = {
             "CIII]_1907": 1.5e-17,
-            "CIII]": 1.2e-17,
+            "CIII]_1909": 1.2e-17,
             "HBETA": 5.0e-17,
         }
 
@@ -1822,7 +1822,7 @@ class TestDoubletCompletenessLogU:
 
         for name in ("NIII_1749", "NIII_1752", "NIV_1483", "NIV_1486",
                       "CIV_1", "CIV_2", "NV_1", "NV_2",
-                      "CIII]_1907", "CIII]"):
+                      "CIII]_1907", "CIII]_1909"):
             assert name in _SNR_PROTECTED, f"{name} not in _SNR_PROTECTED"
 
 
@@ -1928,7 +1928,7 @@ class TestLyaEscapeFraction:
         assert abs(LYA_CASE_B_RATIOS["HBETA"][0] - 26.071) < 0.01
         assert abs(LYA_CASE_B_RATIOS["HGAMMA"][0] - 55.642) < 0.01
         assert abs(LYA_CASE_B_RATIOS["HDELTA"][0] - 100.593) < 0.01
-        assert "Ha" not in LYA_CASE_B_RATIOS
+        assert "HALPHA" not in LYA_CASE_B_RATIOS
 
 
 class TestLyaEscapeFractionMC:
@@ -2343,7 +2343,7 @@ class TestIcfTierValidation:
         line_fluxes = {
             "OIII_5007": (5.0, 0.1),
             "HBETA": (1.0, 0.02),
-            "Ha": (2.86, 0.05),
+            "HALPHA": (2.86, 0.05),
             "OII_doublet": (2.0, 0.1),
         }
         lines = {
@@ -2399,7 +2399,7 @@ class TestInputValidation:
         ("icf_method", "martinez", ("auto", "martinez25", "izotov06", "direct_sum")),
         ("co_icf_method", "garnett", ("auto", "martinez25", "garnett97")),
         ("forward_sampler", "nautilus", ("emcee", "dynesty")),
-        ("balmer_anchor", "HALPHA", ("HBETA", "Ha")),
+        ("balmer_anchor", "HGAMMA", ("HBETA", "HALPHA")),
     ]
 
     def _make_mock_fit_result(self):
@@ -2419,7 +2419,7 @@ class TestInputValidation:
         line_fluxes = {
             "OIII_5007": (5.0, 0.1),
             "HBETA": (1.0, 0.02),
-            "Ha": (2.86, 0.05),
+            "HALPHA": (2.86, 0.05),
             "OII_doublet": (2.0, 0.1),
         }
         lines = {
@@ -2446,10 +2446,10 @@ class TestInputValidation:
 
         with pytest.raises(ValueError) as excinfo:
             compute_abundances(
-                self._make_mock_fit_result(), z=2.0, balmer_pair=("Ha", "HB"),
+                self._make_mock_fit_result(), z=2.0, balmer_pair=("HALPHA", "HB"),
             )
         msg = str(excinfo.value)
-        for option in ("Ha", "HBETA", "HGAMMA", "HDELTA", "H9", "H10"):
+        for option in ("HALPHA", "HBETA", "HGAMMA", "HDELTA", "H9", "H10"):
             assert option in msg
 
     def test_wrong_length_balmer_pair_raises(self):
@@ -2457,7 +2457,7 @@ class TestInputValidation:
 
         with pytest.raises(ValueError, match="balmer_pair"):
             compute_abundances(
-                self._make_mock_fit_result(), z=2.0, balmer_pair=("Ha",),
+                self._make_mock_fit_result(), z=2.0, balmer_pair=("HALPHA",),
             )
 
     def test_valid_choices_accepted(self):
@@ -2468,7 +2468,7 @@ class TestInputValidation:
         abund = compute_abundances(
             self._make_mock_fit_result(), z=2.0, method="strong_line",
             dust_law="cardelli", Av_prior="uniform", Te_relation="garnett",
-            icf_method="direct_sum", balmer_anchor="Ha",
-            balmer_pair=("Ha", "HBETA"), n_mc=50, progress=False,
+            icf_method="direct_sum", balmer_anchor="HALPHA",
+            balmer_pair=("HALPHA", "HBETA"), n_mc=50, progress=False,
         )
         assert abund.method == "strong_line"

@@ -62,7 +62,7 @@ result ──> _extract_fluxes() ──> (fluxes, errors, is_mcmc)
 
 - Iterates `result.lines`, skipping `_BROAD` entries on first pass.
 - If `flux_err` is a tuple `(lo, hi)`, symmetrises to `0.5*(lo+hi)` and sets `is_mcmc=True`.
-- Second pass: sums broad Balmer components (`Ha_BROAD`, `HBETA_BROAD`, etc.) into
+- Second pass: sums broad Balmer components (`HALPHA_BROAD`, `HBETA_BROAD`, etc.) into
   the narrow totals so the Balmer decrement uses total hydrogen flux.
 
 ### `_extract_posteriors(result)` -> `{name: flux_posterior_array}`
@@ -97,7 +97,7 @@ _SNR_PROTECTED = {
     "NIV_1483", "NIV_1486",
     "NV_1", "NV_2",
     "CIV_1", "CIV_2",
-    "CIII]_1907", "CIII]",
+    "CIII]_1907", "CIII]_1909",
     "CII]_2324", "CII]_2326",
 }
 ```

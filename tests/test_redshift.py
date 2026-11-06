@@ -52,12 +52,12 @@ def _make_spec(
             "Lya": 4.0,
             "CIV_doublet": 1.5,
             "HEII_1640": 1.0,
-            "CIII]": 1.5,
+            "CIII]_1909": 1.5,
             "OII_doublet": 1.0,
             "HBETA": 0.6,
             "OIII_4959": 1.5,
             "OIII_5007": 4.5,
-            "Ha": 3.0,
+            "HALPHA": 3.0,
             "NII_6585": 0.5,
         }
     for name, amp in line_amps.items():
@@ -121,7 +121,7 @@ class TestNoDataTolerance:
         res = fit_redshift(spec, verbose=False)
         assert abs(res.z_best - 8.0) < 0.05
         # The best peak's lines_used must exclude Halpha (out of range).
-        assert "Ha" not in res.peaks[0].lines_used
+        assert "HALPHA" not in res.peaks[0].lines_used
         # And it should rest on at least 3 lines.
         assert res.peaks[0].n_lines_used >= 3
 
@@ -207,11 +207,11 @@ class TestAliasing:
         """
         spec = _make_spec(
             6.1052, grating="G395M",
-            line_amps={"Ha": 4.0, "NII_6585": 0.8},
+            line_amps={"HALPHA": 4.0, "NII_6585": 0.8},
         )
         res = fit_redshift(
             spec,
-            lines=["Ha", "NII_6585", "HBETA", "OIII_4959", "OIII_5007"],
+            lines=["HALPHA", "NII_6585", "HBETA", "OIII_4959", "OIII_5007"],
             verbose=False, refine_dchi2=50.0,
         )
         # There should be more than one peak (truth + alias).
@@ -263,7 +263,7 @@ class TestMinLinesInRange:
         # the reddest is [SII] at z=0.5 -> 1.01 um, all below 2.87 um).
         # So fit_redshift should raise rather than report a spurious peak.
         spec = _make_spec(
-            0.5, grating="G395M", line_amps={"Ha": 2.0},
+            0.5, grating="G395M", line_amps={"HALPHA": 2.0},
         )
         with pytest.raises(RuntimeError, match="No local minimum"):
             fit_redshift(spec, z_min=0.0, z_max=1.0, verbose=False)
@@ -333,7 +333,7 @@ class TestResolveR:
         wave_A = wave_um * 1e4
         flux = np.full_like(wave_A, 0.05)
         for name, amp in [("HBETA", 0.6), ("OIII_4959", 1.5),
-                           ("OIII_5007", 4.5), ("Ha", 3.0)]:
+                           ("OIII_5007", 4.5), ("HALPHA", 3.0)]:
             mu = REST_LINES_A[name] * (1 + z_true)
             sig = mu / (2.355 * 1500.0)
             flux += amp * np.exp(-0.5 * ((wave_A - mu) / sig) ** 2)

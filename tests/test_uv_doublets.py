@@ -38,7 +38,7 @@ def _make_uv_spectrum(
             "CIV_1": 3.0e-17,
             "CIV_2": 1.5e-17,
             "CIII]_1907": 4.0e-17,
-            "CIII]": 2.5e-17,
+            "CIII]_1909": 2.5e-17,
         }
 
     rng = np.random.default_rng(seed)
@@ -97,7 +97,7 @@ class TestConstraintSetFreeMask:
     def test_no_uv_tying(self):
         """With tie_uv_doublets=False, all UV params free except CIII]
         sigma which is always tied to CIII]_1907."""
-        names = ["CIV_1", "CIV_2", "CIII]_1907", "CIII]"]
+        names = ["CIV_1", "CIV_2", "CIII]_1907", "CIII]_1909"]
         nL = 4
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=False)
@@ -131,7 +131,7 @@ class TestConstraintSetFreeMask:
 
     def test_kinematic_tied_free_mask(self):
         """Kinematics-only: secondary amplitude free, centroid/sigma derived."""
-        names = ["CIII]_1907", "CIII]"]
+        names = ["CIII]_1907", "CIII]_1909"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         free = cs.free_mask()
@@ -146,10 +146,10 @@ class TestConstraintSetFreeMask:
 
     def test_blended_doublet_free_mask(self):
         """Blended doublet: secondary amplitude also constrained."""
-        names = ["CIII]_1907", "CIII]"]
+        names = ["CIII]_1907", "CIII]_1909"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True,
-                           blended_doublets={"CIII]"})
+                           blended_doublets={"CIII]_1909"})
         free = cs.free_mask()
         nL = 2
         # Secondary: all 3 params constrained when blended
@@ -228,7 +228,7 @@ class TestConstraintSetFreeMask:
 
     def test_free_count_reduction(self):
         """Tying should reduce the number of free parameters."""
-        names = ["CIV_1", "CIV_2", "CIII]_1907", "CIII]",
+        names = ["CIV_1", "CIV_2", "CIII]_1907", "CIII]_1909",
                  "NIV_1486", "NIV_1483"]
         cs_off = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                                tie_uv_doublets=False)
@@ -332,7 +332,7 @@ class TestConstraintSetApply:
 
     def test_ciii_amplitude_free(self):
         """CIII] amplitude is NOT overwritten (kinematics-only, not blended)."""
-        names = ["CIII]_1907", "CIII]"]
+        names = ["CIII]_1907", "CIII]_1909"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         p = self._make_params(names)
@@ -340,20 +340,20 @@ class TestConstraintSetApply:
         p_out = cs.apply(p)
         nL = 2
         assert p_out[1] == pytest.approx(original_a_sec)
-        lam_ratio = REST_LINES_A["CIII]"] / REST_LINES_A["CIII]_1907"]
+        lam_ratio = REST_LINES_A["CIII]_1909"] / REST_LINES_A["CIII]_1907"]
         assert p_out[nL + 1] == pytest.approx(p_out[nL + 0] * lam_ratio)
         assert p_out[2 * nL + 1] == pytest.approx(p_out[2 * nL + 0] * lam_ratio)
 
     def test_ciii_blended_amplitude_fixed(self):
         """When blended, CIII] amplitude IS overwritten."""
         from jwspecfit.constraints import _INTERCOM_LOW_DENSITY_RATIOS
-        names = ["CIII]_1907", "CIII]"]
+        names = ["CIII]_1907", "CIII]_1909"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True,
-                           blended_doublets={"CIII]"})
+                           blended_doublets={"CIII]_1909"})
         p = self._make_params(names)
         p_out = cs.apply(p)
-        expected_ratio = _INTERCOM_LOW_DENSITY_RATIOS[("CIII]_1907", "CIII]")]
+        expected_ratio = _INTERCOM_LOW_DENSITY_RATIOS[("CIII]_1907", "CIII]_1909")]
         assert p_out[1] == pytest.approx(p_out[0] * expected_ratio)
 
     def test_niv_amplitude_free(self):
@@ -366,7 +366,7 @@ class TestConstraintSetApply:
         assert p_out[1] == pytest.approx(original_a)
 
     def test_apply_is_idempotent(self):
-        names = ["CIV_1", "CIV_2", "CIII]_1907", "CIII]"]
+        names = ["CIV_1", "CIV_2", "CIII]_1907", "CIII]_1909"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         p = self._make_params(names)
@@ -385,7 +385,7 @@ class TestConstraintSetApply:
 
     def test_apply_without_tying_ciii_sigma_tied(self):
         """CIII] sigma always tied even with tie_uv_doublets=False."""
-        names = ["CIII]_1907", "CIII]"]
+        names = ["CIII]_1907", "CIII]_1909"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=False)
         p = self._make_params(names)
@@ -398,7 +398,7 @@ class TestConstraintSetApply:
         assert p_out[2 * nL] == p[2 * nL]
         # Secondary sigma derived from primary
         from jwspecfit.lines import REST_LINES_A
-        lam_ratio = REST_LINES_A["CIII]"] / REST_LINES_A["CIII]_1907"]
+        lam_ratio = REST_LINES_A["CIII]_1909"] / REST_LINES_A["CIII]_1907"]
         expected = p[2 * nL] * lam_ratio
         np.testing.assert_almost_equal(p_out[2 * nL + 1], expected)
 
@@ -426,7 +426,7 @@ class TestExpandFreeToFull:
         assert p_full[2 * nL + 1] == pytest.approx(5.0 * lam_ratio)
 
     def test_round_trip_kinematic_tied(self):
-        names = ["CIII]_1907", "CIII]"]
+        names = ["CIII]_1907", "CIII]_1909"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         free_mask = cs.free_mask()
@@ -439,12 +439,12 @@ class TestExpandFreeToFull:
         assert p_full[nL + 0] == pytest.approx(7630.0)
         assert p_full[2 * nL + 0] == pytest.approx(8.0)
         assert p_full[1] == pytest.approx(2.5)
-        lam_ratio = REST_LINES_A["CIII]"] / REST_LINES_A["CIII]_1907"]
+        lam_ratio = REST_LINES_A["CIII]_1909"] / REST_LINES_A["CIII]_1907"]
         assert p_full[nL + 1] == pytest.approx(7630.0 * lam_ratio)
         assert p_full[2 * nL + 1] == pytest.approx(8.0 * lam_ratio)
 
     def test_mixed_doublets(self):
-        names = ["CIV_1", "CIV_2", "CIII]_1907", "CIII]", "NIV_1486", "NIV_1483"]
+        names = ["CIV_1", "CIV_2", "CIII]_1907", "CIII]_1909", "NIV_1486", "NIV_1483"]
         cs = ConstraintSet(names, tie_nii=False, tie_balmer_to_oiii=False,
                            tie_uv_doublets=True)
         free_mask = cs.free_mask()
@@ -476,7 +476,7 @@ class TestFitLinesUVDoublets:
                 "CIV_1": 3.0e-17,
                 "CIV_2": 1.5e-17,
                 "CIII]_1907": 4.0e-17,
-                "CIII]": 2.5e-17,
+                "CIII]_1909": 2.5e-17,
             },
             R=1000.0,
             noise_level=0.003,
@@ -485,7 +485,7 @@ class TestFitLinesUVDoublets:
     def test_fit_succeeds_with_tying(self, uv_spectrum_civ_ciii):
         result = fit_lines(
             uv_spectrum_civ_ciii, z=3.0, R=1000.0,
-            lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]"],
+            lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]_1909"],
             tie_uv_doublets=True, n_boot=0,
         )
         assert isinstance(result, FitResult)
@@ -494,7 +494,7 @@ class TestFitLinesUVDoublets:
     def test_fit_succeeds_without_tying(self, uv_spectrum_civ_ciii):
         result = fit_lines(
             uv_spectrum_civ_ciii, z=3.0, R=1000.0,
-            lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]"],
+            lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]_1909"],
             tie_uv_doublets=False, n_boot=0,
         )
         assert result.success
@@ -503,7 +503,7 @@ class TestFitLinesUVDoublets:
         """CIV_2 amplitude should be free (fitted independently)."""
         result = fit_lines(
             uv_spectrum_civ_ciii, z=3.0, R=1000.0,
-            lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]"],
+            lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]_1909"],
             tie_uv_doublets=True, n_boot=0,
         )
         civ1 = result.lines["CIV_1"]
@@ -515,11 +515,11 @@ class TestFitLinesUVDoublets:
     def test_ciii_kinematics_tied(self, uv_spectrum_civ_ciii):
         result = fit_lines(
             uv_spectrum_civ_ciii, z=3.0, R=1000.0,
-            lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]"],
+            lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]_1909"],
             tie_uv_doublets=True, n_boot=0,
         )
         c1907 = result.lines["CIII]_1907"]
-        c1909 = result.lines["CIII]"]
+        c1909 = result.lines["CIII]_1909"]
         v_sigma_1907 = c1907.sigma_A / c1907.centroid_A
         v_sigma_1909 = c1909.sigma_A / c1909.centroid_A
         assert v_sigma_1907 == pytest.approx(v_sigma_1909, rel=1e-4)
@@ -527,7 +527,7 @@ class TestFitLinesUVDoublets:
     def test_bootstrap_with_tying(self, uv_spectrum_civ_ciii):
         result = fit_lines(
             uv_spectrum_civ_ciii, z=3.0, R=1000.0,
-            lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]"],
+            lines=["CIV_1", "CIV_2", "CIII]_1907", "CIII]_1909"],
             tie_uv_doublets=True, n_boot=20, n_jobs=1,
         )
         assert result.success
@@ -736,7 +736,7 @@ class TestBlendedDoubletRatiosMatchAtomicData:
     @pytest.mark.parametrize(
         ("pri", "sec", "element", "ion", "wave_pri", "wave_sec"),
         [
-            ("CIII]_1907", "CIII]", "C", 3, 1907, 1909),
+            ("CIII]_1907", "CIII]_1909", "C", 3, 1907, 1909),
             ("NIV_1486", "NIV_1483", "N", 4, 1486, 1483),
             ("SiIII_1", "SiIII_2", "Si", 3, 1883, 1892),
         ],
@@ -756,25 +756,25 @@ class TestBlendedDoubletRatiosMatchAtomicData:
 class TestFixBlendedRatiosSwitch:
     """``fix_blended_ratios=False`` keeps an unresolved doublet's ratio free."""
 
-    _LINES = ["CIII]_1907", "CIII]"]
+    _LINES = ["CIII]_1907", "CIII]_1909"]
 
     def _spec(self):
         # 1906.7/1908.7 at R=1000: 2.1 A apart, below the 4.71 sigma_inst cut.
         return _make_uv_spectrum(
-            z=3.0, lines_to_inject={"CIII]_1907": 3e-17, "CIII]": 1.5e-17},
+            z=3.0, lines_to_inject={"CIII]_1907": 3e-17, "CIII]_1909": 1.5e-17},
             R=1000.0, noise_level=0.002,
         )
 
     def test_default_fixes_the_ratio(self):
         res = fit_lines(self._spec(), z=3.0, R=1000.0, lines=self._LINES, n_boot=0)
-        assert res.constraints.blended_doublets == {"CIII]"}
+        assert res.constraints.blended_doublets == {"CIII]_1909"}
 
     def test_switch_frees_the_ratio(self):
         res = fit_lines(self._spec(), z=3.0, R=1000.0, lines=self._LINES, n_boot=0,
                         fix_blended_ratios=False)
         assert not res.constraints.blended_doublets
         assert res.constraints.free_mask()[1]               # 1909 amplitude free
-        ratio = res.lines["CIII]"].flux / res.lines["CIII]_1907"].flux
+        ratio = res.lines["CIII]_1909"].flux / res.lines["CIII]_1907"].flux
         assert ratio == pytest.approx(0.5, abs=0.1)         # injected, not 0.67
 
     def test_mcmc_passes_the_switch(self):

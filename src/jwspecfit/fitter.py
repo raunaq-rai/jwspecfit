@@ -22,7 +22,13 @@ from .constraints import ConstraintSet
 from .continuum import fit_continuum
 from .io import Spectrum
 from .limits import flux_noise_for_lines, resolution_of
-from .lines import REST_LINES_A, get_line_list, observable_lines
+from .lines import (
+    REST_LINES_A,
+    LineDict,
+    canonical_line_names,
+    get_line_list,
+    observable_lines,
+)
 from .models import asymmetric_gaussian, build_model, gaussian_binned, pixel_weight
 from .resolution import resolve_R, sigma_inst_A
 
@@ -127,6 +133,20 @@ class LineResult:
         return self.snr_int_err
 
 
+def _canonicalise_result_names(result) -> None:
+    """Store a result's lines under their current names (see LEGACY_LINE_NAMES).
+
+    Results built before a key was renamed (saved files, older code) are
+    brought up to date, and ``result.lines`` becomes a :class:`LineDict` so
+    lookups by an old name still resolve, with a warning.
+    """
+    result.lines = LineDict(result.lines)
+    for name, lr in result.lines.items():
+        if getattr(lr, "name", name) != name:
+            lr.name = name
+    result.line_names = canonical_line_names(list(result.line_names), warn=False)
+
+
 @dataclass
 class FitResult:
     """Container for a complete line-fit result.
@@ -166,6 +186,9 @@ class FitResult:
     constraints: ConstraintSet | None = None
     success: bool = True
     lya_params: np.ndarray | None = None  # [A_peak, mu, sigma, alpha]
+
+    def __post_init__(self) -> None:
+        _canonicalise_result_names(self)
 
     def flux_upper_limit(
         self,
@@ -430,6 +453,7 @@ def fit_lines(
     -------
     FitResult
     """
+    lines = canonical_line_names(lines)
     if continuum is not None:
         continuum = np.asarray(continuum, dtype=float)
         if continuum.shape != spectrum.flux_ujy.shape:

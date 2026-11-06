@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .lines import REST_LINES_A
+from .lines import REST_LINES_A, canonical_line_names
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ _INTERCOM_LOW_DENSITY_RATIOS: dict[tuple[str, str], float] = {
     # temperature dependence at all.  Verified against PyNEB at
     # ne = 1e1, 1e3 and 1e6: 0.4016 to four figures throughout.
     ("OIII_1666", "OIII_1661"): 0.4016,
-    ("CIII]_1907", "CIII]"):     0.65,   # Keenan+1992
+    ("CIII]_1907", "CIII]_1909"):     0.65,   # Keenan+1992
     ("CII]_2326", "CII]_2324"):  0.49,   # A-value ratio, same upper level
     ("NIV_1486",   "NIV_1483"):  1.48,   # low-density limit (PyNEB); drops below 1 at ne > 5e4
     ("SiIII_1",   "SiIII_2"):   0.67,
@@ -115,6 +115,14 @@ class ConstraintSet:
     ciii_doublet_ratio: float | None = None
     fix_branching_ratios: bool = True
 
+    def __post_init__(self) -> None:
+        # Constraints saved before a line key was renamed carry the old name.
+        self.line_names = canonical_line_names(list(self.line_names), warn=False)
+        if self.blended_doublets is not None:
+            self.blended_doublets = canonical_line_names(
+                set(self.blended_doublets), warn=False,
+            )
+
     def apply(self, params: np.ndarray) -> np.ndarray:
         """Apply constraints to a parameter vector (in-place copy).
 
@@ -145,7 +153,7 @@ class ConstraintSet:
             # Width tying: Balmer lines share OIII velocity dispersion.
             # NII width is free (tied only via the doublet constraint).
             width_targets = [
-                "Ha", "HBETA", "HGAMMA", "HDELTA",
+                "HALPHA", "HBETA", "HGAMMA", "HDELTA",
                 "HEPSILON", "H8", "H9", "H10",
             ]
             for name in width_targets:
@@ -156,7 +164,7 @@ class ConstraintSet:
 
             # Centroid tying: Balmer lines only (not NII — its centroid is free).
             centroid_targets = [
-                "Ha", "HBETA", "HGAMMA", "HDELTA",
+                "HALPHA", "HBETA", "HGAMMA", "HDELTA",
                 "HEPSILON", "H8", "H9", "H10",
             ]
             for name in centroid_targets:
@@ -167,7 +175,7 @@ class ConstraintSet:
 
         # --- Tie broad centroids to their narrow counterparts ---
         _BROAD_PAIRS = [
-            ("Ha_BROAD", "Ha"), ("Ha_BROAD2", "Ha"),
+            ("HALPHA_BROAD", "HALPHA"), ("HALPHA_BROAD2", "HALPHA"),
             ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
             ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
             ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
@@ -242,7 +250,7 @@ class ConstraintSet:
                 ("NV_1",      "NV_2"),
                 ("CIV_1",     "CIV_2"),
                 ("OIII_1666", "OIII_1661"),
-                ("CIII]_1907", "CIII]"),
+                ("CIII]_1907", "CIII]_1909"),
                 ("NIV_1486",   "NIV_1483"),
                 ("SiIII_1",   "SiIII_2"),
                 ("CII]_2326", "CII]_2324"),
@@ -260,7 +268,7 @@ class ConstraintSet:
                     # assumed density).
                     if (pri, sec) == ("NIV_1486", "NIV_1483") and self.niv_doublet_ratio is not None:
                         p[i_sec] = p[i_pri] * self.niv_doublet_ratio
-                    elif (pri, sec) == ("CIII]_1907", "CIII]") and self.ciii_doublet_ratio is not None:
+                    elif (pri, sec) == ("CIII]_1907", "CIII]_1909") and self.ciii_doublet_ratio is not None:
                         p[i_sec] = p[i_pri] * self.ciii_doublet_ratio
                     # Fix amplitude for unresolved doublets.
                     elif sec in _blended:
@@ -308,7 +316,7 @@ class ConstraintSet:
         # Members of these doublets always share the same velocity width,
         # even when tie_uv_doublets is False.
         _ALWAYS_TIE_WIDTH = [
-            ("CIII]_1907", "CIII]"),
+            ("CIII]_1907", "CIII]_1909"),
         ]
         for pri, sec in _ALWAYS_TIE_WIDTH:
             if pri in idx and sec in idx:
@@ -354,7 +362,7 @@ class ConstraintSet:
         if self.tie_balmer_to_oiii and "OIII_5007" in idx:
             # Width tied for Balmer lines only (NII width is free).
             width_targets = [
-                "Ha", "HBETA", "HGAMMA", "HDELTA",
+                "HALPHA", "HBETA", "HGAMMA", "HDELTA",
                 "HEPSILON", "H8", "H9", "H10",
             ]
             for name in width_targets:
@@ -363,7 +371,7 @@ class ConstraintSet:
 
             # Centroid tied for Balmer lines only (NII centroid stays free).
             centroid_targets = [
-                "Ha", "HBETA", "HGAMMA", "HDELTA",
+                "HALPHA", "HBETA", "HGAMMA", "HDELTA",
                 "HEPSILON", "H8", "H9", "H10",
             ]
             for name in centroid_targets:
@@ -372,7 +380,7 @@ class ConstraintSet:
 
         # Broad centroids tied to narrow.
         _BROAD_PAIRS = [
-            ("Ha_BROAD", "Ha"), ("Ha_BROAD2", "Ha"),
+            ("HALPHA_BROAD", "HALPHA"), ("HALPHA_BROAD2", "HALPHA"),
             ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
             ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
             ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
@@ -409,7 +417,7 @@ class ConstraintSet:
                 ("NV_1",      "NV_2"),
                 ("CIV_1",     "CIV_2"),
                 ("OIII_1666", "OIII_1661"),
-                ("CIII]_1907", "CIII]"),
+                ("CIII]_1907", "CIII]_1909"),
                 ("NIV_1486",   "NIV_1483"),
                 ("SiIII_1",   "SiIII_2"),
                 ("CII]_2326", "CII]_2324"),
@@ -424,7 +432,7 @@ class ConstraintSet:
                     # Amplitude derived when explicit ratio is set.
                     if (pri, sec) == ("NIV_1486", "NIV_1483") and self.niv_doublet_ratio is not None:
                         free[i_sec] = False
-                    elif (pri, sec) == ("CIII]_1907", "CIII]") and self.ciii_doublet_ratio is not None:
+                    elif (pri, sec) == ("CIII]_1907", "CIII]_1909") and self.ciii_doublet_ratio is not None:
                         free[i_sec] = False
                     elif sec in _blended:
                         free[i_sec] = False
@@ -452,7 +460,7 @@ class ConstraintSet:
 
         # Doublet-internal width tying (always active).
         _ALWAYS_TIE_WIDTH = [
-            ("CIII]_1907", "CIII]"),
+            ("CIII]_1907", "CIII]_1909"),
         ]
         for pri, sec in _ALWAYS_TIE_WIDTH:
             if pri in idx and sec in idx:

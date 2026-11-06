@@ -152,7 +152,7 @@ By default Hα, Hβ, Hγ and Hδ all get the broad component. Pass
 
 ```python
 result = jwspecfit.fit_with_broad(
-    spec, z=2.0, fit_balmer_broad=True, balmer_broad_lines=["Ha"],
+    spec, z=2.0, fit_balmer_broad=True, balmer_broad_lines=["HALPHA"],
 )
 ```
 
@@ -169,7 +169,7 @@ ISM absorption, DLA flanks):
 ```python
 uv_lines = [
     "NV_1", "NV_2", "CIV_1", "CIV_2", "HEII_1640",
-    "CIII]_1907", "CIII]",
+    "CIII]_1907", "CIII]_1909",
     "abs_SiII1260", "abs_CII1334", "abs_SiIV1394", "abs_SiIV1403",
 ]
 result = jwspecfit.fit_lines(spec, z=6.0, lines=uv_lines)

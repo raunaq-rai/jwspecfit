@@ -118,7 +118,7 @@ class TestTying:
 
     def test_members_follow_the_uv_width_anchor(self):
         """CIII] sets the UV width; the members inherit its final value."""
-        names = ["CIII]_1907", "CIII]", *MEMBERS]
+        names = ["CIII]_1907", "CIII]_1909", *MEMBERS]
         cs = self._cs(names)
         nL = len(names)
         p = np.zeros(3 * nL)
@@ -133,7 +133,7 @@ class TestTying:
         """The JAX likelihood's tying ops reproduce ConstraintSet.apply."""
         from jwspecmcmc.jax_likelihood import _compile_tying_ops
 
-        names = ["CIII]_1907", "CIII]", "NIV_1486", "NIV_1483", *MEMBERS]
+        names = ["CIII]_1907", "CIII]_1909", "NIV_1486", "NIV_1483", *MEMBERS]
         cs = self._cs(names)
         rng = np.random.default_rng(0)
         p = rng.uniform(1.0, 5.0, 3 * len(names))

@@ -18,6 +18,8 @@ from typing import Any
 
 import numpy as np
 
+from jwspecfit.lines import canonical_line_keys
+
 logger = logging.getLogger(__name__)
 
 # Default electron density fallback (cm^-3).
@@ -1931,6 +1933,7 @@ def compute_ionic_abundances(
     dict
         Ionic abundances, e.g. ``{"O+/H+": val, "O++/H+": val, ...}``.
     """
+    fluxes = canonical_line_keys(fluxes)
     ionic = {}
     Hb = fluxes.get("HBETA", 0.0)
     if Hb <= 0:
@@ -2017,7 +2020,7 @@ def compute_ionic_abundances(
 
     # C2+/H+ from CIII] 1907 + 1909 — intermediate zone (Te_mid, ne_md)
     _c1907 = fluxes.get("CIII]_1907", 0.0)
-    _c1909 = fluxes.get("CIII]", 0.0)
+    _c1909 = fluxes.get("CIII]_1909", 0.0)
     if _c1907 > 0 and _c1909 > 0:
         ionic["C++/H+"] = _ionic_abundance("C", 3, _c1907 + _c1909, Hb, Te_mid, ne_md, [1907, 1909])
     elif _c1907 > 0:

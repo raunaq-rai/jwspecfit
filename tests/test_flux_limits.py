@@ -48,7 +48,7 @@ def synthetic_fit():
     lam_A = wave * 1e4
     flux = np.full_like(wave, 0.05)
     for name, amp in {
-        "HBETA": 2.0, "OIII_5007": 6.0, "OIII_4959": 2.0, "Ha": 6.0,
+        "HBETA": 2.0, "OIII_5007": 6.0, "OIII_4959": 2.0, "HALPHA": 6.0,
     }.items():
         lam_obs = REST_LINES_A[name] * (1.0 + z)
         s_inst = sigma_inst_A(np.array([lam_obs * 1e-4]), grating="G395M")[0]
@@ -61,7 +61,7 @@ def synthetic_fit():
     )
     return fit_lines(
         spec, z=z,
-        lines=["HBETA", "OIII_5007", "OIII_4959", "OIII_4363", "Ha", "NII_6585"],
+        lines=["HBETA", "OIII_5007", "OIII_4959", "OIII_4363", "HALPHA", "NII_6585"],
         n_boot=60,
     )
 
@@ -191,7 +191,7 @@ class TestAssumedWidth:
         Uses one detected and one undetected line: the tied lines all share
         one width, so in the full set the undetected one cannot move the median.
         """
-        pair = {n: synthetic_fit.lines[n] for n in ("Ha", "OIII_4363")}
+        pair = {n: synthetic_fit.lines[n] for n in ("HALPHA", "OIII_4363")}
         loose = intrinsic_sigma_kms(pair, grating="G395M", snr_min=0.0, min_lines=1)
         strict = intrinsic_sigma_kms(pair, grating="G395M", snr_min=5.0, min_lines=1)
         assert loose < strict
@@ -247,14 +247,14 @@ class TestAssumedWidth:
             )
         narrow = 2.0 * s_inst
         lines = {
-            "Ha": _lr("Ha", narrow),
+            "HALPHA": _lr("HALPHA", narrow),
             "HBETA": _lr("HBETA", narrow),
-            "Ha_BROAD": _lr("Ha_BROAD", 20.0 * s_inst),
+            "HALPHA_BROAD": _lr("HALPHA_BROAD", 20.0 * s_inst),
             "Lya": _lr("Lya", 20.0 * s_inst),
         }
         both = intrinsic_sigma_kms(lines, grating="G395M")
         narrow_only = intrinsic_sigma_kms(
-            {k: v for k, v in lines.items() if k in ("Ha", "HBETA")},
+            {k: v for k, v in lines.items() if k in ("HALPHA", "HBETA")},
             grating="G395M",
         )
         assert both == pytest.approx(narrow_only)

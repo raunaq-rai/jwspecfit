@@ -172,7 +172,7 @@ class TestBalmerBroadLines:
 
     def test_subset_is_ordered_and_deduplicated(self):
         """Caller order must not change the parameter vector."""
-        assert _resolve_balmer_broad_lines(["HBETA", "Ha", "Ha"]) == ["Ha", "HBETA"]
+        assert _resolve_balmer_broad_lines(["HBETA", "HALPHA", "HALPHA"]) == ["HALPHA", "HBETA"]
 
     @pytest.mark.parametrize("bad", [["HEPSILON"], ["OIII_5007"], []])
     def test_rejects_unknown_or_empty(self, bad):
@@ -180,12 +180,12 @@ class TestBalmerBroadLines:
             _resolve_balmer_broad_lines(bad)
 
     def test_add_broad_lines_subset(self):
-        narrow = ["Ha", "NII_6585", "HBETA", "HGAMMA", "HDELTA"]
-        out = _add_broad_lines(narrow, "both", balmer_broad_lines=["Ha"])
-        assert [n for n in out if "_BROAD" in n] == ["Ha_BROAD", "Ha_BROAD2"]
+        narrow = ["HALPHA", "NII_6585", "HBETA", "HGAMMA", "HDELTA"]
+        out = _add_broad_lines(narrow, "both", balmer_broad_lines=["HALPHA"])
+        assert [n for n in out if "_BROAD" in n] == ["HALPHA_BROAD", "HALPHA_BROAD2"]
 
     def test_add_broad_lines_default_unchanged(self):
-        out = _add_broad_lines(["Ha", "HBETA", "HGAMMA", "HDELTA"], "broad1")
+        out = _add_broad_lines(["HALPHA", "HBETA", "HGAMMA", "HDELTA"], "broad1")
         assert [n for n in out if "_BROAD" in n] == [
             f"{n}_BROAD" for n in BROAD_CANDIDATES
         ]
@@ -194,10 +194,10 @@ class TestBalmerBroadLines:
         z = 5.0
         wave_um = np.linspace(2.0, 5.0, 3000)
         both = _balmer_pixel_mask(wave_um, z)
-        ha = _balmer_pixel_mask(wave_um, z, lines=("Ha",))
+        ha = _balmer_pixel_mask(wave_um, z, lines=("HALPHA",))
         hb_obs = REST_LINES_A["HBETA"] * (1.0 + z) * 1e-4
         assert np.array_equal(
-            both, _balmer_pixel_mask(wave_um, z, lines=("Ha", "HBETA"))
+            both, _balmer_pixel_mask(wave_um, z, lines=("HALPHA", "HBETA"))
         )
         assert 0 < ha.sum() < both.sum()
         assert not np.any(ha & (np.abs(wave_um - hb_obs) < 0.01))
@@ -212,14 +212,14 @@ class TestBalmerBroadLines:
     def test_ha_only_fits_no_other_broad_balmer(self, prism_spectrum):
         result = fit_with_broad(
             prism_spectrum, z=6.0, grating="PRISM",
-            fit_balmer_broad=True, balmer_broad_lines=["Ha"],
+            fit_balmer_broad=True, balmer_broad_lines=["HALPHA"],
             n_boot=0, n_boot_bic=0, snr_threshold=0.0,
         )
         for variant in ("broad1", "broad2", "both"):
             broad = {
                 n for n in result.all_fits[variant].line_names if "_BROAD" in n
             }
-            assert broad and broad <= {"Ha_BROAD", "Ha_BROAD2"}
+            assert broad and broad <= {"HALPHA_BROAD", "HALPHA_BROAD2"}
 
     def test_bootstrap_fits_receive_subset(self, grating_spectrum, monkeypatch):
         """Every broad fit, bootstrap iterations included, sees the subset."""
@@ -241,21 +241,21 @@ class TestBalmerBroadLines:
         monkeypatch.setattr(broad, "_fit_model_variant", spy)
         fit_with_broad(
             grating_spectrum, z=5.0, grating="G395M",
-            fit_balmer_broad=True, balmer_broad_lines=["Ha"],
+            fit_balmer_broad=True, balmer_broad_lines=["HALPHA"],
             n_boot=0, n_boot_bic=2, n_jobs=1, snr_threshold=0.0,
         )
         # 3 variants x 2 bootstrap draws + 3 real-data fits.
         assert len(seen) == 9
-        assert all(s == ["Ha"] for s in seen)
+        assert all(s == ["HALPHA"] for s in seen)
 
     def test_snr_gate_uses_requested_line(self, prism_spectrum):
         """An Hβ-only test is gated on Hβ's SNR, not Hα's."""
         narrow = fit_with_broad(
             prism_spectrum, z=6.0, grating="PRISM", n_boot=0,
         ).best_fit
-        if not {"Ha", "HBETA"} <= narrow.lines.keys():
+        if not {"HALPHA", "HBETA"} <= narrow.lines.keys():
             pytest.skip("needs both Hα and Hβ in the fit")
-        ha, hb = narrow.lines["Ha"].snr, narrow.lines["HBETA"].snr
+        ha, hb = narrow.lines["HALPHA"].snr, narrow.lines["HBETA"].snr
         if not ha > hb:
             pytest.skip("needs Hα detected more strongly than Hβ")
         kw = dict(
@@ -263,7 +263,7 @@ class TestBalmerBroadLines:
             n_boot=0, n_boot_bic=0, snr_threshold=0.5 * (ha + hb),
         )
         hb_only = fit_with_broad(prism_spectrum, balmer_broad_lines=["HBETA"], **kw)
-        ha_only = fit_with_broad(prism_spectrum, balmer_broad_lines=["Ha"], **kw)
+        ha_only = fit_with_broad(prism_spectrum, balmer_broad_lines=["HALPHA"], **kw)
         assert np.isnan(hb_only.bic_broad1)
         assert np.isfinite(ha_only.bic_broad1)
 
@@ -291,6 +291,6 @@ class TestBalmerBroadLines:
         with pytest.raises(_Captured) as exc:
             getattr(importlib.import_module(module), entry)(
                 prism_spectrum, z=6.0,
-                fit_balmer_broad=True, balmer_broad_lines=["Ha"],
+                fit_balmer_broad=True, balmer_broad_lines=["HALPHA"],
             )
-        assert exc.value.args[0] == ["Ha"]
+        assert exc.value.args[0] == ["HALPHA"]

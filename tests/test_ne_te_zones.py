@@ -168,7 +168,7 @@ class TestIonicWiring:
         fluxes = {
             "HBETA": 100.0,
             "NIII_1749": 5.0, "NIII_1752": 4.0,
-            "CIII]_1907": 8.0, "CIII]": 6.0,
+            "CIII]_1907": 8.0, "CIII]_1909": 6.0,
         }
         lo = compute_ionic_abundances(
             fluxes, 2.0e4, 1.2e4, 1e2, ne_mid=1e2, Te_int=1.3e4,
@@ -206,7 +206,7 @@ class TestIonicWiring:
         # use the supplied O²⁺-zone density (z-fallback mid), NOT ne_low.
         fluxes = {
             "HBETA": 100.0,
-            "CIII]_1907": 8.0, "CIII]": 6.0,
+            "CIII]_1907": 8.0, "CIII]_1909": 6.0,
             "NIII_1749": 5.0, "NIII_1752": 4.0,
         }
         # ne_mid=None, ne_low=600, ne_Opp=6e4 (a z-fallback mid value).
@@ -557,8 +557,8 @@ class TestMultiNeWiring:
         from jwspecabund._core import _compute_multi_ne
 
         # CIII] doublet present, no [Ar IV] -> ne_Opp comes from CIII].
-        fluxes = {"CIII]_1907": 1.5, "CIII]": 1.0}
-        errors = {"CIII]_1907": 0.02, "CIII]": 0.02}
+        fluxes = {"CIII]_1907": 1.5, "CIII]_1909": 1.0}
+        errors = {"CIII]_1907": 0.02, "CIII]_1909": 0.02}
         _, ne_mid, _, ne_Opp, _ = _compute_multi_ne(
             fluxes, errors=errors, snr_ne=3.0, z=0.0,
         )

@@ -23,7 +23,7 @@ import numpy as np
 from scipy.optimize import lsq_linear
 
 from .io import Spectrum
-from .lines import REST_LINES_A
+from .lines import REST_LINES_A, canonical_line_names
 from .resolution import R_from_pixels, resolve_R
 
 # NumPy 2.0 renamed ``np.trapz`` to ``np.trapezoid`` and removed the old
@@ -38,13 +38,13 @@ DEFAULT_LINES: list[str] = [
     "Lya",
     "CIV_doublet",
     "HEII_1640",
-    "CIII]",
+    "CIII]_1909",
     "OII_doublet",
     "NeIII_3869",
     "HBETA",
     "OIII_4959",
     "OIII_5007",
-    "Ha",
+    "HALPHA",
 ]
 
 
@@ -520,6 +520,7 @@ def fit_redshift(
     """
     if lines is None:
         lines = list(DEFAULT_LINES)
+    lines = canonical_line_names(lines)
     for name in lines:
         if name not in REST_LINES_A:
             raise KeyError(f"Unknown line name: {name!r}")

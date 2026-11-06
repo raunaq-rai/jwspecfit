@@ -61,7 +61,7 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
         lam_o3 = REST_LINES_A["OIII_5007"]
 
         width_targets = [
-            "Ha", "HBETA", "HGAMMA", "HDELTA",
+            "HALPHA", "HBETA", "HGAMMA", "HDELTA",
             "HEPSILON", "H8", "H9", "H10",
         ]
         for name in width_targets:
@@ -70,7 +70,7 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
                 ops.append((2 * nL + idx[name], 2 * nL + i_o3, ratio))
 
         centroid_targets = [
-            "Ha", "HBETA", "HGAMMA", "HDELTA",
+            "HALPHA", "HBETA", "HGAMMA", "HDELTA",
             "HEPSILON", "H8", "H9", "H10",
         ]
         for name in centroid_targets:
@@ -80,7 +80,7 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
 
     # --- Broad centroid tying ---
     _BROAD_PAIRS = [
-        ("Ha_BROAD", "Ha"), ("Ha_BROAD2", "Ha"),
+        ("HALPHA_BROAD", "HALPHA"), ("HALPHA_BROAD2", "HALPHA"),
         ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
         ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
         ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
@@ -139,7 +139,7 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
             ("NV_1", "NV_2"),
             ("CIV_1", "CIV_2"),
             ("OIII_1666", "OIII_1661"),
-            ("CIII]_1907", "CIII]"),
+            ("CIII]_1907", "CIII]_1909"),
             ("NIV_1486", "NIV_1483"),
             ("SiIII_1", "SiIII_2"),
         ]
@@ -182,7 +182,7 @@ def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
 
     # --- Always-tie-width doublets (unconditional) ---
     _ALWAYS_TIE_WIDTH = [
-        ("CIII]_1907", "CIII]"),
+        ("CIII]_1907", "CIII]_1909"),
     ]
     for pri, sec in _ALWAYS_TIE_WIDTH:
         if pri in idx and sec in idx:

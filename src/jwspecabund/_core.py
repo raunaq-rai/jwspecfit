@@ -15,7 +15,7 @@ import numpy as np
 from tqdm import tqdm
 
 from jwspecfit.fitter import FitResult
-from jwspecfit.lines import REST_LINES_A
+from jwspecfit.lines import REST_LINES_A, LineDict, canonical_line_name
 
 from .dust import (
     compute_Av_balmer_pair,
@@ -50,7 +50,7 @@ _LINE_WAVES: dict[str, float] = {
 }
 
 # Balmer lines whose broad components should be summed with the narrow.
-_BALMER_LINES = {"Ha", "HBETA", "HGAMMA", "HDELTA"}
+_BALMER_LINES = {"HALPHA", "HBETA", "HGAMMA", "HDELTA"}
 
 # Lines that must never be SNR-filtered (required for Te computation
 # and flux normalisation).
@@ -67,7 +67,7 @@ _SNR_PROTECTED = {
     "NIV_1483", "NIV_1486",
     "NV_1", "NV_2",
     "CIV_1", "CIV_2",
-    "CIII]_1907", "CIII]",
+    "CIII]_1907", "CIII]_1909",
     "CII]_2324", "CII]_2326",
 }
 
@@ -113,9 +113,10 @@ def _extract_fluxes(result: Any) -> tuple[dict[str, float], dict[str, float], bo
     fluxes = {}
     errors = {}
     is_mcmc = False
+    lines = LineDict(result.lines)  # results pickled before a key was renamed
 
     # First pass: extract narrow components.
-    for name, lr in result.lines.items():
+    for name, lr in lines.items():
         if "_BROAD" in name:
             continue
         fluxes[name] = lr.flux
@@ -126,7 +127,7 @@ def _extract_fluxes(result: Any) -> tuple[dict[str, float], dict[str, float], bo
             errors[name] = lr.flux_err
 
     # Second pass: add broad Balmer components to narrow totals.
-    for name, lr in result.lines.items():
+    for name, lr in lines.items():
         if "_BROAD" not in name:
             continue
         base_name = name.replace("_BROAD", "")
@@ -166,14 +167,15 @@ def _extract_posteriors(result: Any) -> dict[str, np.ndarray]:
         ``{line_name: flux_posterior_array}``.
     """
     posteriors = {}
-    for name, lr in result.lines.items():
+    lines = LineDict(result.lines)  # results pickled before a key was renamed
+    for name, lr in lines.items():
         if "_BROAD" in name:
             continue
         if hasattr(lr, "flux_posterior") and lr.flux_posterior is not None:
             posteriors[name] = lr.flux_posterior
 
     # Add broad Balmer posteriors sample-by-sample.
-    for name, lr in result.lines.items():
+    for name, lr in lines.items():
         if "_BROAD" not in name:
             continue
         base_name = name.replace("_BROAD", "")
@@ -594,11 +596,11 @@ def _compute_multi_ne(
 
     # Mid-ionisation zone: CIII] 1907/1909 (~24 eV).
     ne_mid = None
-    if "CIII]_1907" in fluxes and "CIII]" in fluxes:
-        if _doublet_snr_ok("CIII]_1907", "CIII]", fluxes, errors, snr_ne, combined=True):
+    if "CIII]_1907" in fluxes and "CIII]_1909" in fluxes:
+        if _doublet_snr_ok("CIII]_1907", "CIII]_1909", fluxes, errors, snr_ne, combined=True):
             try:
                 ne_mid = compute_ne_CIII(
-                    fluxes["CIII]_1907"], fluxes["CIII]"], Te_guess=te_int,
+                    fluxes["CIII]_1907"], fluxes["CIII]_1909"], Te_guess=te_int,
                 )
                 logger.info("n_e(mid) from CIII] = %.0f cm^-3.", ne_mid)
             except Exception as exc:
@@ -944,7 +946,7 @@ def _compute_CppOpp_uv_raw(
 
     try:
         cpp_opp, note = compute_CppOpp_uv(
-            fluxes.get("CIII]_1907", 0.0), fluxes.get("CIII]", 0.0), Te, ne,
+            fluxes.get("CIII]_1907", 0.0), fluxes.get("CIII]_1909", 0.0), Te, ne,
             flux_1661=fluxes.get("OIII_1661", 0.0),
             flux_1666=fluxes.get("OIII_1666", 0.0),
             Te_C=Te_C, ne_C=ne_C,
@@ -1828,7 +1830,7 @@ def _compute_ionic_upper_limits(
         ("N++/H+",  "N", 3, list(NIII_MULTIPLET), list(NIII_MULTIPLET.values()), Te_mid, ne_mid),
         ("N+++/H+", "N", 4, ["NIV_1483", "NIV_1486"],   [1483, 1486], Te_high, ne_high),
         ("C+/H+",   "C", 2, ["CII]_2324", "CII]_2326"], [2323, 2325, 2326, 2327, 2328], Te_low, ne_low),
-        ("C++/H+",  "C", 3, ["CIII]_1907", "CIII]"],    [1907, 1909], Te_mid, ne_mid),
+        ("C++/H+",  "C", 3, ["CIII]_1907", "CIII]_1909"],    [1907, 1909], Te_mid, ne_mid),
         ("C+++/H+", "C", 4, ["CIV_1", "CIV_2"],         [1548, 1551], Te_high, ne_high),
         ("Ne++/H+", "Ne", 3, ["NeIII_3869"], [3869],     Te_high, ne_opp),
         ("S+/H+",   "S", 2, ["SII_6718", "SII_6732"], [6718, 6732], Te_low, ne_low),
@@ -2132,7 +2134,7 @@ def _build_diagnostics(
         )
 
     # ne(mid)
-    _has_ciii = "CIII]_1907" in fluxes and "CIII]" in fluxes
+    _has_ciii = "CIII]_1907" in fluxes and "CIII]_1909" in fluxes
     if ne_mid is not None:
         diag["ne(mid)"] = f"CIII] 1907/1909 doublet ratio -> {ne_mid:.0f} cm^-3"
     elif _has_ciii:
@@ -3861,7 +3863,7 @@ def compute_abundances(
         Denominator line for the multi-Balmer A_V derivation.  Only
         Balmer lines **bluer than** the anchor (and above *snr_balmer*)
         are ratioed against it.  ``"HBETA"`` (default) therefore uses
-        Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ — **Hα is excluded**.  ``"Ha"`` uses
+        Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ — **Hα is excluded**.  ``"HALPHA"`` uses
         every other Balmer line (Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα).
         So anchor on Hα when you want Hα included, on Hβ when you don't.
         Ignored when *Av* is supplied directly, when *balmer_pair* is
@@ -3890,9 +3892,9 @@ def compute_abundances(
     balmer_pair : tuple of str or None
         Force the A_V derivation onto a single Balmer decrement instead
         of the multi-line fit, given as ``(numerator, denominator)`` line
-        names from the ladder (``"Ha"``, ``"HBETA"``, ``"HGAMMA"``,
+        names from the ladder (``"HALPHA"``, ``"HBETA"``, ``"HGAMMA"``,
         ``"HDELTA"``, ``"H9"``, ``"H10"``).  For example
-        ``balmer_pair=("Ha", "HBETA")`` uses only Hα/Hβ — useful to avoid
+        ``balmer_pair=("HALPHA", "HBETA")`` uses only Hα/Hβ — useful to avoid
         low-SNR Balmer lines.  Overrides *balmer_anchor* / *snr_balmer*
         for the A_V step.  Ignored when *Av* is supplied directly.
         ``None`` (default) keeps the multi-Balmer fit.
@@ -4241,6 +4243,10 @@ def compute_abundances(
     AbundanceResult
         Chemical abundance measurement.
     """
+    balmer_anchor = canonical_line_name(balmer_anchor)
+    if balmer_pair is not None:
+        balmer_pair = tuple(canonical_line_name(n) for n in balmer_pair)
+
     # --- Fail-fast validation of string-choice inputs ---
     # Every choice parameter raises here with the valid options rather
     # than falling back silently or failing deep inside the pipeline.
@@ -4387,7 +4393,7 @@ def compute_abundances(
                     anchor=balmer_anchor, **dust_kwargs,
                 )
             _ANCHOR_LABELS = {
-                "Ha": "Hα", "HBETA": "Hβ", "HGAMMA": "Hγ",
+                "HALPHA": "Hα", "HBETA": "Hβ", "HGAMMA": "Hγ",
                 "HDELTA": "Hδ", "H9": "H9", "H10": "H10",
             }
             anchor_label = _ANCHOR_LABELS.get(
@@ -4792,7 +4798,7 @@ def compute_abundances(
                 + ", ".join(parts)
             )
         else:
-            anchor_label = "Hα" if _balmer_info.get("anchor") == "Ha" else "Hβ"
+            anchor_label = "Hα" if _balmer_info.get("anchor") == "HALPHA" else "Hβ"
             parts = []
             for r in _balmer_info["individual"]:
                 parts.append(

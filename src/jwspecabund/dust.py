@@ -11,6 +11,12 @@ import logging
 
 import numpy as np
 
+from jwspecfit.lines import (
+    canonical_line_keys,
+    canonical_line_name,
+    canonical_line_names,
+)
+
 logger = logging.getLogger(__name__)
 
 # Intrinsic Balmer decrements (Case B, T=10^4 K, n_e=100 cm^-3).
@@ -349,7 +355,7 @@ def compute_Av_from_balmer(
 # EXCLUDED: Hε (blended with [NeIII] 3968, Δλ=3 Å) and
 #           H8 (blended with HeI 3889, Δλ=0.4 Å).
 _BALMER_LADDER: dict[str, tuple[float, float]] = {
-    "Ha":     (6564.61, 2.86),
+    "HALPHA":     (6564.61, 2.86),
     "HBETA":  (4862.68, 1.00),
     "HGAMMA": (4341.68, 0.468),
     "HDELTA": (4102.89, 0.259),
@@ -357,7 +363,7 @@ _BALMER_LADDER: dict[str, tuple[float, float]] = {
     "H10":    (3799.00, 0.0530),
 }
 
-_VALID_BALMER_ANCHORS: tuple[str, ...] = ("HBETA", "Ha")
+_VALID_BALMER_ANCHORS: tuple[str, ...] = ("HBETA", "HALPHA")
 
 
 def _kappa(wave_A: np.ndarray, law: str, **kwargs) -> np.ndarray:
@@ -438,7 +444,7 @@ def compute_Av_multi_balmer(
     anchor : str
         Reference (denominator) line for the decrement.  ``"HBETA"``
         (default) uses only bluer lines (Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ),
-        excluding Hα.  ``"Ha"`` uses every other Balmer line
+        excluding Hα.  ``"HALPHA"`` uses every other Balmer line
         (Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα).
     **kwargs
         Extra arguments to the attenuation law (Rv, delta, B).
@@ -450,6 +456,8 @@ def compute_Av_multi_balmer(
         ``"individual"`` (list of dicts with per-line results),
         ``"n_lines"`` (number of lines used), ``"anchor"`` (anchor name).
     """
+    fluxes, errors = canonical_line_keys(fluxes), canonical_line_keys(errors)
+    anchor = canonical_line_name(anchor)
     if anchor not in _VALID_BALMER_ANCHORS:
         raise ValueError(
             f"anchor must be one of {_VALID_BALMER_ANCHORS}, got {anchor!r}"
@@ -621,6 +629,7 @@ def compute_Av_joint_balmer(
         (per-line observed and model fluxes), ``"n_lines"``,
         ``"anchor"`` (``"joint"``), ``"method"`` (``"joint"``).
     """
+    fluxes, errors = canonical_line_keys(fluxes), canonical_line_keys(errors)
     empty = {
         "Av": 0.0, "Av_err": np.nan, "Av_fit": np.nan,
         "chi2": np.nan, "dof": 0, "individual": [],
@@ -715,7 +724,7 @@ def compute_Av_balmer_pair(
 
     Like :func:`compute_Av_multi_balmer` but restricted to exactly one
     ``(numerator, denominator)`` pair — useful when you want to force the
-    dust correction onto a high-SNR pair (e.g. ``("Ha", "HBETA")``) and
+    dust correction onto a high-SNR pair (e.g. ``("HALPHA", "HBETA")``) and
     ignore lower-SNR Balmer lines.
 
     Parameters
@@ -724,8 +733,8 @@ def compute_Av_balmer_pair(
         Observed (not dust-corrected) line fluxes and 1σ errors.
     pair : tuple of str
         ``(numerator, denominator)`` line names from the Balmer ladder
-        (``"Ha"``, ``"HBETA"``, ``"HGAMMA"``, ``"HDELTA"``, ``"H9"``,
-        ``"H10"``), e.g. ``("Ha", "HBETA")`` for Hα/Hβ.
+        (``"HALPHA"``, ``"HBETA"``, ``"HGAMMA"``, ``"HDELTA"``, ``"H9"``,
+        ``"H10"``), e.g. ``("HALPHA", "HBETA")`` for Hα/Hβ.
     law : str
         ``"salim"`` (default) or ``"cardelli"``.
     **kwargs
@@ -743,7 +752,8 @@ def compute_Av_balmer_pair(
     ValueError
         If either line name is not in the Balmer ladder.
     """
-    num, den = pair
+    fluxes, errors = canonical_line_keys(fluxes), canonical_line_keys(errors)
+    num, den = canonical_line_names(tuple(pair))
     for nm in (num, den):
         if nm not in _BALMER_LADDER:
             raise ValueError(

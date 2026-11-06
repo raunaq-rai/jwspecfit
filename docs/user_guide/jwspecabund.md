@@ -27,7 +27,7 @@ combined as an inverse-variance weighted mean. So:
 
 - **`balmer_anchor="HBETA"`** (default) uses Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ
   — **Hα is excluded** (it's redder than Hβ).
-- **`balmer_anchor="Ha"`** uses every other Balmer line (Hβ/Hα, Hγ/Hα,
+- **`balmer_anchor="HALPHA"`** uses every other Balmer line (Hβ/Hα, Hγ/Hα,
   Hδ/Hα, H9/Hα, H10/Hα) — i.e. **all** of them that pass the SNR cut.
 
 Anchor on Hα when you want Hα included; on Hβ when you want only the
@@ -36,7 +36,7 @@ bluer Balmer series:
 ```python
 abund = jwspecabund.compute_abundances(
     result, z=2.5,
-    balmer_anchor="Ha",    # or "HBETA" (default)
+    balmer_anchor="HALPHA",    # or "HBETA" (default)
     dust_law="salim",       # or "cardelli"
 )
 ```
@@ -51,13 +51,13 @@ decrement — and ignore lower-SNR Balmer lines — pass `balmer_pair`:
 ```python
 abund = jwspecabund.compute_abundances(
     result, z=6.0,
-    balmer_pair=("Ha", "HBETA"),   # A_V from Hα/Hβ only
+    balmer_pair=("HALPHA", "HBETA"),   # A_V from Hα/Hβ only
     dust_law="cardelli",
 )
 print(f"A_V = {abund.Av:.3f} ± {abund.Av_err:.3f}")
 ```
 
-`balmer_pair=(numerator, denominator)` accepts ladder names `"Ha"`,
+`balmer_pair=(numerator, denominator)` accepts ladder names `"HALPHA"`,
 `"HBETA"`, `"HGAMMA"`, `"HDELTA"`, `"H9"`, `"H10"`; the intrinsic Case-B
 ratio is looked up automatically. It overrides `balmer_anchor` /
 `snr_balmer` for the A_V step and is ignored when `Av=` is supplied.

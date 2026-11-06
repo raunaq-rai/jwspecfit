@@ -94,7 +94,7 @@ import jwspecabund
 abund = jwspecabund.compute_abundances(
     result, z=6.0,
     method="auto",            # "direct" / "strong_line" / "forward"
-    balmer_anchor="HBETA",    # or "Ha" if Hα is your best Balmer line
+    balmer_anchor="HBETA",    # or "HALPHA" if Hα is your best Balmer line
     dust_law="salim",         # or "cardelli"
 )
 

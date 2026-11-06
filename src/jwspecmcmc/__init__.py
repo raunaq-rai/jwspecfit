@@ -211,8 +211,8 @@ def fit_lines(
         SNR of the strongest line in *balmer_broad_lines*.  Default
         ``False`` (narrow-only).
     balmer_broad_lines : list of str, optional
-        Balmer lines that get the broad component, chosen from ``"Ha"``,
-        ``"HBETA"``, ``"HDELTA"``, ``"HGAMMA"``; e.g. ``["Ha"]`` tests a
+        Balmer lines that get the broad component, chosen from ``"HALPHA"``,
+        ``"HBETA"``, ``"HDELTA"``, ``"HGAMMA"``; e.g. ``["HALPHA"]`` tests a
         broad Hα alone.  ``None`` (default) uses all four.
     fit_oiii_broad : bool
         If ``True``, run an independent BIC test for a broad component on
@@ -469,8 +469,8 @@ def fit_with_broad(
         SNR of the strongest line in *balmer_broad_lines*.  Default
         ``False``.
     balmer_broad_lines : list of str, optional
-        Balmer lines that get the broad component, chosen from ``"Ha"``,
-        ``"HBETA"``, ``"HDELTA"``, ``"HGAMMA"``; e.g. ``["Ha"]`` tests a
+        Balmer lines that get the broad component, chosen from ``"HALPHA"``,
+        ``"HBETA"``, ``"HDELTA"``, ``"HGAMMA"``; e.g. ``["HALPHA"]`` tests a
         broad Hα alone.  ``None`` (default) uses all four.
     fit_oiii_broad : bool
         If ``True``, run an independent BIC test for a broad [OIII]

@@ -164,7 +164,9 @@ def intrinsic_sigma_kms(
         Intrinsic Gaussian σ in km/s, or ``None`` if too few lines are
         detected well enough to measure one.
     """
-    skip_set = set(skip)
+    from .lines import canonical_line_names
+
+    skip_set = set(canonical_line_names(list(skip)))
     widths: list[float] = []
     for name, lr in lines.items():
         if name in skip_set or "_BROAD" in name:

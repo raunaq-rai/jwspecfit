@@ -40,7 +40,7 @@ class TestCompileTyingOps:
 
     def test_ciii_always_tied(self):
         cs = ConstraintSet(
-            ["CIII]_1907", "CIII]"], tie_nii=False,
+            ["CIII]_1907", "CIII]_1909"], tie_nii=False,
             tie_balmer_to_oiii=False, tie_uv_doublets=False,
         )
         ops = _compile_tying_ops(cs)
@@ -140,7 +140,7 @@ class TestUntiedMLESeed:
             "HBETA": (4862.69, 3.0, 1.9),
             "OIII_4959": (4960.29, 4.0, 2.0),
             "OIII_5007": (5008.24, 12.0, 2.0),
-            "Ha": (6564.63, 15.0, 1.6),   # narrower than [OIII]
+            "HALPHA": (6564.63, 15.0, 1.6),   # narrower than [OIII]
         }
         for _, (lam, amp, sig) in inject.items():
             flux += amp * np.exp(-0.5 * ((wave_A - lam) / sig) ** 2)
@@ -153,7 +153,7 @@ class TestUntiedMLESeed:
 
         result = jwspecmcmc.fit_lines(
             spec, z=0.0, sampler="nuts",
-            lines=["HBETA", "OIII_4959", "OIII_5007", "Ha"],
+            lines=["HBETA", "OIII_4959", "OIII_5007", "HALPHA"],
             tie_balmer_to_oiii=False,      # the path that used to explode
             init_from_mle=True,
             n_warmup=120, n_samples_nuts=120, n_chains=1,
