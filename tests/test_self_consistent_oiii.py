@@ -354,6 +354,9 @@ def test_plot_te_ne_diagnostic_renders():
     ]
     assert len(labelled) == 4
     assert ax.get_xscale() == "log"
+    # The shaded joint posterior is named in the legend.
+    texts = [t.get_text() for t in ax.get_legend().get_texts()]
+    assert "posterior 68 %" in texts and "posterior 95 %" in texts
 
 
 def test_plot_requires_a_solution():

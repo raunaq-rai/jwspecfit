@@ -203,7 +203,13 @@ def _draw_posterior_contours(ax: Any, sc: Any) -> None:
 
     xc = 10.0 ** (0.5 * (xedges[:-1] + xedges[1:]))
     yc = 0.5 * (yedges[:-1] + yedges[1:])
+    colours = ["#f6c28b", "#e08214"][-len(levels):]
     ax.contourf(
         xc, yc, counts.T, levels=levels + [counts.max() + 1],
-        colors=["#f6c28b", "#e08214"][-len(levels):], alpha=0.55, zorder=2,
+        colors=colours, alpha=0.55, zorder=2,
     )
+    # contourf artists carry no legend label, so add empty proxies.  The
+    # darker fill is the 68 % region; it is alone if both levels coincide.
+    labels = ["posterior 95 %", "posterior 68 %"][-len(levels):]
+    for colour, label in zip(colours[::-1], labels[::-1]):
+        ax.fill_between([], [], color=colour, alpha=0.55, lw=0, label=label)
