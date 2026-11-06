@@ -37,6 +37,7 @@ except PackageNotFoundError:  # running from a source tree without an install
     __version__ = "0.0.0+unknown"
 
 from ._core import VALID_LOGU_DIAGNOSTICS, compute_abundances
+from .dustcorr import DustCorrectedFluxes, dust_correct
 from .forward import forward_model, hbeta_emissivity_aller84
 from .direct import (
     SelfConsistentOIII,
@@ -88,6 +89,8 @@ from .strong_line import compute_line_ratios, sanders25_metallicity
 
 __all__ = [
     "AbundanceResult",
+    "DustCorrectedFluxes",
+    "dust_correct",
     "Te_int_from_high",
     "Te_low_from_high",
     "cardelli_extinction",

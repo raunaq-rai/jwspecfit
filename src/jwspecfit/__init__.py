@@ -63,6 +63,7 @@ __all__ = [
     "Spectrum",
     "assumed_sigma_A",
     "compute_D_Lya",
+    "dust_correct",
     "fit_NHI",
     "fit_lines",
     "fit_redshift",
@@ -90,6 +91,18 @@ __all__ = [
     "show_lines",
     "sigma_inst_A",
 ]
+
+
+def dust_correct(result, **kwargs):
+    """Dust-correct fitted line fluxes via the Balmer decrement.
+
+    Thin alias for :func:`jwspecabund.dust_correct` (Case B intrinsic
+    ratios, Salim+18 curve by default); see that function for the
+    parameters.
+    """
+    from jwspecabund.dustcorr import dust_correct as _dust_correct
+
+    return _dust_correct(result, **kwargs)
 
 
 def _merge_window_results(
