@@ -398,6 +398,76 @@ _BALMER_LADDER: dict[str, tuple[float, float]] = {
 
 _VALID_BALMER_ANCHORS: tuple[str, ...] = ("HBETA", "HALPHA")
 
+# Upper level n of each Balmer line (lower level 2), for PyNeb emissivities.
+_BALMER_UPPER_LEVEL: dict[str, int] = {
+    "HALPHA": 3, "HBETA": 4, "HGAMMA": 5, "HDELTA": 6, "H9": 9, "H10": 10,
+}
+
+# Validity range of the Storey & Hummer (1995) tables in PyNeb.
+_SH95_TE_RANGE: tuple[float, float] = (500.0, 30000.0)
+
+
+def balmer_intrinsic_ratios(Te: float, ne: float) -> dict[str, float]:
+    """Case B Balmer-line ratios to Hbeta at a given T_e and n_e.
+
+    Uses the Storey & Hummer (1995) H I recombination emissivities in
+    PyNeb (``RecAtom("H", 1)``).  At ``Te = 1e4``, ``ne = 100`` this
+    reproduces the fixed ratios in ``_BALMER_LADDER``.
+
+    Parameters
+    ----------
+    Te : float
+        Electron temperature in K.  Values outside the tabulated range
+        (500-30,000 K) are clipped to it, with a warning.
+    ne : float
+        Electron density in cm^-3.
+
+    Returns
+    -------
+    dict
+        ``{line_name: F(line) / F(Hbeta)}`` for the Balmer ladder lines.
+    """
+    import pyneb as pn
+
+    lo, hi = _SH95_TE_RANGE
+    Te_use = float(np.clip(Te, lo, hi))
+    if Te_use != Te:
+        logger.warning(
+            "T_e = %.0f K is outside the Storey & Hummer (1995) range "
+            "%.0f-%.0f K; Balmer ratios evaluated at %.0f K.",
+            Te, lo, hi, Te_use,
+        )
+    h1 = pn.RecAtom("H", 1)
+    hb = h1.getEmissivity(Te_use, ne, lev_i=4, lev_j=2)
+    return {
+        name: float(h1.getEmissivity(Te_use, ne, lev_i=lev, lev_j=2) / hb)
+        for name, lev in _BALMER_UPPER_LEVEL.items()
+    }
+
+
+def _ladder(intrinsic: dict[str, float] | None) -> dict[str, tuple[float, float]]:
+    """Balmer ladder ``{name: (wave_A, ratio_to_Hb)}``, optionally re-ratioed.
+
+    Parameters
+    ----------
+    intrinsic : dict or None
+        ``{name: ratio_to_Hbeta}`` overriding the Case B 10^4 K ratios
+        (e.g. from :func:`balmer_intrinsic_ratios`).  ``None`` returns the
+        default ladder.
+
+    Returns
+    -------
+    dict
+        The ladder with the requested intrinsic ratios.
+    """
+    if intrinsic is None:
+        return _BALMER_LADDER
+    intrinsic = canonical_line_keys(intrinsic)
+    return {
+        name: (wave, float(intrinsic.get(name, ratio)))
+        for name, (wave, ratio) in _BALMER_LADDER.items()
+    }
+
 
 def _kappa(wave_A: np.ndarray, law: str, **kwargs) -> np.ndarray:
     """Attenuation per unit A_V, kappa(lambda) = A(lambda) / A_V.
@@ -454,6 +524,7 @@ def compute_Av_multi_balmer(
     law: str = "salim",
     snr_min: float = 3.0,
     anchor: str = "HBETA",
+    intrinsic: dict[str, float] | None = None,
     **kwargs,
 ) -> dict[str, object]:
     """Derive A_V from every available Balmer decrement.
@@ -479,6 +550,9 @@ def compute_Av_multi_balmer(
         (default) uses only bluer lines (Hγ/Hβ, Hδ/Hβ, H9/Hβ, H10/Hβ),
         excluding Hα.  ``"HALPHA"`` uses every other Balmer line
         (Hβ/Hα, Hγ/Hα, Hδ/Hα, H9/Hα, H10/Hα).
+    intrinsic : dict, optional
+        Intrinsic ratios to Hβ, e.g. from :func:`balmer_intrinsic_ratios`.
+        Default: Case B at T_e = 10^4 K, n_e = 100 cm^-3.
     **kwargs
         Extra arguments to the attenuation law (Rv, delta, B).
 
@@ -502,12 +576,13 @@ def compute_Av_multi_balmer(
             "n_lines": 0, "anchor": anchor,
         }
 
-    anchor_wave, anchor_ratio_over_Hb = _BALMER_LADDER[anchor]
+    ladder = _ladder(intrinsic)
+    anchor_wave, anchor_ratio_over_Hb = ladder[anchor]
     anchor_flux = fluxes[anchor]
     anchor_err = errors.get(anchor, 0.0)
 
     results = []
-    for name, (wave, ratio_over_Hb) in _BALMER_LADDER.items():
+    for name, (wave, ratio_over_Hb) in ladder.items():
         if name == anchor:
             continue
         # Only use lines bluer than the anchor.  Anchor=Hβ therefore uses
@@ -603,6 +678,7 @@ def compute_Av_joint_balmer(
     Av_min: float = -1.0,
     Av_max: float = 6.0,
     n_grid: int = 7001,
+    intrinsic: dict[str, float] | None = None,
     **kwargs,
 ) -> dict[str, object]:
     """Derive A_V by fitting the whole Balmer ladder at once.
@@ -651,6 +727,9 @@ def compute_Av_joint_balmer(
         returned ``"Av"`` is clipped at zero afterwards.
     n_grid : int
         Number of grid points in the scan (default 7001, i.e. 0.001 mag).
+    intrinsic : dict, optional
+        Intrinsic ratios to Hβ, e.g. from :func:`balmer_intrinsic_ratios`.
+        Default: Case B at T_e = 10^4 K, n_e = 100 cm^-3.
     **kwargs
         Extra arguments to the attenuation law (Rv, delta, B).
 
@@ -670,7 +749,7 @@ def compute_Av_joint_balmer(
     }
 
     names, wave, ratio, flux, err = [], [], [], [], []
-    for name, (w, r) in _BALMER_LADDER.items():
+    for name, (w, r) in _ladder(intrinsic).items():
         f = fluxes.get(name)
         if f is None or f <= 0:
             continue
@@ -751,6 +830,7 @@ def compute_Av_balmer_pair(
     errors: dict[str, float],
     pair: tuple[str, str],
     law: str = "salim",
+    intrinsic: dict[str, float] | None = None,
     **kwargs,
 ) -> dict[str, object]:
     """Derive A_V from a single, explicitly-chosen Balmer decrement.
@@ -770,6 +850,9 @@ def compute_Av_balmer_pair(
         ``"H10"``), e.g. ``("HALPHA", "HBETA")`` for Hα/Hβ.
     law : str
         ``"salim"`` (default) or ``"cardelli"``.
+    intrinsic : dict, optional
+        Intrinsic ratios to Hβ, e.g. from :func:`balmer_intrinsic_ratios`.
+        Default: Case B at T_e = 10^4 K, n_e = 100 cm^-3.
     **kwargs
         Extra arguments to the attenuation law (Rv, delta, B).
 
@@ -801,8 +884,9 @@ def compute_Av_balmer_pair(
             "n_lines": 0, "anchor": den,
         }
 
-    wave_num, ratio_num = _BALMER_LADDER[num]
-    wave_den, ratio_den = _BALMER_LADDER[den]
+    ladder = _ladder(intrinsic)
+    wave_num, ratio_num = ladder[num]
+    wave_den, ratio_den = ladder[den]
     intrinsic_ratio = ratio_num / ratio_den
 
     av, av_err = compute_Av_from_balmer(

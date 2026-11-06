@@ -110,6 +110,15 @@ class AbundanceResult:
         Full joint O++ T_e-n_e solution, including the T_e(n_e) curves, when
         one was computed.  See
         :func:`~jwspecabund.direct.compute_Te_ne_OIII`.
+    balmer_Te, balmer_ne : float or None
+        H⁺-zone T_e (K) and n_e (cm^-3) at which the intrinsic Balmer
+        ratios were evaluated, when ``balmer_Te_ne=True``; ``None``
+        otherwise (fixed Case B at 10^4 K, 100 cm^-3).
+    balmer_iterations : list of dict or None
+        ``balmer_Te_ne`` history: ``{"iteration", "Te", "ne", "Av"}`` per
+        step.
+    balmer_converged : bool or None
+        Whether ``balmer_Te_ne`` met its A_V tolerance.
     excluded_lines : list of str or None
         Line names excluded by the per-line SNR filter.
     failures : dict or None
@@ -165,6 +174,10 @@ class AbundanceResult:
     lya_f_esc_posterior: np.ndarray | None = field(default=None, repr=False)
     lya_f_esc_details: dict | None = field(default=None, repr=False)
     excluded_lines: list[str] | None = None
+    balmer_Te: float | None = None
+    balmer_ne: float | None = None
+    balmer_iterations: list[dict[str, float]] | None = field(default=None, repr=False)
+    balmer_converged: bool | None = None
     ionic_upper_limits: dict[str, float] | None = field(default=None, repr=False)
     ionic_ul_details: dict[str, dict] | None = field(default=None, repr=False)
     NO_tiers: dict[str, float] | None = field(default=None, repr=False)
@@ -262,6 +275,11 @@ class AbundanceResult:
                 lines.append(f"  A_V         = {self.Av:.3f} +/- {self.Av_err:.3f}")
             else:
                 lines.append(f"  A_V         = {self.Av:.3f}")
+            if self.balmer_Te is not None:
+                lines.append(
+                    f"  Balmer T_e  = {self.balmer_Te:.0f} K, "
+                    f"n_e = {self.balmer_ne:.3g} cm^-3 (iterated)"
+                )
 
         # --- T_e(O++) diagnostics, side by side ---
         _alt_direct = {

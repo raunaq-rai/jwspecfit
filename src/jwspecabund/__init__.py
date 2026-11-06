@@ -72,6 +72,7 @@ from .martinez25_icf import (
     log_U_from_O32_ionic,
 )
 from .dust import (
+    balmer_intrinsic_ratios,
     cardelli_extinction,
     compute_Av_balmer_pair,
     compute_Av_from_balmer,
@@ -90,6 +91,7 @@ from .strong_line import compute_line_ratios, sanders25_metallicity
 __all__ = [
     "AbundanceResult",
     "DustCorrectedFluxes",
+    "balmer_intrinsic_ratios",
     "dust_correct",
     "Te_int_from_high",
     "Te_low_from_high",

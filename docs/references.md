@@ -248,9 +248,18 @@ n<sub>e</sub> = 100 cm<sup>−3</sup>; Osterbrock & Ferland 2006):
 
 **Note on temperature dependence:** The intrinsic Balmer ratios
 are temperature-dependent.  At T<sub>e</sub> = 2.5 × 10<sup>4</sup> K
-the Hα/Hβ ratio is ∼2.72, not 2.86.  The current implementation
+the Hα/Hβ ratio is ∼2.72, not 2.86.  By default the direct method
 uses fixed ratios at 10<sup>4</sup> K for the external dust correction.
-See Section 3.5 (forward model) for self-consistent treatment where
+With `compute_abundances(..., balmer_Te_ne=True)` the reddening, T<sub>e</sub>
+and n<sub>e</sub> are solved together: A<sub>V</sub> is derived at Case B
+10<sup>4</sup> K, the abundance calculation is run, the intrinsic ratios
+to Hβ are recomputed with PyNeb (Storey & Hummer 1995) at the H⁺-zone
+conditions, and A<sub>V</sub> is re-derived from the observed fluxes,
+repeating until A<sub>V</sub> changes by less than 0.005 mag (usually two
+or three passes).  The H⁺-zone T<sub>e</sub> and n<sub>e</sub> are the
+O⁺/O²⁺-abundance-weighted means of the low-ionisation and O²⁺ zones.
+Ratios can also be supplied directly with `balmer_intrinsic=`.  See
+Section 3.5 (forward model) for the fully joint treatment, where
 A<sub>V</sub> is a free parameter and Balmer ratios are recomputed at
 each model T<sub>e</sub>.
 

@@ -3802,6 +3802,100 @@ def _run_strong_line(
     )
 
 
+def _hplus_zone_conditions(res: AbundanceResult) -> tuple[float, float] | None:
+    """T_e and n_e of the H⁺ zone from an abundance result.
+
+    The O⁺/H⁺- and O²⁺/H⁺-weighted means of the low-ionisation
+    (T_low, n_e,low) and O²⁺ (T_high, n_e(O²⁺)) zone conditions.  Falls
+    back to the O²⁺ zone when O⁺ (or its conditions) is unavailable.
+
+    Parameters
+    ----------
+    res : AbundanceResult
+        Output of a direct-method :func:`compute_abundances` call.
+
+    Returns
+    -------
+    tuple of float or None
+        ``(Te, ne)``, or ``None`` if no O²⁺-zone temperature was measured.
+    """
+    def _ok(v):
+        return v is not None and np.isfinite(v) and v > 0
+
+    Te_hi = res.Te_high
+    ne_hi = res.ne_Opp if _ok(res.ne_Opp) else res.ne
+    if not (_ok(Te_hi) and _ok(ne_hi)):
+        return None
+    ionic = res.ionic or {}
+    x_lo, x_hi = ionic.get("O+/H+"), ionic.get("O++/H+")
+    if _ok(x_lo) and _ok(x_hi) and _ok(res.Te_low) and _ok(res.ne_low):
+        w = x_hi / (x_lo + x_hi)
+        return (w * Te_hi + (1 - w) * res.Te_low,
+                w * ne_hi + (1 - w) * res.ne_low)
+    return float(Te_hi), float(ne_hi)
+
+
+def _compute_abundances_balmer_Te_ne(call_args: dict[str, Any]) -> AbundanceResult:
+    """Iterate A_V with Balmer ratios at the measured T_e, n_e.
+
+    Implements ``compute_abundances(..., balmer_Te_ne=True)``; see that
+    docstring.
+
+    Parameters
+    ----------
+    call_args : dict
+        The arguments of the outer :func:`compute_abundances` call.
+
+    Returns
+    -------
+    AbundanceResult
+        The run at the converged intrinsic ratios, with ``balmer_Te``,
+        ``balmer_ne`` and ``balmer_iterations`` set.
+    """
+    from .dust import balmer_intrinsic_ratios
+
+    kw = {**call_args, "balmer_Te_ne": False}
+    max_iter = int(kw["balmer_max_iter"])
+    tol = float(kw["balmer_tol"])
+    history: list[dict[str, float]] = []
+    intrinsic: dict[str, float] | None = None   # start at Case B 10^4 K
+    conditions: tuple[float, float] = (1.0e4, 1.0e2)
+    res = None
+    converged = False
+    for it in range(max_iter):
+        res = compute_abundances(**{**kw, "balmer_intrinsic": intrinsic})
+        history.append({"iteration": it, "Te": conditions[0],
+                        "ne": conditions[1], "Av": res.Av})
+        logger.info(
+            "balmer_Te_ne iteration %d: ratios at T_e = %.0f K, "
+            "n_e = %.3g cm^-3 -> A_V = %.4f", it, *conditions, res.Av,
+        )
+        if it > 0 and abs(res.Av - history[-2]["Av"]) < tol:
+            converged = True
+            break
+        new = _hplus_zone_conditions(res)
+        if new is None:
+            logger.warning(
+                "balmer_Te_ne: no T_e measured (method=%r); keeping the "
+                "Balmer ratios at T_e = %.0f K, n_e = %.3g cm^-3.",
+                res.method, *conditions,
+            )
+            break
+        conditions = (float(new[0]), float(new[1]))
+        intrinsic = balmer_intrinsic_ratios(*conditions)
+    else:
+        logger.warning(
+            "balmer_Te_ne did not converge to %.3g mag in %d iterations "
+            "(last change %.4f mag); returning the last iteration.",
+            tol, max_iter, abs(history[-1]["Av"] - history[-2]["Av"])
+            if len(history) > 1 else np.nan,
+        )
+    res.balmer_Te, res.balmer_ne = history[-1]["Te"], history[-1]["ne"]
+    res.balmer_iterations = history
+    res.balmer_converged = converged
+    return res
+
+
 def compute_abundances(
     result: Any,
     z: float,
@@ -3849,6 +3943,12 @@ def compute_abundances(
     balmer_anchor: str = "HBETA",
     balmer_method: str = "anchored",
     balmer_pair: tuple[str, str] | None = None,
+    # Intrinsic Balmer ratios: fixed Case B (default), user-supplied, or
+    # iterated to the measured T_e / n_e (opt-in).
+    balmer_intrinsic: dict[str, float] | None = None,
+    balmer_Te_ne: bool = False,
+    balmer_max_iter: int = 10,
+    balmer_tol: float = 0.005,
     # Forward model kwargs (method="forward")
     forward_sampler: str = "emcee",
     forward_n_walkers: int = 32,
@@ -3928,6 +4028,34 @@ def compute_abundances(
         low-SNR Balmer lines.  Overrides *balmer_anchor* / *snr_balmer*
         for the A_V step.  Ignored when *Av* is supplied directly.
         ``None`` (default) keeps the multi-Balmer fit.
+    balmer_intrinsic : dict or None
+        Intrinsic Balmer ratios to Hβ (``{"HALPHA": 2.75, "HGAMMA": 0.475,
+        ...}``) used for the A_V derivation; lines not given keep their
+        default.  ``None`` (default) uses Case B at T_e = 10^4 K,
+        n_e = 100 cm^-3 (Osterbrock & Ferland 2006).  See
+        :func:`jwspecabund.dust.balmer_intrinsic_ratios`.
+    balmer_Te_ne : bool
+        Opt-in (default ``False``).  Solve for the reddening, T_e and n_e
+        together: start from the Case B 10^4 K ratios, run the full
+        abundance calculation, recompute the intrinsic Balmer ratios to
+        Hβ at the measured H⁺-zone conditions (PyNeb, Storey & Hummer
+        1995), re-derive A_V from the *observed* fluxes, and repeat until
+        A_V changes by less than *balmer_tol*.  The H⁺-zone T_e and n_e
+        are the O⁺/O²⁺-abundance-weighted means of (T_low, n_e,low) and
+        (T_high, n_e(O²⁺)), falling back to the O²⁺ zone alone when O⁺ is
+        unavailable.  The final call uses the converged ratios, so its
+        uncertainties are those of a normal run at those ratios (the T_e
+        uncertainty is not propagated into the intrinsic ratios).  The
+        conditions used are stored on the result as ``balmer_Te``,
+        ``balmer_ne`` and the history as ``balmer_iterations``.  Ignored
+        (with a warning) when *Av* is supplied, *dust_correct* is off,
+        *balmer_intrinsic* is given, or no T_e is measured
+        (strong-line or forward method).
+    balmer_max_iter : int
+        Maximum number of iterations for *balmer_Te_ne* (default 10).
+    balmer_tol : float
+        Convergence tolerance on A_V in magnitudes for *balmer_Te_ne*
+        (default 0.005).
     Av_err : float or None
         Controls whether A_V is marginalised over.  ``None`` (default)
         keeps A_V fixed at its central value — derived once from the
@@ -4277,6 +4405,7 @@ def compute_abundances(
     AbundanceResult
         Chemical abundance measurement.
     """
+    _call_args = dict(locals())  # before anything is rebound (balmer_Te_ne)
     balmer_anchor = canonical_line_name(balmer_anchor)
     if balmer_pair is not None:
         balmer_pair = tuple(canonical_line_name(n) for n in balmer_pair)
@@ -4383,6 +4512,23 @@ def compute_abundances(
                     f"valid options are {', '.join(_BALMER_LADDER)}."
                 )
 
+    if balmer_Te_ne:
+        _skip = [
+            _why for _cond, _why in (
+                (not dust_correct, "dust_correct=False"),
+                (Av is not None, "Av is supplied"),
+                (balmer_intrinsic is not None, "balmer_intrinsic is supplied"),
+                (method in ("forward", "strong_line"), f"method={method!r}"),
+            ) if _cond
+        ]
+        if _skip:
+            logger.warning(
+                "balmer_Te_ne ignored because %s; using the fixed intrinsic "
+                "Balmer ratios.", " and ".join(_skip),
+            )
+        else:
+            return _compute_abundances_balmer_Te_ne(_call_args)
+
     # Physical redshift for the z-dependent n_e fallbacks (decoupled from
     # the geometric z used for continuum-RMS line windows).
     _z_ne = z_ne if z_ne is not None else z
@@ -4410,21 +4556,23 @@ def compute_abundances(
                 # Force A_V onto a single chosen decrement (e.g. Hα/Hβ),
                 # ignoring lower-SNR Balmer lines.
                 balmer_out = compute_Av_balmer_pair(
-                    fluxes, errors, balmer_pair, law=dust_law, **dust_kwargs,
+                    fluxes, errors, balmer_pair, law=dust_law,
+                    intrinsic=balmer_intrinsic, **dust_kwargs,
                 )
             elif balmer_method == "joint":
                 # Fit the whole ladder at once: two free parameters (A_V and
                 # a normalisation), every detected line used exactly once.
                 balmer_out = compute_Av_joint_balmer(
                     fluxes, errors, law=dust_law, snr_min=snr_balmer,
-                    **dust_kwargs,
+                    intrinsic=balmer_intrinsic, **dust_kwargs,
                 )
             else:
                 # Derive A_V from all available Balmer decrements anchored
                 # on either Hβ (default) or Hα via `balmer_anchor`.
                 balmer_out = compute_Av_multi_balmer(
                     fluxes, errors, law=dust_law, snr_min=snr_balmer,
-                    anchor=balmer_anchor, **dust_kwargs,
+                    anchor=balmer_anchor, intrinsic=balmer_intrinsic,
+                    **dust_kwargs,
                 )
             _ANCHOR_LABELS = {
                 "HALPHA": "Hα", "HBETA": "Hβ", "HGAMMA": "Hγ",

@@ -26,6 +26,26 @@ history on GitHub is the authoritative source.
   log M* = 10), which has an SMC-like far-UV slope. It was R_V = 3.15,
   δ = −0.35, B = 2.27. Passing `Rv=` still overrides R_V.
 
+### Added: reddening solved with T_e and n_e (opt-in)
+
+- `compute_abundances(..., balmer_Te_ne=True)` iterates A_V with Case B
+  Balmer ratios to Hβ evaluated at the measured H⁺-zone T_e and n_e
+  (PyNeb, Storey & Hummer 1995), instead of the fixed 10⁴ K, 100 cm⁻³
+  values. It starts at 10⁴ K, runs the full calculation, recomputes the
+  ratios at the O⁺/O²⁺-weighted T_e and n_e, re-derives A_V from the
+  observed fluxes, and stops when A_V changes by less than `balmer_tol`
+  (0.005 mag; `balmer_max_iter=10`). The result records `balmer_Te`,
+  `balmer_ne`, `balmer_iterations` and `balmer_converged`. **Off by
+  default; the default output is unchanged.** It is skipped, with a
+  warning, when `Av=` is supplied or no T_e is measured.
+- `balmer_intrinsic=` on `compute_abundances` and on the A_V estimators
+  (`compute_Av_multi_balmer`, `compute_Av_joint_balmer`,
+  `compute_Av_balmer_pair`) supplies the intrinsic ratios directly.
+- New `balmer_intrinsic_ratios(Te, ne)`. T_e outside 500–30,000 K is
+  clipped to the table, with a warning.
+- On a mock nebula at T_e ≈ 1.9×10⁴ K, A_V goes from 0.459 to 0.515 after
+  two iterations, and O/H moves by −0.008 dex.
+
 ### Added: `dust_correct()` for dust-corrected fluxes without abundances
 
 - `jwspecfit.dust_correct(result)` (also `jwspecabund.dust_correct`)
