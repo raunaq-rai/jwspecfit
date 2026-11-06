@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 from astropy.io import fits
@@ -175,6 +175,8 @@ _ERR_NAMES = {
     "uncertainty", "stddev", "std",
 }
 _IVAR_NAMES = {"ivar", "inv_var", "inverse_variance", "weight", "wht"}
+# Matched exactly (case-insensitive), never as a substring: "r" is too short.
+_R_NAMES = ("resolution", "resolving_power", "r")
 
 
 def _find_column(table_names: list[str], aliases: set[str]) -> str | None:
@@ -243,6 +245,19 @@ def _read_bintable_spectrum(
             err_ujy = np.zeros_like(flux_ujy)
 
     meta = {"hdu": hdu.name, "columns": names, "wave_col": wcol, "flux_col": fcol}
+
+    # Per-pixel resolving power (msaexp-style combined and single-grating
+    # files carry one for the source).  Kept so fits need no R= argument.
+    lower = {n.lower(): n for n in names}
+    rcol = next((lower[a] for a in _R_NAMES if a in lower), None)
+    if rcol is not None:
+        from .resolution import TabulatedR
+
+        try:
+            meta["_R"] = TabulatedR(wave_um, np.asarray(data[rcol], dtype=float))
+            meta["resolution_col"] = rcol
+        except ValueError:
+            logger.warning("Resolution column %r has no usable values; ignored.", rcol)
     return wave_um, flux_ujy, err_ujy, meta
 
 
@@ -290,6 +305,7 @@ def read_fits(
     wave_col: str | None = None,
     flux_col: str | None = None,
     err_col: str | None = None,
+    R: float | Callable[[np.ndarray], np.ndarray] | None = None,
 ) -> Spectrum:
     """Read a 1-D spectrum from a FITS file.
 
@@ -322,6 +338,14 @@ def read_fits(
     wave_col, flux_col, err_col : str, optional
         Force specific column names instead of auto-detecting.  Only
         used for BinTable HDUs.
+    R : float or callable, optional
+        Resolving power to attach.  By default it is read from the
+        table's ``resolution`` (or ``resolving_power`` / ``R``) column
+        when there is one, as a :class:`~jwspecfit.resolution.TabulatedR`
+        curve for this source.  That is the right R for a combined
+        multi-grating spectrum, and each single-grating extension (e.g.
+        ``hdu="SPEC1D_G395M"``) carries its own.  Without either, the fit
+        falls back to the nominal R of the ``GRATING`` header.
 
     Returns
     -------
@@ -377,9 +401,12 @@ def read_fits(
                 sci_2d = None
 
     meta.update({"filename": path.name, "filter": filt})
+    file_R = meta.pop("_R", None)
+    if R is None:
+        R = file_R
     logger.info(
-        "Read %s [%s]: %d pixels, grating=%s",
-        path.name, meta.get("hdu", "?"), len(wave_um), grating,
+        "Read %s [%s]: %d pixels, grating=%s, R=%s",
+        path.name, meta.get("hdu", "?"), len(wave_um), grating, R,
     )
 
     return Spectrum(
@@ -388,6 +415,7 @@ def read_fits(
         err_ujy=err_ujy,
         grating=grating,
         z=z,
+        R=R,
         meta=meta,
         sci_2d=sci_2d,
     )

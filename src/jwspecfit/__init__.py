@@ -44,7 +44,7 @@ from .plotting import (
     plot_spectrum_interactive,
 )
 from .redshift import DEFAULT_LINES, Peak, RedshiftResult, fit_redshift
-from .resolution import R_from_pixels, R_prism, resolve_R, sigma_inst_A
+from .resolution import R_from_pixels, R_prism, TabulatedR, resolve_R, sigma_inst_A
 
 __all__ = [
     "BroadFitResult",
@@ -57,6 +57,7 @@ __all__ = [
     "REST_LINES_A",
     "canonical_line_name",
     "R_from_pixels",
+    "TabulatedR",
     "R_prism",
     "RedshiftResult",
     "Spectrum",

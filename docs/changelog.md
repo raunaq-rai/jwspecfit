@@ -6,6 +6,24 @@ history on GitHub is the authoritative source.
 
 ## Unreleased
 
+### The resolution curve is read from the file
+
+- **`read_fits` loads the table's `resolution` column into `spec.R`**
+  (also `resolving_power` or `R`) as a `TabulatedR` curve for the source.
+  Combined medium-resolution spectra (`GRATING = "G140M+G235M+G395M"`) and
+  single-grating extensions (`hdu="SPEC1D_G395M"`) therefore fit with their
+  own R(λ) and need no `R=` argument. Passing `R=` to `read_fits` or
+  `fit_lines` still takes precedence.
+- **Fixed: upper limits crashed for a combined grating name.** The limit
+  code re-derived R from `spec.grating` and ignored the `R=` given to the
+  fit, so `"G140M+G235M+G395M"` raised `Unknown grating`. `fit_lines` (both
+  packages) now stores the R it used on `result.spectrum`, as a picklable
+  `TabulatedR` when it was a callable, and every later
+  `flux_upper_limit()` / `compute_abundances` call uses that.
+  The caller's spectrum is not modified.
+- `R_grating` accepts combined names whose gratings share a nominal R
+  (all M or all H) and asks for `R=` when they differ.
+
 ### Hα and C III] 1909 line keys renamed
 
 - **`Ha` → `HALPHA`** (and `Ha_BROAD` / `Ha_BROAD2` → `HALPHA_BROAD` /

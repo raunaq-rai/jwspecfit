@@ -470,6 +470,15 @@ def fit_lines(
         logger.info("No grating or R specified; estimating R from pixel spacing.")
         R = R_from_pixels(spec.wave_um)
 
+    # Keep the R this fit uses on the spectrum the result carries, so the
+    # upper limits (here and in every later flux_upper_limit() call) use it
+    # too instead of re-deriving R from the grating name.
+    if R is not None and R is not spec.R:
+        from .resolution import as_stored_R
+
+        spec = spec.copy()
+        spec.R = as_stored_R(R, spec.wave_um)
+
     # Apply fit window: crop spectrum to wavelength range.
     if wave_range_A is not None:
         lo_A, hi_A = wave_range_A

@@ -66,11 +66,83 @@ def R_grating(name: str) -> float:
         Approximate resolving power.
     """
     g = name.upper()
+    # Combined spectra are named like "G140M+G235M+G395M".
+    parts = [p.strip() for p in g.split("+") if p.strip()]
+    if len(parts) > 1:
+        values = {R_grating(p) for p in parts}
+        if len(values) == 1:
+            return values.pop()
+        raise ValueError(
+            f"The gratings in {name!r} have different nominal resolving "
+            "powers; pass R= (e.g. the file's resolution column)."
+        )
     if g in ("G140M", "G235M", "G395M"):
         return 1000.0
     if g in ("G140H", "G235H", "G395H"):
         return 2700.0
     raise ValueError(f"Unknown grating: {name!r}")
+
+
+class TabulatedR:
+    """Resolving power tabulated on a wavelength grid.
+
+    A picklable callable ``R(lam_um)`` that interpolates linearly between
+    the tabulated points and holds the end values beyond them.  Used for
+    the per-source resolution curve shipped with combined or single-grating
+    spectra (the ``resolution`` column), which beats the nominal grating R.
+
+    Parameters
+    ----------
+    wave_um : array_like
+        Wavelengths in microns.
+    R : array_like
+        Resolving power at each wavelength.  Non-finite or non-positive
+        entries are dropped.
+    """
+
+    def __init__(self, wave_um: np.ndarray, R: np.ndarray) -> None:
+        w = np.asarray(wave_um, dtype=float)
+        r = np.asarray(R, dtype=float)
+        ok = np.isfinite(w) & np.isfinite(r) & (r > 0)
+        if ok.sum() < 2:
+            raise ValueError("TabulatedR needs at least two finite, positive R values.")
+        order = np.argsort(w[ok])
+        self.wave_um = w[ok][order]
+        self.R = r[ok][order]
+
+    def __call__(self, lam_um: np.ndarray) -> np.ndarray:
+        return np.interp(np.asarray(lam_um, dtype=float), self.wave_um, self.R)
+
+    def __repr__(self) -> str:
+        return (
+            f"TabulatedR({self.wave_um.size} points, "
+            f"{self.wave_um[0]:.3f}-{self.wave_um[-1]:.3f} um, "
+            f"R = {self.R.min():.0f}-{self.R.max():.0f})"
+        )
+
+
+def as_stored_R(
+    R: float | Callable[[np.ndarray], np.ndarray] | None, wave_um: np.ndarray,
+) -> float | TabulatedR | None:
+    """Return *R* in a form a :class:`Spectrum` can carry and pickle.
+
+    Floats and :class:`TabulatedR` pass through; any other callable is
+    evaluated on *wave_um* and tabulated there.
+
+    Parameters
+    ----------
+    R : float, callable or None
+        Resolving power as accepted by :func:`resolve_R`.
+    wave_um : array_like
+        The spectrum's wavelength grid in microns.
+
+    Returns
+    -------
+    float, TabulatedR or None
+    """
+    if R is None or isinstance(R, TabulatedR) or not callable(R):
+        return R
+    return TabulatedR(wave_um, resolve_R(wave_um, R=R))
 
 
 def resolve_R(

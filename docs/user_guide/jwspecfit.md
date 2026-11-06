@@ -28,6 +28,20 @@ erg/s/cm²/Å) and falls through to image HDUs with WCS keywords
 Override the auto-detection with `hdu=`, `wave_col=`, `flux_col=`,
 `err_col=` if needed.
 
+If the table has a `resolution` column (msaexp combined and
+single-grating files do), it becomes `spec.R`, the source's own R(λ).
+That is what the fits then use, so a combined medium-resolution spectrum
+needs no `R=` argument:
+
+```python
+spec = jwspecfit.read_fits(path, z=z)                       # G140M+G235M+G395M, R from file
+spec_g395m = jwspecfit.read_fits(path, z=z, hdu="SPEC1D_G395M")  # that grating's own curve
+fit = jwspecfit.fit_lines(spec, z=z)
+```
+
+Passing `R=` (a number or a callable `R(lam_um)`) to `read_fits` or
+`fit_lines` still overrides it.
+
 See the {doc}`quickstart guide <../quickstart>` for the full list of
 readers (`read_fits`, `read_dict`, `read_npz`).
 
