@@ -28,8 +28,9 @@ Thumbs.db
 docs/_build/
 docs/api_reference/generated/
 
-# Example notebooks (kept locally, pending a rewrite before republishing)
-docs/notebooks/
+# Only the published example notebook is tracked.
+docs/notebooks/*
+!docs/notebooks/example.ipynb
 
 # Keep FITS data in repo (small test files)
 # !data/*.fits
