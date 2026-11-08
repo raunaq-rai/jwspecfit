@@ -509,8 +509,10 @@ def heI_4714_over_4472(Te: float, ne: float) -> float:
         F([Ar IV] 4711) = F(ArIV_4713) - ratio * F(HEI_4472).
 
     The ratio is computed from PyNEB He I recombination emissivities
-    (Storey & Hummer 1995) rather than hard-coded, so it tracks the
-    assumed T_e and n_e (~0.11 at 10⁴ K to ~0.18 at 2x10⁴ K).
+    (Porter et al. 2012, 2013) rather than hard-coded, so it tracks the
+    assumed T_e and n_e (~0.11 at 10⁴ K to ~0.18 at 2x10⁴ K, n_e = 10³).
+    Those tables stop at 25 kK, so hotter T_e are evaluated at 25 kK
+    (the ratio varies by only ~1% between 20 and 25 kK).
 
     Parameters
     ----------
@@ -527,7 +529,7 @@ def heI_4714_over_4472(Te: float, ne: float) -> float:
     pn = _get_pyneb()
     He1 = pn.RecAtom("He", 1)
     # PyNEB He I labels: 4471 (the 4472 anchor) and 4713 (the 4714 line).
-    Te_eval = min(Te, _PYNEB_HI_TMAX) if Te > 0 else 1.5e4
+    Te_eval = min(Te, _PYNEB_HEI_TMAX) if Te > 0 else 1.5e4
     e_4714 = He1.getEmissivity(Te_eval, ne, wave=4713)
     e_4472 = He1.getEmissivity(Te_eval, ne, wave=4471)
     if e_4472 <= 0 or not np.isfinite(e_4714):
@@ -535,6 +537,11 @@ def heI_4714_over_4472(Te: float, ne: float) -> float:
             f"PyNEB returned invalid He I emissivity at T_e={Te:.0f}, n_e={ne:.0f}"
         )
     return float(e_4714 / e_4472)
+
+
+#: Upper temperature limit of PyNEB's He I recombination tables
+#: (Porter et al. 2012, 2013); they return NaN above it.
+_PYNEB_HEI_TMAX = 25000.0
 
 
 # ---------------------------------------------------------------------------

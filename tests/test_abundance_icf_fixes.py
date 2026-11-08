@@ -230,3 +230,12 @@ def test_oii_upper_limit_uses_both_doublet_emissivities():
     )
     expect = _ionic_abundance("O", 2, 6.0, 100.0, 1.35e4, 300.0, [3726, 3729])
     assert ul["O+/H+"] == pytest.approx(expect, rel=1e-10, abs=0)
+
+
+@pytest.mark.parametrize("Te", [2.6e4, 3.5e4])
+def test_hei_deblend_ratio_above_table_limit(Te):
+    """He I tables stop at 25 kK: hotter gas must still give a ratio."""
+    from jwspecabund.direct import heI_4714_over_4472
+    r = heI_4714_over_4472(Te, 1e4)
+    assert r == heI_4714_over_4472(2.5e4, 1e4)
+    assert 0.1 < r < 0.3
