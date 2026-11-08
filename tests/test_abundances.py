@@ -260,13 +260,22 @@ class TestBalmerAnchor:
 class TestStrongLine:
     """Tests for strong_line.py Sanders+25 calibrations."""
 
+    def test_sanders25_o3_only_refused(self):
+        """O3 is double-valued: on its own it cannot choose a branch."""
+        from jwspecabund.strong_line import sanders25_metallicity
+
+        fluxes = {"OIII_5007": 7.08, "HBETA": 1.0}
+        errors = {"OIII_5007": 0.1, "HBETA": 0.02}
+        with pytest.raises(ValueError, match="double-valued"):
+            sanders25_metallicity(fluxes, errors, n_mc=10)
+
     def test_sanders25_basic(self):
-        """Known O3 ratio should give a sensible metallicity."""
+        """Known O3 + O2 ratios should give a sensible metallicity."""
         from jwspecabund.strong_line import sanders25_metallicity
 
         # Typical star-forming galaxy: log(O3/Hb) ~ 0.85 → 12+log(O/H) ~ 8.0
-        fluxes = {"OIII_5007": 7.08, "HBETA": 1.0}  # log10(7.08) ~ 0.85
-        errors = {"OIII_5007": 0.1, "HBETA": 0.02}
+        fluxes = {"OIII_5007": 7.08, "HBETA": 1.0, "OII_doublet": 1.5}
+        errors = {"OIII_5007": 0.1, "HBETA": 0.02, "OII_doublet": 0.1}
 
         Z, Z_lo, Z_hi, chi2, ratios, Z_mc = sanders25_metallicity(
             fluxes, errors, n_mc=100,
@@ -731,6 +740,7 @@ class TestComputeAbundances:
             "OIII_5007": (5.0, 0.1),
             "HBETA": (1.0, 0.02),
             "HALPHA": (2.86, 0.05),
+            "OII_doublet": (1.5, 0.05),
         })
 
         abund = compute_abundances(result, z=2.0, method="auto", n_mc=50)
@@ -819,6 +829,7 @@ class TestComputeAbundances:
             "OIII_5007": (5.0, 0.1),
             "HBETA": (1.0, 0.02),
             "HALPHA": (2.86, 0.05),
+            "OII_doublet": (1.5, 0.05),
         })
 
         abund = compute_abundances(result, z=2.0, method="strong_line", n_mc=200)

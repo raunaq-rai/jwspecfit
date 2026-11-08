@@ -423,7 +423,7 @@ strengths).
 
 1. `compute_line_ratios()` builds log10 ratios (O3, O2, R23, O32) with SNR gating.
 2. `_chi2_simultaneous()` evaluates combined chi-squared across all available diagnostics.
-3. `minimize_scalar()` finds best-fit `12+log(O/H)` in [6.5, 9.0].
+3. `solve_metallicity()` finds the global chi-squared minimum in the calibrated range [7.3, 8.6]; O3/R23 alone (no [O II]) is refused as double-valued.
 4. MC loop perturbs ratios by `sqrt(sigma_obs^2 + sigma_cal^2)` for uncertainty.
 
 When MCMC posteriors are available, posterior samples are propagated directly

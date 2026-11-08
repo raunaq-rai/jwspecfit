@@ -20,8 +20,18 @@ logger = logging.getLogger(__name__)
 
 # Reference metallicity for the polynomial expansion.
 Z_REF = 8.0
-Z_MIN = 6.5
-Z_MAX = 9.0
+# Calibrated range of every Sanders+25 ratio (their Table 1, Z_min-Z_max).
+# The solution is confined to it: the cubic O3 fit turns over again near
+# 6.7, and outside the range the extrapolated slopes give spuriously small
+# errors.  A solution on an edge is flagged.
+Z_MIN = 7.3
+Z_MAX = 8.6
+_Z_GRID = np.linspace(Z_MIN, Z_MAX, 261)  # 0.005 dex spacing
+
+# Ratios that are single-valued over [Z_MIN, Z_MAX].  O3 and R23 peak inside
+# the range, so on their own they cannot pick a branch (Sanders+25 Sec. 5:
+# double-valued ratios need a simultaneous fit with a monotonic one).
+SINGLE_VALUED = frozenset({"O2", "O32"})
 
 # Sanders+25 calibration coefficients and scatter (Table 3).
 #   sigma_R_fit  — rms residual of the polynomial fit (σ_{R,fit})
@@ -165,6 +175,44 @@ def _chi2_simultaneous(
         total_var = sig_obs**2 + sig_cal**2
         chi2 += (R_obs - R_model) ** 2 / total_var
     return chi2
+
+
+def solve_metallicity(observed_ratios: dict[str, dict[str, float]]) -> float:
+    """Global chi-squared minimum over the calibrated range.
+
+    A grid search over :data:`_Z_GRID` finds the global minimum (a bounded
+    local minimiser lands in whichever minimum it meets first, i.e. on an
+    arbitrary branch of a double-valued ratio), then a bounded Brent step
+    refines it within one grid cell.
+
+    Parameters
+    ----------
+    observed_ratios : dict
+        ``{diag_name: {"val": log_ratio, "err": log_ratio_err}}``.
+
+    Returns
+    -------
+    float
+        12+log(O/H).
+    """
+    chi2 = np.array([_chi2_simultaneous(z, observed_ratios) for z in _Z_GRID])
+    k = int(np.argmin(chi2))
+    lo = _Z_GRID[max(k - 1, 0)]
+    hi = _Z_GRID[min(k + 1, _Z_GRID.size - 1)]
+    res = minimize_scalar(
+        _chi2_simultaneous, bounds=(lo, hi), args=(observed_ratios,),
+        method="bounded", options={"xatol": 1e-5},
+    )
+    return float(res.x) if res.fun <= chi2[k] else float(_Z_GRID[k])
+
+
+def _require_single_valued(ratios: dict) -> None:
+    if not SINGLE_VALUED.intersection(ratios):
+        raise ValueError(
+            f"Strong-line ratios {sorted(ratios)} are all double-valued in "
+            "12+log(O/H); at least one of O2 or O32 (i.e. [O II]) is needed to "
+            "choose the branch (Sanders+25 Sec. 5)."
+        )
 
 
 def compute_line_ratios(
@@ -315,18 +363,20 @@ def sanders25_metallicity(
 
     if not ratios:
         raise ValueError(
-            "No valid strong-line ratios. Need at minimum OIII_5007 + HBETA."
+            "No valid strong-line ratios. Need [OII] and HBETA (plus [OIII]) above the SNR cut."
         )
 
-    # Best-fit metallicity via bounded minimisation.
-    res = minimize_scalar(
-        _chi2_simultaneous,
-        bounds=(Z_MIN, Z_MAX),
-        args=(ratios,),
-        method="bounded",
-    )
-    Z_best = float(res.x)
-    chi2 = float(res.fun)
+    _require_single_valued(ratios)
+
+    # Best-fit metallicity: global minimum over the calibrated range.
+    Z_best = solve_metallicity(ratios)
+    chi2 = float(_chi2_simultaneous(Z_best, ratios))
+    if min(Z_best - Z_MIN, Z_MAX - Z_best) < 0.01:
+        logger.warning(
+            "Strong-line 12+log(O/H) = %.2f is at the edge of the Sanders+25 "
+            "calibrated range [%.1f, %.1f]; the true value may lie beyond it.",
+            Z_best, Z_MIN, Z_MAX,
+        )
 
     # Monte Carlo error propagation.
     rng = np.random.default_rng(seed)
@@ -339,13 +389,7 @@ def sanders25_metallicity(
                 "val": rng.normal(dat["val"], sig_tot),
                 "err": dat["err"],
             }
-        mc_res = minimize_scalar(
-            _chi2_simultaneous,
-            bounds=(Z_MIN, Z_MAX),
-            args=(perturbed,),
-            method="bounded",
-        )
-        mc_samples[i] = mc_res.x
+        mc_samples[i] = solve_metallicity(perturbed)
 
     if n_mc > 0:
         Z_lo = float(np.percentile(mc_samples, 16))

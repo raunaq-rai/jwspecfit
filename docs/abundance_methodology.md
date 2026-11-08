@@ -1015,8 +1015,15 @@ chi^2(Z) = sum_i [(R_obs,i - R_model,i(Z))^2 / (sigma_obs,i^2 + sigma_cal,i^2)]
 
 where sigma_cal = sqrt(sigma_R,fit^2 + sigma_R,int^2) accounts for
 both the fit residual and intrinsic scatter in the calibration.  The
-best-fit Z is found via bounded scalar minimisation over
-6.5 <= Z <= 9.0.
+best-fit Z is the *global* chi-squared minimum (a 0.005-dex grid search
+refined by a bounded Brent step) over the calibrated range of every
+Sanders+25 ratio, 7.3 <= Z <= 8.6 (their Table 1); solutions within
+0.01 dex of an edge are warned about.  O3 and R23 are double-valued in this
+range, so at least one single-valued ratio (O2 or O32, i.e. [O II]) is
+required: with O3 alone there is no strong-line O/H (it is reported as NaN
+with the reason under `failures`).  For MCMC input the ratio set is fixed
+from the posterior medians at the SNR cut, and when `Av_err > 0` each
+posterior draw is dust-corrected with its own A_V ~ N(A_V, Av_err).
 
 ### 9.3 Monte Carlo uncertainty
 

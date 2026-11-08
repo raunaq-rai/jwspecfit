@@ -3682,19 +3682,34 @@ def _run_strong_line(
     Av_derived: float | None,
     Av_err_derived: float | None,
     excluded_lines: list[str],
+    dust_kappa: dict[str, float] | None = None,
 ) -> AbundanceResult:
-    """Run the strong-line method and return an AbundanceResult."""
+    """Run the strong-line method and return an AbundanceResult.
+
+    ``dust_kappa`` maps line name -> A_lambda/A_V.  It is given only when
+    the MCMC posteriors were left uncorrected (``Av_err > 0``, so the direct
+    path can resample A_V); each posterior draw is then corrected with its
+    own A_V ~ N(Av_derived, Av_err_derived), clipped at 0.
+    """
     from .strong_line import sanders25_metallicity
 
     if is_mcmc and posteriors:
         from .strong_line import (
             CALIBRATIONS,
-            _chi2_simultaneous,
-            Z_MAX,
-            Z_MIN,
+            _require_single_valued,
             compute_line_ratios,
+            solve_metallicity,
         )
-        from scipy.optimize import minimize_scalar
+
+        # The ratio set is fixed once, from the posterior medians at the
+        # module's SNR cut, so an undetected line cannot enter individual
+        # draws (its ~0 draws would give log ratios of ~-50).
+        med_fluxes = {name: float(np.median(arr)) for name, arr in posteriors.items()}
+        med_errors = {name: float(np.std(arr)) for name, arr in posteriors.items()}
+        ratios = compute_line_ratios(med_fluxes, med_errors)
+        if not ratios:
+            raise ValueError("No valid strong-line ratios in the posterior medians.")
+        _require_single_valued(ratios)
 
         n_total = min(len(v) for v in posteriors.values())
         if n_posterior > 0 and n_total > n_posterior:
@@ -3714,9 +3729,15 @@ def _run_strong_line(
 
         for i in tqdm(range(n_samples), desc="Strong-line (posterior)", disable=not progress):
             samp = {name: max(float(arr[i]), 1e-50) for name, arr in sample_fluxes.items()}
+            if dust_kappa:
+                Av_i = max(float(rng.normal(Av_derived or 0.0, Av_err_derived)), 0.0)
+                for name, kap in dust_kappa.items():
+                    if name in samp:
+                        samp[name] *= 10.0 ** (0.4 * kap * Av_i)
             try:
                 ratios_i = compute_line_ratios(samp, dummy_errors, snr_thresh=-np.inf)
-                if not ratios_i:
+                ratios_i = {m: v for m, v in ratios_i.items() if m in ratios}
+                if set(ratios_i) != set(ratios):
                     continue
                 perturbed = {}
                 for m, dat in ratios_i.items():
@@ -3725,23 +3746,13 @@ def _run_strong_line(
                         "val": rng.normal(dat["val"], sig_cal),
                         "err": dat["err"],
                     }
-                res_i = minimize_scalar(
-                    _chi2_simultaneous,
-                    bounds=(Z_MIN, Z_MAX),
-                    args=(perturbed,),
-                    method="bounded",
-                )
-                OH_post[i] = res_i.x
+                OH_post[i] = solve_metallicity(perturbed)
             except (ValueError, RuntimeError):
                 continue
 
         OH_med = float(np.nanmedian(OH_post))
         OH_lo = float(OH_med - np.nanpercentile(OH_post, 16))
         OH_hi = float(np.nanpercentile(OH_post, 84) - OH_med)
-
-        med_fluxes = {name: float(np.median(arr)) for name, arr in posteriors.items()}
-        med_errors = {name: float(np.std(arr)) for name, arr in posteriors.items()}
-        ratios = compute_line_ratios(med_fluxes, med_errors)
 
         return AbundanceResult(
             method="strong_line",
@@ -4512,6 +4523,7 @@ def compute_abundances(
     _lya_obs_err = errors.get("Lya", 0.0)
 
     # --- Dust correction ---
+    _sl_dust_kappa: dict[str, float] | None = None
     dust_kwargs = {}
     if dust_law == "salim":
         dust_kwargs = {"Rv": Rv, "delta": delta, "B": B_bump}
@@ -4625,6 +4637,19 @@ def compute_abundances(
                     else:
                         A_lam = cardelli_extinction(wave_arr, Av_derived)[0]
                     posteriors[name] = posteriors[name] * 10.0 ** (0.4 * A_lam)
+        # Raw posteriors: the strong-line path must correct each draw itself.
+        if posteriors and Av_err is not None and Av_err > 0:
+            from .dust import salim_attenuation, cardelli_extinction
+            _sl_dust_kappa = {}
+            for name in posteriors:
+                wave = _LINE_WAVES.get(name)
+                if wave is None:
+                    continue
+                wave_arr = np.array([wave])
+                if dust_law == "salim":
+                    _sl_dust_kappa[name] = float(salim_attenuation(wave_arr, 1.0, **dust_kwargs)[0])
+                else:
+                    _sl_dust_kappa[name] = float(cardelli_extinction(wave_arr, 1.0)[0])
     else:
         Av_derived = Av  # store for the result even if not applied
 
@@ -4962,10 +4987,22 @@ def compute_abundances(
 
     if primary_result is None:
         # --- Strong-line method ---
-        primary_result = _run_strong_line(
-            fluxes, errors, is_mcmc, posteriors, n_mc, n_posterior,
-            progress, Av_derived, Av_err_derived, excluded_lines,
-        )
+        try:
+            primary_result = _run_strong_line(
+                fluxes, errors, is_mcmc, posteriors, n_mc, n_posterior,
+                progress, Av_derived, Av_err_derived, excluded_lines,
+                dust_kappa=_sl_dust_kappa,
+            )
+        except ValueError as exc:
+            # No usable (single-valued) ratio set: report O/H as unavailable
+            # rather than inventing one, and keep the dust/Lya results.
+            logger.warning("Strong-line O/H unavailable: %s", exc)
+            primary_result = AbundanceResult(
+                method="strong_line", OH=np.nan, OH_err=np.nan,
+                Av=Av_derived, Av_err=Av_err_derived,
+                excluded_lines=excluded_lines if excluded_lines else None,
+            )
+            primary_result.failures = {"strong_line": str(exc)}
         if _direct_failure is not None:
             primary_result.failures = dict(primary_result.failures or {})
             primary_result.failures["direct method"] = _direct_failure
@@ -4980,6 +5017,7 @@ def compute_abundances(
                 alt["strong_line"] = _run_strong_line(
                     fluxes, errors, is_mcmc, posteriors, n_mc, n_posterior,
                     progress, Av_derived, Av_err_derived, excluded_lines,
+                    dust_kappa=_sl_dust_kappa,
                 )
             except Exception:
                 logger.info("Alternative strong-line method failed; skipping.")
