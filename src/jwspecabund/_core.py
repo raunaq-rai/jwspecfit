@@ -5106,7 +5106,10 @@ def compute_abundances(
         _Av_for_esc = Av_derived if Av_derived is not None else 0.0
         _Av_err_for_esc = Av_err_derived if Av_err_derived is not None and np.isfinite(Av_err_derived) else 0.0
 
-        if is_mcmc:
+        # The MC path draws Lya and A_V once per draw, so it carries the A_V
+        # uncertainty; the analytic one cannot, so use it only when A_V is
+        # exact.
+        if is_mcmc or _Av_err_for_esc > 0:
             lya_esc_out = compute_lya_escape_fraction_mc(
                 _lya_obs_flux, _lya_obs_err,
                 fluxes, errors,

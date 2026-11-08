@@ -934,11 +934,15 @@ def compute_lya_escape_fraction(
     """Compute Lyα escape fraction from dust-corrected Balmer lines.
 
     Each available Balmer line predicts an intrinsic Lyα flux via
-    Case B recombination (T=10⁴ K, n_e=100 cm⁻³).  The escape
-    fraction is the ratio of observed Lyα to intrinsic Lyα.
+    Case B recombination (T=10⁴ K, n_e=10³ cm⁻³; :data:`LYA_CASE_B_RATIOS`).
+    The escape fraction is the ratio of observed Lyα to intrinsic Lyα.
 
-    When multiple Balmer lines are available, f_esc is computed as
-    the inverse-variance weighted mean of the individual estimates.
+    When multiple Balmer lines are available, their intrinsic-Lyα
+    predictions are combined by inverse-variance weighting and f_esc is
+    the observed Lyα over that combination.  (Averaging the per-line
+    f_esc values instead would treat the one observed Lyα flux as an
+    independent measurement for every Balmer line and shrink the error
+    by ~sqrt(N).)
 
     The observed Lyα flux should NOT be dust-corrected — the escape
     fraction encapsulates both dust attenuation and resonant scattering.
@@ -1002,19 +1006,22 @@ def compute_lya_escape_fraction(
     if not results:
         return {"f_esc": np.nan, "f_esc_err": np.nan, "individual": results, "n_lines": 0}
 
-    # Inverse-variance weighted mean.
-    fescs = np.array([r["f_esc"] for r in results])
-    errs = np.array([r["f_esc_err"] for r in results])
-    valid = np.isfinite(errs) & (errs > 0)
-    if valid.sum() >= 2:
-        w = 1.0 / errs[valid] ** 2
-        f_esc_mean = np.average(fescs[valid], weights=w)
-        f_esc_mean_err = 1.0 / np.sqrt(np.sum(w))
-    elif valid.sum() == 1:
-        f_esc_mean = fescs[valid][0]
-        f_esc_mean_err = errs[valid][0]
+    # Combine the independent intrinsic-Lyα predictions, then divide the
+    # single observed Lyα flux by the combination.
+    lya_ints = np.array([r["lya_intrinsic"] for r in results])
+    lya_errs = np.array([r["lya_intrinsic_err"] for r in results])
+    valid = np.isfinite(lya_errs) & (lya_errs > 0)
+    if valid.sum() >= 1:
+        w = 1.0 / lya_errs[valid] ** 2
+        lya_int_mean = float(np.average(lya_ints[valid], weights=w))
+        lya_int_mean_err = float(1.0 / np.sqrt(np.sum(w)))
+        f_esc_mean = lya_flux / lya_int_mean
+        f_esc_mean_err = f_esc_mean * np.sqrt(
+            (lya_flux_err / lya_flux) ** 2
+            + (lya_int_mean_err / lya_int_mean) ** 2
+        )
     else:
-        f_esc_mean = np.median(fescs)
+        f_esc_mean = float(np.median([r["f_esc"] for r in results]))
         f_esc_mean_err = np.nan
 
     return {

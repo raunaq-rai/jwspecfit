@@ -252,3 +252,16 @@ class TestMartinezEdgeCases:
         from jwspecabund.martinez25_icf import icf_NpOp
         with pytest.raises(ValueError, match="finite n_e"):
             icf_NpOp(-2.0, 0.1, float("nan"))
+
+
+def test_lya_fesc_error_counts_shared_lya_once():
+    """Three Balmer lines and one noisy Lya: error is set by the Lya error."""
+    from jwspecabund.dust import LYA_CASE_B_RATIOS, compute_lya_escape_fraction
+    hb = 1.0
+    fl = {k: 26.071 / r * hb for k, (r, _) in LYA_CASE_B_RATIOS.items()}
+    er = {k: v / 30 for k, v in fl.items()}  # SNR 30 each
+    lya = 0.2 * 26.071 * hb
+    out = compute_lya_escape_fraction(lya, lya / 5, fl, er)  # Lya SNR 5
+    assert out["f_esc"] == pytest.approx(0.2, rel=1e-12, abs=0)
+    # Must be at least the Lya-only fractional error (20%).
+    assert out["f_esc_err"] >= 0.2 * 0.2
