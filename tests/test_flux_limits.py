@@ -359,7 +359,9 @@ class TestFitIntegration:
         assert lr.ew_obs_A == pytest.approx(7.0 * lr.ew0_A, rel=1e-12)
         with pytest.warns(FutureWarning, match="ew_A was renamed to ew0_A"):
             assert lr.ew_A == lr.ew0_A
-        assert lr.cont_snr is None  # least-squares fits carry no continuum error
+        # Least-squares fits now carry the continuum error and an EW error.
+        assert lr.cont_snr is not None and lr.cont_snr > 0
+        assert lr.ew0_err is not None and lr.ew0_err > 0
 
     def test_ew0_upper_limit_without_a_continuum_is_nan(self):
         lr = LineResult(
