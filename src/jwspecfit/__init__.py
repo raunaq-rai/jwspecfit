@@ -462,10 +462,11 @@ def fit_lines(
             fix_blended_ratios=fix_blended_ratios,
         )
 
-    return fit_with_broad(
+    result = fit_with_broad(
         spectrum, z,
         grating=grating, R=R, lines=lines,
-        deg=deg,
+        wave_range_A=wave_range_A, deg=deg, clip_sigma=clip_sigma,
+        lya_break=lya_break, fix_blended_ratios=fix_blended_ratios,
         fit_balmer_broad=fit_balmer_broad,
         balmer_broad_lines=balmer_broad_lines,
         fit_oiii_broad=fit_oiii_broad,
@@ -489,3 +490,6 @@ def fit_lines(
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
     )
+    if save_path is not None:
+        export_lines_txt(result.best_fit, save_path, z=z)
+    return result

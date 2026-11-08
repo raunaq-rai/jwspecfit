@@ -195,6 +195,47 @@ class BroadFitResult:
         return self.best_fit.success
 
 
+_SQRT2 = float(np.sqrt(2.0))
+
+
+def _select_by_bic(
+    bic: dict[str, float],
+    ref: str,
+    bic_delta: float,
+    boot: dict[str, np.ndarray] | None = None,
+) -> tuple[str, float]:
+    """Pick the model with the largest BIC improvement over *ref*.
+
+    The improvement of model *v* is ``BIC_ref - BIC_v``: on the real data,
+    or, with bootstrap draws, the median over draws of the *paired*
+    difference (the same perturbed spectrum scored by both models).  A
+    model is adopted only if its improvement is finite and at least
+    *bic_delta*; otherwise *ref* is kept.
+
+    Returns
+    -------
+    tuple
+        ``(selected model, its improvement over ref)`` (0 when ref is kept).
+    """
+    gains = {}
+    for v in bic:
+        if v == ref:
+            continue
+        if boot is not None and ref in boot and v in boot:
+            d = np.asarray(boot[ref]) - np.asarray(boot[v])
+            g = float(np.nanmedian(d)) if np.any(np.isfinite(d)) else np.nan
+        else:
+            g = bic[ref] - bic[v]
+        if np.isfinite(g):
+            gains[v] = g
+    if not gains:
+        return ref, 0.0
+    best = max(gains, key=gains.get)
+    if gains[best] < bic_delta:
+        return ref, gains[best]
+    return best, gains[best]
+
+
 def _compute_bic(
     residuals: np.ndarray,
     errors: np.ndarray,
@@ -350,6 +391,8 @@ def _bic_bootstrap_single(
     hei_mask: np.ndarray | None = None,
     centroid_max_sigma: float = 1.0,
     balmer_broad_lines: list[str] | None = None,
+    tie_balmer_to_oiii: bool = True,
+    fix_blended_ratios: bool = True,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
 
@@ -390,7 +433,9 @@ def _bic_bootstrap_single(
     dict[str, float]
         ``{variant_name: bic_value}`` for each variant.
     """
-    # Create perturbed spectrum.
+    # Perturbed spectrum.  The data already carry one realisation of the
+    # noise, so the perturbed data carry sqrt(2) x err: every chi-square
+    # below is computed with that error, or Delta chi^2 would be doubled.
     perturbed = spec.copy()
     perturbed.flux_ujy = spec.flux_ujy + noise * spec.err_ujy
 
@@ -414,13 +459,15 @@ def _bic_bootstrap_single(
                 niv_doublet_ratio=niv_doublet_ratio,
                 ciii_doublet_ratio=ciii_doublet_ratio,
                 balmer_broad_lines=balmer_broad_lines,
+                fix_blended_ratios=fix_blended_ratios,
+                tie_balmer_to_oiii=tie_balmer_to_oiii,
             )
         except (ValueError, RuntimeError):
             results[variant] = np.nan
             continue
 
         # Compute BIC on Balmer pixels only.
-        flam_err = _ujy_to_flam(perturbed.err_ujy, perturbed.wave_um)
+        flam_err = _SQRT2 * _ujy_to_flam(perturbed.err_ujy, perturbed.wave_um)
         flam_data = _ujy_to_flam(
             perturbed.flux_ujy - fit_v.continuum, perturbed.wave_um
         )
@@ -444,7 +491,7 @@ def _bic_bootstrap_single(
     # what happens in the Balmer complex.
     # ------------------------------------------------------------------
     if oiii_variants and oiii_mask is not None:
-        flam_err = _ujy_to_flam(perturbed.err_ujy, perturbed.wave_um)
+        flam_err = _SQRT2 * _ujy_to_flam(perturbed.err_ujy, perturbed.wave_um)
         for variant in oiii_variants:
             # variant is one of "off"|"broad1"|"broad2"|"both"; map to
             # the oiii_broad_type kwarg accepted by _fit_model_variant.
@@ -467,6 +514,8 @@ def _bic_bootstrap_single(
                     ciii_doublet_ratio=ciii_doublet_ratio,
                     oiii_broad_type=oiii_type,
                     balmer_broad_lines=balmer_broad_lines,
+                    fix_blended_ratios=fix_blended_ratios,
+                    tie_balmer_to_oiii=tie_balmer_to_oiii,
                 )
             except (ValueError, RuntimeError):
                 results[variant] = np.nan
@@ -494,7 +543,7 @@ def _bic_bootstrap_single(
     # to a broad HeI signature.
     # ------------------------------------------------------------------
     if hei_variants and hei_mask is not None:
-        flam_err = _ujy_to_flam(perturbed.err_ujy, perturbed.wave_um)
+        flam_err = _SQRT2 * _ujy_to_flam(perturbed.err_ujy, perturbed.wave_um)
         for variant in hei_variants:
             hei_type = None if variant == "off" else variant
             try:
@@ -516,6 +565,8 @@ def _bic_bootstrap_single(
                     oiii_broad_type=hei_baseline_oiii,
                     hei_broad_type=hei_type,
                     balmer_broad_lines=balmer_broad_lines,
+                    fix_blended_ratios=fix_blended_ratios,
+                    tie_balmer_to_oiii=tie_balmer_to_oiii,
                 )
             except (ValueError, RuntimeError):
                 results[variant] = np.nan
@@ -652,6 +703,8 @@ def _fit_model_variant(
     hei_broad_type: str | None = None,
     centroid_max_sigma: float = 1.0,
     balmer_broad_lines: list[str] | None = None,
+    tie_balmer_to_oiii: bool = True,
+    fix_blended_ratios: bool = True,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -717,6 +770,8 @@ def _fit_model_variant(
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
+        continuum=continuum, fix_blended_ratios=fix_blended_ratios,
+        tie_balmer_to_oiii=tie_balmer_to_oiii,
         _label=variant_label, _p0_hint=p0_hint,
     )
 
@@ -767,6 +822,12 @@ def fit_with_broad(
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    wave_range_A: tuple[float, float] | None = None,
+    clip_sigma: float = 2.5,
+    lya_break: bool = False,
+    tie_balmer_to_oiii: bool = True,
+    fix_blended_ratios: bool = True,
+    seed: int | None = 42,
     _print_R: bool = True,
 ) -> BroadFitResult:
     """Fit emission lines with optional BIC-selected broad components.
@@ -823,19 +884,42 @@ def fit_with_broad(
     n_boot : int
         Number of bootstrap iterations for flux uncertainties (default 1000).
     n_boot_bic : int
-        Number of bootstrap iterations for BIC model selection (default 100).
-        Set to 0 for single-point BIC (legacy behaviour).
+        Number of bootstrap draws for BIC model selection (default 100).
+        Each draw adds a noise realisation to the data, scores every model
+        on it (with the sqrt(2)-larger noise the perturbed data carry), and
+        the decision uses the median of the paired difference
+        ``BIC_simpler - BIC_complex``.  Set to 0 to decide on the real-data
+        BIC alone.
     n_jobs : int
         Number of parallel jobs for bootstrap. ``-1`` uses all cores,
         ``1`` runs sequentially. Default ``-1``.
     snr_threshold : float
-        Minimum SNR of the strongest requested Balmer line (Hα > Hβ >
-        Hγ > Hδ) to attempt the Balmer broad fit (default 5.0).
+        Minimum SNR of the strongest requested Balmer line the spectrum
+        covers (Hα > Hβ > Hγ > Hδ) to attempt the Balmer broad fit
+        (default 5.0).
     oiii_snr_threshold : float
         Minimum [OIII] 5007 / 4959 SNR to attempt the OIII broad fit
         (default 5.0).
     bic_delta : float
         ΔBIC threshold for accepting a more complex model (default 6.0).
+    wave_range_A : tuple of float, optional
+        Observed-frame ``(lo, hi)`` window (Å); the fit and every BIC
+        comparison use only these pixels.
+    clip_sigma : float
+        Continuum sigma-clipping threshold (default 2.5).
+    lya_break : bool
+        Suppress the continuum blueward of Lyα (enabled automatically
+        when ``"Lya"`` is fitted).
+    tie_balmer_to_oiii : bool
+        Tie narrow Balmer kinematics to [OIII] 5007 (default ``True``), as
+        in :func:`jwspecfit.fitter.fit_lines`; applies to every model
+        compared.
+    fix_blended_ratios : bool
+        Fix the flux ratio of UV doublets closer than two FWHM (default
+        ``True``), as in :func:`jwspecfit.fitter.fit_lines`.
+    seed : int or None
+        Seed of the BIC bootstrap noise (default 42), so a rerun selects
+        the same model.  ``None`` draws fresh noise each call.
 
     Returns
     -------
@@ -843,8 +927,24 @@ def fit_with_broad(
     """
     lines = canonical_line_names(lines)
     balmer_broad_lines = _resolve_balmer_broad_lines(balmer_broad_lines)
+    # One seeded stream for every BIC bootstrap stage, so a rerun selects
+    # the same model.
+    bic_rng = np.random.default_rng(seed)
     grating = grating or spectrum.grating
     R = R or spectrum.R
+
+    if wave_range_A is not None:
+        lo_A, hi_A = wave_range_A
+        win = (spectrum.wave_A >= lo_A) & (spectrum.wave_A <= hi_A)
+        if np.sum(win) < 10:
+            raise ValueError(
+                f"Fit window [{lo_A:.0f}, {hi_A:.0f}] Å contains only {np.sum(win)} pixels."
+            )
+        spectrum = Spectrum(
+            wave_um=spectrum.wave_um[win], flux_ujy=spectrum.flux_ujy[win],
+            err_ujy=spectrum.err_ujy[win], grating=spectrum.grating, z=spectrum.z,
+            R=spectrum.R, meta=spectrum.meta,
+        )
 
     # Print resolving power once for the top-level broad-fitting call.
     if _print_R:
@@ -868,11 +968,13 @@ def fit_with_broad(
     else:
         narrow_lines = list(lines)
 
-    # Continuum (shared across all variants).
+    # Continuum, shared by every model variant (passed to each fit, so all
+    # models are compared on the same continuum).
     continuum = fit_continuum(
         spectrum.wave_um, spectrum.flux_ujy, spectrum.err_ujy,
         z, narrow_lines, grating=grating, R=R, deg=deg,
-        moving_average=moving_average,
+        clip_sigma=clip_sigma, moving_average=moving_average,
+        lya_break=lya_break or "Lya" in narrow_lines,
     )
 
     # --- Phase 1: fast fits without bootstrap for BIC comparison ---
@@ -888,6 +990,8 @@ def fit_with_broad(
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
+        fix_blended_ratios=fix_blended_ratios,
+        tie_balmer_to_oiii=tie_balmer_to_oiii,
     )
 
     bic_b1 = np.nan
@@ -913,6 +1017,8 @@ def fit_with_broad(
                 centroid_overrides=centroid_overrides,
                 niv_doublet_ratio=niv_doublet_ratio,
                 ciii_doublet_ratio=ciii_doublet_ratio,
+                fix_blended_ratios=fix_blended_ratios,
+                tie_balmer_to_oiii=tie_balmer_to_oiii,
             )
             all_fits["narrow"] = fit_narrow
         return BroadFitResult(
@@ -926,13 +1032,14 @@ def fit_with_broad(
         )
 
     # Gate on the strongest requested Balmer line (Hα unless excluded).
+    # Only lines the spectrum covers can gate: Halpha out of range (G395M at
+    # z > 6.8, G235M) used to give SNR 0 and silently skip the test.
     gate_line = next(
-        n for n in ("HALPHA", "HBETA", "HGAMMA", "HDELTA")
-        if n in balmer_broad_lines
+        (n for n in ("HALPHA", "HBETA", "HGAMMA", "HDELTA")
+         if n in balmer_broad_lines and n in fit_narrow.lines),
+        None,
     )
-    gate_snr = 0.0
-    if gate_line in fit_narrow.lines:
-        gate_snr = fit_narrow.lines[gate_line].snr
+    gate_snr = fit_narrow.lines[gate_line].snr if gate_line is not None else 0.0
 
     skip_balmer_bic = (not fit_balmer_broad) or (gate_snr < snr_threshold)
     if skip_balmer_bic:
@@ -961,7 +1068,7 @@ def fit_with_broad(
             n for n in ("HALPHA", "HBETA") if n in balmer_broad_lines
         ] or balmer_broad_lines
         balmer_mask = _balmer_pixel_mask(spectrum.wave_um, z, lines=bic_lines)
-        rng = np.random.default_rng()
+        rng = bic_rng
         noise_vectors = rng.standard_normal((n_boot_bic, len(spectrum.wave_um)))
 
         bic_records: list[dict[str, float]] = Parallel(
@@ -976,6 +1083,8 @@ def fit_with_broad(
                 centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
                 centroid_max_sigma=centroid_max_sigma,
                 balmer_broad_lines=balmer_broad_lines,
+                fix_blended_ratios=fix_blended_ratios,
+                tie_balmer_to_oiii=tie_balmer_to_oiii,
             )
             for i in range(n_boot_bic)
         )
@@ -1012,6 +1121,8 @@ def fit_with_broad(
                     sigma_overrides, centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
                     centroid_max_sigma=centroid_max_sigma,
                     balmer_broad_lines=balmer_broad_lines,
+                    fix_blended_ratios=fix_blended_ratios,
+                    tie_balmer_to_oiii=tie_balmer_to_oiii,
                 )
             for variant, fut in futures.items():
                 fit_v, _ = fut.result()
@@ -1033,6 +1144,8 @@ def fit_with_broad(
                     sigma_overrides, centroid_overrides, niv_doublet_ratio, ciii_doublet_ratio,
                     centroid_max_sigma=centroid_max_sigma,
                     balmer_broad_lines=balmer_broad_lines,
+                    fix_blended_ratios=fix_blended_ratios,
+                    tie_balmer_to_oiii=tie_balmer_to_oiii,
                 )
                 bic_futures[variant] = fut
 
@@ -1054,14 +1167,11 @@ def fit_with_broad(
             "broad2": bic_b2,
             "both": bic_both,
         }
-        candidates = {k: v for k, v in candidates.items() if np.isfinite(v)}
-        best_name = min(candidates, key=candidates.get)
-
-        if best_name != "narrow":
-            delta = bic_narrow - candidates[best_name]
-            if delta < bic_delta:
-                best_name = "narrow"
-                logger.info("ΔBIC=%.1f < %.1f; keeping narrow model.", delta, bic_delta)
+        best_name, delta = _select_by_bic(
+            candidates, "narrow", bic_delta, boot=bic_boot_dist or None,
+        )
+        if best_name == "narrow":
+            logger.info("Best ΔBIC=%.1f < %.1f; keeping narrow model.", delta, bic_delta)
 
         bic_src = "median" if n_boot_bic > 0 else "single-point"
         logger.info(
@@ -1110,7 +1220,7 @@ def fit_with_broad(
                 from joblib import Parallel, delayed
                 from tqdm import tqdm
 
-                rng = np.random.default_rng()
+                rng = bic_rng
                 noise_vectors = rng.standard_normal(
                     (n_boot_bic, len(spectrum.wave_um))
                 )
@@ -1129,6 +1239,8 @@ def fit_with_broad(
                         oiii_variants, baseline_broad, oiii_mask,
                         centroid_max_sigma=centroid_max_sigma,
                         balmer_broad_lines=balmer_broad_lines,
+                        fix_blended_ratios=fix_blended_ratios,
+                        tie_balmer_to_oiii=tie_balmer_to_oiii,
                     )
                     for i in range(n_boot_bic)
                 )
@@ -1163,6 +1275,8 @@ def fit_with_broad(
                             ciii_doublet_ratio=ciii_doublet_ratio,
                             oiii_broad_type=oiii_type,
                             balmer_broad_lines=balmer_broad_lines,
+                            fix_blended_ratios=fix_blended_ratios,
+                            tie_balmer_to_oiii=tie_balmer_to_oiii,
                         )
                     except (ValueError, RuntimeError):
                         bic_oiii[v] = float("nan")
@@ -1181,17 +1295,15 @@ def fit_with_broad(
                     bic_oiii[v] = _compute_bic(resid, flam_err, valid, nf)
 
             # Selection: pick lowest BIC; require ΔBIC ≥ bic_delta vs "off".
-            finite = {k: v for k, v in bic_oiii.items() if np.isfinite(v)}
-            if finite:
-                best_oiii = min(finite, key=finite.get)
-                if best_oiii != "off":
-                    delta = bic_oiii["off"] - finite[best_oiii]
-                    if delta < bic_delta:
-                        best_oiii = "off"
-                        logger.info(
-                            "[OIII] ΔBIC=%.1f < %.1f; keeping no OIII broad.",
-                            delta, bic_delta,
-                        )
+            if any(np.isfinite(v) for v in bic_oiii.values()):
+                best_oiii, delta = _select_by_bic(
+                    bic_oiii, "off", bic_delta, boot=bic_oiii_boot or None,
+                )
+                if best_oiii == "off":
+                    logger.info(
+                        "[OIII] best ΔBIC=%.1f < %.1f; keeping no OIII broad.",
+                        delta, bic_delta,
+                    )
                 oiii_selected = best_oiii
                 bic_src = "median" if n_boot_bic > 0 else "single-point"
                 logger.info(
@@ -1243,7 +1355,7 @@ def fit_with_broad(
                 from joblib import Parallel, delayed
                 from tqdm import tqdm
 
-                rng = np.random.default_rng()
+                rng = bic_rng
                 noise_vectors = rng.standard_normal(
                     (n_boot_bic, len(spectrum.wave_um))
                 )
@@ -1264,6 +1376,8 @@ def fit_with_broad(
                         hei_mask,
                         centroid_max_sigma=centroid_max_sigma,
                         balmer_broad_lines=balmer_broad_lines,
+                        fix_blended_ratios=fix_blended_ratios,
+                        tie_balmer_to_oiii=tie_balmer_to_oiii,
                     )
                     for i in range(n_boot_bic)
                 )
@@ -1298,6 +1412,8 @@ def fit_with_broad(
                             oiii_broad_type=oiii_broad_type_sel,
                             hei_broad_type=hei_type,
                             balmer_broad_lines=balmer_broad_lines,
+                            fix_blended_ratios=fix_blended_ratios,
+                            tie_balmer_to_oiii=tie_balmer_to_oiii,
                         )
                     except (ValueError, RuntimeError):
                         bic_hei[v] = float("nan")
@@ -1315,17 +1431,15 @@ def fit_with_broad(
                     )
                     bic_hei[v] = _compute_bic(resid, flam_err, valid, nf)
 
-            finite = {k: v for k, v in bic_hei.items() if np.isfinite(v)}
-            if finite:
-                best_hei = min(finite, key=finite.get)
-                if best_hei != "off":
-                    delta = bic_hei["off"] - finite[best_hei]
-                    if delta < bic_delta:
-                        best_hei = "off"
-                        logger.info(
-                            "HeI ΔBIC=%.1f < %.1f; keeping no HeI broad.",
-                            delta, bic_delta,
-                        )
+            if any(np.isfinite(v) for v in bic_hei.values()):
+                best_hei, delta = _select_by_bic(
+                    bic_hei, "off", bic_delta, boot=bic_hei_boot or None,
+                )
+                if best_hei == "off":
+                    logger.info(
+                        "HeI best ΔBIC=%.1f < %.1f; keeping no HeI broad.",
+                        delta, bic_delta,
+                    )
                 hei_selected = best_hei
                 bic_src = "median" if n_boot_bic > 0 else "single-point"
                 logger.info(
@@ -1372,6 +1486,8 @@ def fit_with_broad(
             oiii_broad_type=oiii_broad_type_sel,
             hei_broad_type=hei_broad_type_sel,
             balmer_broad_lines=balmer_broad_lines,
+            fix_blended_ratios=fix_blended_ratios,
+            tie_balmer_to_oiii=tie_balmer_to_oiii,
         )
         all_fits[selected_key] = best_fit
     elif any_broad_sel and selected_key not in all_fits:
@@ -1394,6 +1510,8 @@ def fit_with_broad(
             oiii_broad_type=oiii_broad_type_sel,
             hei_broad_type=hei_broad_type_sel,
             balmer_broad_lines=balmer_broad_lines,
+            fix_blended_ratios=fix_blended_ratios,
+            tie_balmer_to_oiii=tie_balmer_to_oiii,
         )
         all_fits[selected_key] = best_fit
 

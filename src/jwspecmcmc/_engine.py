@@ -1175,10 +1175,13 @@ def _fit_with_broad_mcmc(
         fit_balmer_broad, fit_oiii_broad, fit_hei_broad,
     )
 
+    # Same window, clipping, ties and seed as the MCMC below, so the model
+    # is selected under the settings it is then sampled with.
     bic_result = _fit_with_broad_mle(
         spectrum, z,
         grating=grating, R=R, lines=lines,
-        deg=deg,
+        wave_range_A=wave_range_A, deg=deg, clip_sigma=clip_sigma,
+        tie_balmer_to_oiii=tie_balmer_to_oiii, seed=seed,
         fit_balmer_broad=fit_balmer_broad,
         balmer_broad_lines=balmer_broad_lines,
         fit_oiii_broad=fit_oiii_broad,
@@ -1211,16 +1214,6 @@ def _fit_with_broad_mcmc(
         "BIC selected model: %s (%d lines: %s)",
         selected_model, len(winning_lines), winning_lines,
     )
-
-    # Build _p0_hint from the MLE best-fit parameters.
-    nL_mle = len(best_mle.line_names)
-    p0_hint: dict[str, tuple[float, float, float]] = {}
-    for i, name in enumerate(best_mle.line_names):
-        p0_hint[name] = (
-            best_mle.params[i],                # amplitude
-            best_mle.params[nL_mle + i],       # centroid
-            best_mle.params[2 * nL_mle + i],   # sigma
-        )
 
     # ------------------------------------------------------------------
     # Phase 2: MCMC on the winning model

@@ -1033,10 +1033,11 @@ def fit_lines(
             ub_cap = max(3.0 * p0[i_pri], p0[i_sec] * 5.0)
             ub[i_sec] = min(ub[i_sec], ub_cap)
 
-    # Override seeds from a previous fit (e.g. narrow-only results).
-    # For non-broad lines, also set an amplitude floor at 30% of the
-    # narrow-only value to prevent the optimizer from zeroing out narrow
-    # lines when a broad component can absorb their flux.
+    # Override seeds from a previous fit (e.g. narrow-only results).  Seeds
+    # only: no bound is derived from the hint.  A narrow-only fit absorbs any
+    # broad wings into the narrow lines, so a floor built from it (formerly
+    # 0.3 x the hint) pinned [NII] at several times its true flux with zero
+    # error once the broad component was added.
     if _p0_hint is not None:
         for hint_name, (hint_A, hint_mu, hint_sig) in _p0_hint.items():
             if hint_name in idx:
@@ -1044,9 +1045,6 @@ def fit_lines(
                 p0[j] = np.clip(hint_A, lb[j], ub[j])
                 p0[nL + j] = np.clip(hint_mu, lb[nL + j], ub[nL + j])
                 p0[2 * nL + j] = np.clip(hint_sig, lb[2 * nL + j], ub[2 * nL + j])
-                # Amplitude floor for narrow lines (not broad components).
-                if "BROAD" not in hint_name and hint_A > 0:
-                    lb[j] = max(lb[j], 0.3 * hint_A)
 
     # Mask constrained parameters: only optimise free ones.
     free_mask = constraints.free_mask()

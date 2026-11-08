@@ -294,3 +294,98 @@ class TestBalmerBroadLines:
                 fit_balmer_broad=True, balmer_broad_lines=["HALPHA"],
             )
         assert exc.value.args[0] == ["HALPHA"]
+
+
+# --- Regression tests from the 2026-11 audit -------------------------------
+
+def _synthetic_g395m(z, comps, err=0.01, seed=0):
+    """Narrow + broad lines on a G395M-like grid; comps = [(rest_A, flux, sigma_v_kms)]."""
+    from jwspecfit.io import Spectrum, _flam_to_ujy
+    from jwspecfit.models import gaussian_binned
+
+    wave = np.arange(2.87, 5.27, 0.00170476)
+    s0 = Spectrum(wave_um=wave, flux_ujy=0 * wave, err_ujy=np.full_like(wave, err), grating="G395M")
+    e = s0.wave_edges_A
+    flam = np.zeros(len(wave))
+    for rest, f, sv in comps:
+        lam = rest * (1 + z)
+        sig = np.hypot(lam / (2.3548 * 1000.0), sv / 2.998e5 * lam)
+        flam += f * gaussian_binned(e[:-1], e[1:], lam, sig)
+    rng = np.random.default_rng(seed)
+    flux = 0.2 + _flam_to_ujy(flam, wave) + rng.normal(0, err, len(wave))
+    return Spectrum(wave_um=wave, flux_ujy=flux, err_ujy=s0.err_ujy, grating="G395M")
+
+
+class TestSelectByBic:
+    def test_nan_comparison_never_adopts_the_complex_model(self):
+        from jwspecfit.broad import _select_by_bic
+
+        assert _select_by_bic({"narrow": np.nan, "broad1": 10.0}, "narrow", 6.0)[0] == "narrow"
+
+    def test_paired_draws_decide_not_unpaired_medians(self):
+        from jwspecfit.broad import _select_by_bic
+
+        # Unpaired medians differ by only 5 (< 6); draw by draw the broad
+        # model wins by 105 in two of three draws, so the paired median is 105.
+        boot = {"narrow": np.array([100.0, 200.0, 300.0]),
+                "broad1": np.array([290.0, 95.0, 195.0])}
+        point = {k: float(np.median(v)) for k, v in boot.items()}
+        assert _select_by_bic(point, "narrow", 6.0)[0] == "narrow"
+        sel, gain = _select_by_bic(point, "narrow", 6.0, boot=boot)
+        assert (sel, gain) == ("broad1", 105.0)
+
+class TestBroadPathRegressions:
+    Z = 5.0
+    NARROW = [(REST_LINES_A["HBETA"], 3e-19, 60), (REST_LINES_A["OIII_4959"], 3.3e-19, 60),
+              (REST_LINES_A["OIII_5007"], 1e-18, 60), (REST_LINES_A["HALPHA"], 9e-19, 60),
+              (REST_LINES_A["NII_6585"], 1e-19, 60), (REST_LINES_A["NII_6549"], 1e-19 / 2.96, 60)]
+    LINES = ["HBETA", "OIII_4959", "OIII_5007", "HALPHA", "NII_6549", "NII_6585"]
+
+    def test_nii_not_pinned_by_a_floor_from_the_narrow_only_fit(self):
+        """A narrow-only fit soaks broad wings into [NII]; no bound may be built from it."""
+        broad = [(REST_LINES_A["HALPHA"], 2.7e-18, 1300)]
+        spec = _synthetic_g395m(self.Z, self.NARROW + broad, seed=1)
+        res = fit_with_broad(spec, self.Z, lines=self.LINES, fit_balmer_broad=True,
+                             balmer_broad_lines=["HALPHA"], n_boot=50, n_boot_bic=0)
+        assert res.selected_model != "narrow"
+        nii = res.best_fit.lines["NII_6585"]
+        assert nii.flux_err > 0
+        assert nii.flux < 2.0e-19          # truth 1e-19; the old floor held it at ~2.6x
+
+    def test_gate_uses_a_covered_balmer_line(self):
+        """Halpha off the detector must not silently skip the Balmer test (G395M, z = 7)."""
+        z = 7.0
+        comps = [(REST_LINES_A["HBETA"], 1e-18, 60), (REST_LINES_A["OIII_5007"], 2e-18, 60),
+                 (REST_LINES_A["OIII_4959"], 2e-18 / 2.984, 60), (REST_LINES_A["HBETA"], 3e-18, 1300)]
+        spec = _synthetic_g395m(z, comps, seed=2)
+        res = fit_with_broad(spec, z, lines=["HBETA", "OIII_4959", "OIII_5007"],
+                             fit_balmer_broad=True, n_boot=0, n_boot_bic=0)
+        assert res.selected_model != "narrow"
+
+    def test_public_wrapper_keeps_wave_range_on_the_broad_path(self):
+        spec = _synthetic_g395m(self.Z, self.NARROW, seed=3)
+        lo, hi = 4600 * (1 + self.Z), 6900 * (1 + self.Z)
+        res = jwspecfit.fit_lines(spec, self.Z, lines=self.LINES, wave_range_A=(lo, hi),
+                                  fit_balmer_broad=True, n_boot=0, n_boot_bic=0)
+        w = res.best_fit.spectrum.wave_A
+        assert w.min() >= lo and w.max() <= hi
+
+    def test_bootstrap_bic_selection_is_reproducible(self):
+        spec = _synthetic_g395m(self.Z, self.NARROW, seed=4)
+        kw = dict(lines=self.LINES, fit_balmer_broad=True, balmer_broad_lines=["HALPHA"],
+                  n_boot=0, n_boot_bic=8, n_jobs=1)
+        a, b = fit_with_broad(spec, self.Z, **kw), fit_with_broad(spec, self.Z, **kw)
+        assert a.selected_model == b.selected_model
+        assert a.bic_narrow == b.bic_narrow
+
+    def test_bootstrap_chi2_is_on_the_noise_scale_of_the_perturbed_data(self):
+        """Perturbed data carry sqrt(2) x err: their narrow chi2/N must be ~1, not ~2."""
+        from jwspecfit.broad import _balmer_pixel_mask
+
+        spec = _synthetic_g395m(self.Z, self.NARROW, seed=5)
+        res = fit_with_broad(spec, self.Z, lines=self.LINES, fit_balmer_broad=True,
+                             balmer_broad_lines=["HALPHA"], n_boot=0, n_boot_bic=12, n_jobs=1)
+        n_pix = int(np.sum(_balmer_pixel_mask(spec.wave_um, self.Z, lines=["HALPHA"])))
+        k = int(np.sum(res.all_fits["narrow"].constraints.free_mask()))
+        chi2 = np.median(res.bic_bootstrap["narrow"]) - k * np.log(n_pix)
+        assert 0.6 < chi2 / n_pix < 1.4
