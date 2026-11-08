@@ -4,7 +4,16 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
-## Unreleased — abundance audit (2026-11-08)
+## 1.2.0 — 2026-11-08
+
+### Installation
+
+- `pip install jwspecfit` now installs every runtime dependency: the
+  NUTS/JAX, emcee and nautilus samplers, PyNeb, dynesty, pandas, and
+  `ipywidgets`/`nbformat` for Jupyter progress bars and plotly figures.
+  The `nuts`, `mcmc`, `abund` and `dla` extras remain as empty aliases.
+
+### Abundance audit
 
 Fixes from a source-by-source audit of `jwspecabund` (every coefficient
 checked against the papers or the authors' released code, ionic
