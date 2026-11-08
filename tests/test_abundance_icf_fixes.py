@@ -218,3 +218,15 @@ def test_izotov_tier_row_matches_adopted_izotov_value():
     tot = compute_total_abundances(ionic, icf_method="izotov06")
     row = [v for k, v in tot["_NO_tiers"].items() if k.startswith("Izotov")]
     assert row and row[0] == pytest.approx(np.log10(tot["N/O"]), abs=1e-12)
+
+
+def test_oii_upper_limit_uses_both_doublet_emissivities():
+    from jwspecabund._core import _compute_ionic_upper_limits
+    from jwspecabund.direct import _ionic_abundance
+    fluxes = {"HBETA": 100.0, "OIII_5007": 500.0}
+    errors = {"HBETA": 1.0, "OIII_5007": 5.0, "OII_doublet": 2.0}
+    ul, _ = _compute_ionic_upper_limits(
+        {"O++/H+": 1e-4}, fluxes, errors, 1.5e4, 1.35e4, 300.0, 300.0, 300.0,
+    )
+    expect = _ionic_abundance("O", 2, 6.0, 100.0, 1.35e4, 300.0, [3726, 3729])
+    assert ul["O+/H+"] == pytest.approx(expect, rel=1e-10, abs=0)

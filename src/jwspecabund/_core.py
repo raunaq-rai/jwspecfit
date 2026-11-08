@@ -1815,7 +1815,9 @@ def _compute_ionic_upper_limits(
     # Mapping: ion_key -> (element, ion_stage, line_names, wave_labels, Te, ne)
     # C²⁺/N²⁺ use the intermediate temperature Te_mid (Martinez+2025 §5.4).
     _ION_MAP = [
-        ("O+/H+",   "O", 2, ["OII_doublet"], [3727],       Te_low,  ne_low),
+        # The doublet limit bounds 3726+3729, so both emissivities are summed
+        # (wave=3727 alone picks the single 3726 transition: limit 2.2x high).
+        ("O+/H+",   "O", 2, ["OII_doublet"], [3726, 3729], Te_low,  ne_low),
         ("O++/H+",  "O", 3, ["OIII_5007"],   [5007],       Te_high, ne_opp),
         ("N+/H+",   "N", 2, ["NII_6585"],    [6584],       Te_low,  ne_low),
         ("N++/H+",  "N", 3, list(NIII_MULTIPLET), list(NIII_MULTIPLET.values()), Te_mid, ne_mid),
