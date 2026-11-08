@@ -119,12 +119,15 @@ def icf_sulfur(O_plus: float, O_total: float) -> float:
 def icf_carbon(O_plus: float, O_pp: float) -> float:
     """ICF for carbon (Garnett+1997).
 
-    When C+ is not detected, the observed (C2+ + C3+)/O2+ underestimates
-    C/O because C+ in the low-ionisation zone is missing.  The correction
-    assumes C+/C_total ~ O+/O_total (similar ionisation structure):
+    When C+ is not detected, (C2+ + C3+)/H+ underestimates C/H because
+    C+ in the low-ionisation zone is missing.  The correction assumes
+    C+/C_total ~ O+/O_total (similar ionisation structure):
 
-        C/O = ICF_C * (C2+ + C3+) / O2+
-        ICF_C = (O+ + O2+) / O2+
+        C/H = ICF_C * (C2+ + C3+) / H+,   ICF_C = (O+ + O2+) / O2+
+
+    so that C/O = ICF_C * (C2+ + C3+) / (O/H) = (C2+ + C3+) / O2+.  The
+    ICF multiplies the ion sum over the *total* O/H, exactly as for N, Ne
+    and Ar; using it with O2+ in the denominator double-counts O+.
 
     Parameters
     ----------

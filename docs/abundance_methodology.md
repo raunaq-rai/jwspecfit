@@ -839,8 +839,12 @@ legacy tiered path is used:
 - **C+ not detected** — Garnett (1997) ICF (Jones et al. 2023 when O+ is also
   missing, ICF = 1):
   ```
-  C/O = ICF_C × (C2+ + C3+) / O2+,    ICF_C = (O+ + O2+) / O2+
+  C/H = ICF_C × (C2+ + C3+) / H+,    ICF_C = (O+ + O2+) / O2+
+  C/O = ICF_C × (C2+ + C3+) / (O+ + O2+) = (C2+ + C3+) / O2+
   ```
+  (Before v1.1.17 the ICF was applied on top of the O2+ denominator,
+  correcting for O+ twice and biasing C/O high by log(O/O2+): +0.05 dex at
+  O2+/O = 0.9.)
 
 
 ---

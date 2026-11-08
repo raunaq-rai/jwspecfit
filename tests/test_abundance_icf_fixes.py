@@ -31,3 +31,19 @@ class TestSulfurNeedsBothIons:
         tot = compute_total_abundances(ionic, icf_method="izotov06")
         expected = icf_sulfur(1e-5, 1e-4) * 1.0e-6 / 1.0e-4
         assert tot["S/O"] == pytest.approx(expected, rel=1e-12, abs=0)
+
+
+class TestGarnettCarbonNotDoubleCounted:
+    """C+/C = O+/O implies C/O = (C2+ + C3+)/O2+ exactly."""
+
+    @pytest.mark.parametrize("w", [0.95, 0.8, 0.5])
+    def test_recovers_true_c_over_o(self, w):
+        O_tot, CO_true = 1.0e-4, 0.3
+        O_pp, O_p = w * O_tot, (1 - w) * O_tot
+        # Carbon ionised like oxygen; C3+ folded into the "upper" fraction.
+        C_tot = CO_true * O_tot
+        ionic = {"O+/H+": O_p, "O++/H+": O_pp,
+                 "C++/H+": 0.8 * w * C_tot, "C+++/H+": 0.2 * w * C_tot}
+        tot = compute_total_abundances(ionic, co_icf_method="garnett97")
+        assert tot["CO_method"] == "garnett97_icf"
+        assert tot["C/O"] == pytest.approx(CO_true, rel=1e-12, abs=0)

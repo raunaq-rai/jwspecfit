@@ -2896,10 +2896,13 @@ def compute_total_abundances(
                 # Direct sum — all C ions detected, use total O
                 totals["C/O"] = (C_p + C_uv) / OH
                 totals["CO_method"] = "direct_sum"
-            elif _co_tier_allowed("garnett97_icf") and C_uv > 0 and O_pp > 0:
-                # Apply Garnett+1997 ICF to correct for missing C+
+            elif _co_tier_allowed("garnett97_icf") and C_uv > 0 and O_pp > 0 and OH > 0:
+                # Garnett+1997: C+/C ~ O+/O, so C/H = ICF_C (C2+ + C3+)/H+ with
+                # ICF_C = O/O2+.  Dividing by the *total* O/H (as for N, Ne,
+                # Ar) gives C/O = (C2+ + C3+)/O2+; dividing by O2+ instead
+                # would apply the O+ correction twice.
                 icf_c = icf_carbon(O_plus, O_pp)
-                raw_co = C_uv / O_pp
+                raw_co = C_uv / OH
                 totals["C/O"] = icf_c * raw_co
                 totals["CO_method"] = "garnett97_icf"
                 totals["CO_icf_value"] = icf_c
