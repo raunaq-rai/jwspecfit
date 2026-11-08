@@ -120,8 +120,13 @@ class LineResult:
         Continuum f_λ (erg/s/cm²/Å) at the line that ``ew0_A`` was
         computed with, and that :meth:`ew0_upper_limit` divides by.
     cont_err_flam : float or None
-        1σ uncertainty on ``cont_flam``, when the fit supplies one (MCMC
-        results do; ``None`` otherwise).
+        1σ uncertainty on ``cont_flam`` from the continuum fit's covariance
+        (``None`` for an external or median-filter continuum).
+    ew0_err : float or None
+        Bootstrap 1σ error on ``ew0_A``.  Each draw refits the continuum,
+        so both the line-flux and the continuum terms are included
+        (only the flux term for an external continuum).  ``None`` without
+        a bootstrap (``n_boot=0``).
     z : float or None
         Redshift used for the rest-frame conversion.
     """
@@ -144,6 +149,7 @@ class LineResult:
     cont_flam: float | None = None
     cont_err_flam: float | None = None
     z: float | None = None
+    ew0_err: float | None = None
 
     @property
     def ew_obs_A(self) -> float:
@@ -716,20 +722,22 @@ def fit_lines(
     _lya_in_lines = "Lya" in line_names
     _lya_break = lya_break or _lya_in_lines
 
+    # The bootstrap refits an internal continuum in every draw with these
+    # settings, so its uncertainty reaches the flux and EW errors; an
+    # external continuum is held fixed.
+    _cont_kwargs = dict(
+        z=z, line_names=list(line_names), grating=grating, R=R, deg=deg,
+        clip_sigma=clip_sigma, moving_average=moving_average, lya_break=_lya_break,
+    )
+    cont_err = None
     if continuum is None:
-        continuum = fit_continuum(
-            spec.wave_um,
-            spec.flux_ujy,
-            spec.err_ujy,
-            z,
-            line_names,
-            grating=grating,
-            R=R,
-            deg=deg,
-            clip_sigma=clip_sigma,
-            moving_average=moving_average,
-            lya_break=_lya_break,
+        continuum, cont_err = fit_continuum(
+            spec.wave_um, spec.flux_ujy, spec.err_ujy, return_err=True, **_cont_kwargs,
         )
+        cont_refit = dict(cont_ujy=continuum, err_ujy=spec.err_ujy,
+                          wave_um=spec.wave_um, kwargs=_cont_kwargs)
+    else:
+        cont_refit = None
     flux_sub = spec.flux_ujy - continuum
 
     # Convert to F_λ for fitting.
@@ -1168,12 +1176,20 @@ def fit_lines(
     dof = max(n_data - n_free, 1)
     chi2_red = float(np.nansum(r**2)) / dof
 
-    # Bootstrap uncertainties.
-    flux_errs = _bootstrap_uncertainties(
+    # Bootstrap uncertainties: fluxes and rest-frame EWs of every line,
+    # Gaussians first, then Lyα.
+    _cont_flam_all = _ujy_to_flam(continuum, spec.wave_um)
+    _mu_all = list(p_best[nL:2 * nL]) + ([_lya_best[1]] if _lya_best is not None else [])
+    _cont_idx = np.array([int(np.argmin(np.abs(spec.wave_A - m))) for m in _mu_all], dtype=int)
+    _boot = _bootstrap_uncertainties(
         flam, flam_err, valid, edges, nL, constraints, free_mask,
         lb_free, ub_free, p0_free, n_boot, label=_label,
-        n_jobs=n_jobs,
+        n_jobs=n_jobs, n_lya=_n_lya, cont_refit=cont_refit,
+        cont_idx=_cont_idx, cont_fixed=_cont_flam_all[_cont_idx], z=z,
     )
+    flux_errs, ew0_errs = _boot if _boot is not None else (None, None)
+    cont_err_flam = (_ujy_to_flam(cont_err, spec.wave_um) if cont_err is not None
+                     else np.full(spec.n_pix, np.nan))
 
     # Build per-line results.
     line_results = {}
@@ -1253,11 +1269,13 @@ def fit_lines(
             flux=flux_line,
             flux_err=f_err,
             ew0_A=ew_rest,
+            ew0_err=float(ew0_errs[i]) if ew0_errs is not None else None,
             snr_int_err=snr_int_err,
             snr_int_cont=snr_int_cont,
             snr_peak_err=snr_peak_err,
             snr_peak_cont=snr_peak_cont,
             cont_flam=float(cont_at_line),
+            cont_err_flam=_finite_or_none(cont_err_flam[idx_cont]),
             z=float(z),
         )
 
@@ -1274,7 +1292,7 @@ def fit_lines(
         flux_lya = float(np.sum(_lya_profile * dlam))
 
         # Uncertainty from local noise.
-        f_err_lya = _analytic_flux_err(
+        f_err_lya = float(flux_errs[nL]) if flux_errs is not None else _analytic_flux_err(
             flux_lya, sig_lya, flam_err, spec.wave_A, mu_lya, valid,
         )
 
@@ -1294,7 +1312,9 @@ def fit_lines(
             flux=flux_lya,
             flux_err=f_err_lya,
             ew0_A=ew_lya,
+            ew0_err=float(ew0_errs[nL]) if ew0_errs is not None else None,
             cont_flam=float(cont_at_lya) if np.isfinite(cont_at_lya) else None,
+            cont_err_flam=_finite_or_none(cont_err_flam[idx_cont_lya]),
             z=float(z),
             snr_int_err=snr_lya,
             snr_int_cont=snr_lya,
@@ -1390,6 +1410,16 @@ def _analytic_flux_err(
     return rms * dlam * sqrt(n_eff)
 
 
+def _finite_or_none(x: float) -> float | None:
+    """``float(x)`` if finite, else None."""
+    return float(x) if np.isfinite(x) else None
+
+
+def _lya_profile(centres: np.ndarray, p_lya: np.ndarray) -> np.ndarray:
+    """Asymmetric-Gaussian Lyα at bin centres; ``p_lya = [A_peak, mu, sigma, alpha]``."""
+    return asymmetric_gaussian(centres, p_lya[0], p_lya[1], p_lya[2], p_lya[3])
+
+
 def _run_single_bootstrap(
     noise_vec: np.ndarray,
     flam: np.ndarray,
@@ -1401,6 +1431,9 @@ def _run_single_bootstrap(
     lb_free: np.ndarray,
     ub_free: np.ndarray,
     p0_free: np.ndarray,
+    n_lya: int = 0,
+    cont_refit: dict | None = None,
+    cont_idx: np.ndarray | None = None,
 ) -> np.ndarray:
     """Run a single bootstrap iteration.
 
@@ -1408,31 +1441,78 @@ def _run_single_bootstrap(
     ----------
     noise_vec : np.ndarray
         Pre-generated standard-normal noise vector (length ``n_pix``).
+    n_lya : int
+        Number of trailing Lyα parameters in the free vector (0 or 4).
+    cont_refit : dict, optional
+        ``{"cont_ujy", "err_ujy", "wave_um", "kwargs"}``: also redraw the
+        continuum.  The continuum fit is linear in the data for a fixed
+        mask, so the shift a noise draw produces is the continuum fit
+        :func:`fit_continuum` ``(**kwargs)`` of the noise itself, with
+        clipping off (clipping the sqrt(2)-noisier perturbed data would
+        remove ~6x as many pixels as the real fit does, inflating the
+        spread).  ``None`` holds the continuum fixed.
+    cont_idx : np.ndarray, optional
+        Pixel index of each reported line, at which the drawn continuum is
+        returned (for the equivalent-width error).
 
     Returns
     -------
     np.ndarray
-        Flux (amplitude) for each line, or NaN if the fit fails.
+        ``[flux_0 .. flux_{n-1}, cont_0 .. cont_{n-1}]`` where the n reported
+        lines are the Gaussians followed by Lyα (if fitted); continuum in
+        F_λ.  NaN where the refit failed.
     """
-    flam_b = flam + noise_vec * flam_err
+    from .io import _ujy_to_flam
 
-    def residual_b(p_free: np.ndarray) -> np.ndarray:
-        p_full = constraints.expand_free_to_full(p_free)
-        model = build_model(p_full, edges, nL)
+    n_out = nL + (1 if n_lya else 0)
+    if cont_refit is not None:
+        cr = cont_refit
+        noise_ujy = noise_vec * cr["err_ujy"]
+        d_cont = fit_continuum(
+            cr["wave_um"], noise_ujy, cr["err_ujy"], **{**cr["kwargs"], "clip_sigma": np.inf},
+        )
+        flam_b = flam + _ujy_to_flam(noise_ujy - d_cont, cr["wave_um"])
+        cont_flam_b = _ujy_to_flam(cr["cont_ujy"] + d_cont, cr["wave_um"])
+    else:
+        flam_b = flam + noise_vec * flam_err
+        cont_flam_b = None
+    centres = 0.5 * (edges[:-1] + edges[1:])
+    n_g = len(p0_free) - n_lya
+
+    def residual_b(p: np.ndarray) -> np.ndarray:
+        model = build_model(constraints.expand_free_to_full(p[:n_g]), edges, nL)
+        if n_lya:
+            model = model + _lya_profile(centres, p[n_g:])
         resid = (flam_b - model) / flam_err
         resid[~valid] = 0.0
         return resid
 
+    out = np.full(2 * n_out, np.nan)
     try:
         res_b = least_squares(
             residual_b, p0_free, bounds=(lb_free, ub_free),
             max_nfev=20000, xtol=1e-6, ftol=1e-6,
             x_scale="jac",
         )
-        p_full_b = constraints.expand_free_to_full(res_b.x)
-        return p_full_b[:nL]
     except Exception:
-        return np.full(nL, np.nan)
+        return out
+    out[:nL] = constraints.expand_free_to_full(res_b.x[:n_g])[:nL]
+    if n_lya:
+        out[nL] = float(np.sum(_lya_profile(centres, res_b.x[n_g:]) * np.diff(edges)))
+    if cont_flam_b is not None and cont_idx is not None:
+        out[n_out:] = cont_flam_b[cont_idx]
+    return out
+
+
+def _clipped_std(samples: np.ndarray) -> float:
+    """3-sigma-clipped standard deviation, falling back to the plain one."""
+    from astropy.stats import sigma_clipped_stats
+
+    finite = samples[np.isfinite(samples)]
+    if len(finite) < 3:
+        return float(np.nanstd(samples)) if len(finite) else np.nan
+    _, _, std = sigma_clipped_stats(finite, sigma=3.0)
+    return float(std) if std > 0 else float(np.std(finite))
 
 
 def _bootstrap_uncertainties(
@@ -1449,74 +1529,81 @@ def _bootstrap_uncertainties(
     n_boot: int,
     label: str = "",
     n_jobs: int = -1,
-) -> np.ndarray | None:
-    """Run bootstrap resampling for flux uncertainties.
+    n_lya: int = 0,
+    cont_refit: dict | None = None,
+    cont_idx: np.ndarray | None = None,
+    cont_fixed: np.ndarray | None = None,
+    z: float = 0.0,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Bootstrap the line fluxes and rest-frame equivalent widths.
 
     Parameters
     ----------
     n_jobs : int
         Number of parallel jobs for bootstrap. ``-1`` uses all cores,
         ``1`` runs sequentially. Default ``-1``.
+    n_lya : int
+        Trailing Lyα parameters in the free vector (0 or 4).
+    cont_refit : dict, optional
+        Refit the continuum in every draw (see :func:`_run_single_bootstrap`).
+    cont_idx : np.ndarray, optional
+        Pixel index of each reported line (Gaussians, then Lyα).
+    cont_fixed : np.ndarray, optional
+        Continuum F_λ at those pixels, used when the continuum is held fixed.
+    z : float
+        Redshift, for the rest-frame equivalent width.
 
     Returns
     -------
-    np.ndarray or None
-        Standard deviation of flux for each line, or None if n_boot == 0.
+    tuple of np.ndarray or None
+        ``(flux_err, ew0_err)`` per reported line (3-sigma-clipped standard
+        deviations over the draws), or None if ``n_boot == 0``.
     """
     if n_boot <= 0:
         return None
 
     # Pre-generate all noise vectors for reproducibility.
     rng = np.random.default_rng(42)
-    noise_all = rng.standard_normal((n_boot, len(flam)))
+    n_pix = len(flam)
+    noise_all = rng.standard_normal((n_boot, n_pix))
 
-    # Shared keyword arguments for _run_single_bootstrap.
     shared_kwargs = dict(
         flam=flam, flam_err=flam_err, valid=valid, edges=edges,
         nL=nL, constraints=constraints, lb_free=lb_free, ub_free=ub_free,
-        p0_free=p0_free,
+        p0_free=p0_free, n_lya=n_lya, cont_refit=cont_refit, cont_idx=cont_idx,
     )
 
     desc = f"Bootstrap ({label})" if label else "Bootstrap"
+    from tqdm import tqdm
 
     try:
         from joblib import Parallel, delayed
-        from tqdm import tqdm
 
         logger.info("%s: %d iterations, n_jobs=%d", desc, n_boot, n_jobs)
-
-        # return_as="generator" yields results as they complete,
-        # letting tqdm update incrementally.
         gen = Parallel(n_jobs=n_jobs, return_as="generator", prefer="processes")(
             delayed(_run_single_bootstrap)(noise_all[b], **shared_kwargs)
             for b in range(n_boot)
         )
-        results = list(tqdm(gen, total=n_boot, desc=desc, unit="iter"))
-        flux_samples = np.array(results)
-
+        samples = np.array(list(tqdm(gen, total=n_boot, desc=desc, unit="iter")))
     except ImportError:
         logger.warning("joblib not installed; falling back to sequential bootstrap.")
-        from tqdm import tqdm
+        samples = np.array([
+            _run_single_bootstrap(noise_all[b], **shared_kwargs)
+            for b in tqdm(range(n_boot), desc=desc, unit="iter")
+        ])
 
-        flux_samples = np.zeros((n_boot, nL))
-
-        for b in tqdm(range(n_boot), desc=desc, unit="iter"):
-            flux_samples[b, :] = _run_single_bootstrap(
-                noise_all[b], **shared_kwargs
-            )
-
-    # Use sigma-clipped std to reject pathological bootstrap iterations
-    # where unconstrained parameters (e.g. UV secondaries) blow up.
-    from astropy.stats import sigma_clipped_stats
-
-    errs = np.zeros(flux_samples.shape[1])
-    for i in range(flux_samples.shape[1]):
-        col = flux_samples[:, i]
-        finite = col[np.isfinite(col)]
-        if len(finite) < 3:
-            errs[i] = np.nanstd(col)
-        else:
-            _, _, std = sigma_clipped_stats(finite, sigma=3.0)
-            # Fall back to nanstd if clipping removes all variance.
-            errs[i] = std if std > 0 else np.nanstd(finite)
-    return errs
+    n_out = nL + (1 if n_lya else 0)
+    flux = samples[:, :n_out]
+    if cont_refit is not None:
+        cont = samples[:, n_out:]
+    elif cont_fixed is not None:
+        cont = np.broadcast_to(cont_fixed, flux.shape)
+    else:
+        cont = np.full_like(flux, np.nan)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ew0 = np.where(cont > 0, flux / cont / (1.0 + z), np.nan)
+    # Sigma-clipped spread rejects pathological refits of unconstrained
+    # parameters (e.g. UV secondaries) without touching Gaussian scatter.
+    flux_err = np.array([_clipped_std(flux[:, i]) for i in range(n_out)])
+    ew0_err = np.array([_clipped_std(ew0[:, i]) for i in range(n_out)])
+    return flux_err, ew0_err

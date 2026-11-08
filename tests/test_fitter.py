@@ -135,3 +135,54 @@ def test_grating_bounds_use_sigma_inst_at_the_line(grating, lo, hi, n):
         seed = _grating_bounds(grating, sig, dlam, lam, wave_A=wave_A)[1]
         expect = (0.90 if grating == "PRISM" else 0.60) * sig[np.argmin(abs(wave_A - lam))]
         assert seed == pytest.approx(expect)
+
+
+def _faint_continuum_spectrum(cont_ujy, seed=0, with_lya=False):
+    import numpy as np
+
+    from jwspecfit.io import Spectrum, _flam_to_ujy
+    from jwspecfit.lines import REST_LINES_A
+    from jwspecfit.models import asymmetric_gaussian, gaussian_binned
+
+    z = 7.5 if with_lya else 5.0
+    wave = np.arange(0.97 if with_lya else 2.87, 1.89 if with_lya else 5.2, 0.0006 if with_lya else 0.0017)
+    err = np.full_like(wave, 0.05)
+    s0 = Spectrum(wave_um=wave, flux_ujy=0 * wave, err_ujy=err, grating="G140M" if with_lya else "G395M")
+    e = s0.wave_edges_A
+    flam = np.zeros(len(wave))
+    names = ["CIV_1"] if with_lya else ["OIII_5007", "HALPHA"]
+    for n in names:
+        lam = REST_LINES_A[n] * (1 + z)
+        flam += 1.5e-18 * gaussian_binned(e[:-1], e[1:], lam, lam / 2355.0)
+    if with_lya:
+        c = 0.5 * (e[1:] + e[:-1])
+        flam += asymmetric_gaussian(c, 4e-19, REST_LINES_A["Lya"] * (1 + z), 6.0, 3.0)
+    rng = np.random.default_rng(seed)
+    flux = cont_ujy + _flam_to_ujy(flam, wave) + rng.normal(0, 1, len(wave)) * err
+    return Spectrum(wave_um=wave, flux_ujy=flux, err_ujy=err, grating=s0.grating), z, names
+
+
+def test_lsq_ew_error_includes_the_continuum_term():
+    """Least-squares EWs carry an error, and a faint continuum dominates it."""
+    from jwspecfit.fitter import fit_lines
+
+    spec, z, names = _faint_continuum_spectrum(0.02)
+    res = fit_lines(spec, z, lines=names, n_boot=60, _label="t")
+    for n in names:
+        lr = res.lines[n]
+        flux_only = lr.ew0_A * lr.flux_err / lr.flux
+        assert lr.ew0_err is not None and lr.ew0_err > 1.5 * flux_only
+        assert lr.cont_err_flam is not None and lr.cont_snr > 0
+
+
+def test_bootstrap_errors_finite_when_lya_is_fitted():
+    """Lyα's four parameters used to break every bootstrap refit (all errors NaN)."""
+    import numpy as np
+
+    from jwspecfit.fitter import fit_lines
+
+    spec, z, names = _faint_continuum_spectrum(0.05, with_lya=True)
+    res = fit_lines(spec, z, lines=["Lya"] + names, n_boot=30, _label="t")
+    for n in ["Lya"] + names:
+        lr = res.lines[n]
+        assert np.isfinite(lr.flux_err) and 0 < lr.flux_err < 0.3 * lr.flux, n
