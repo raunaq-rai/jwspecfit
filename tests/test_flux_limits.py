@@ -652,7 +652,7 @@ class TestMCMCIntegration:
         )
         assert set(limits) == set(mcmc_fit.lines)
         for name, lr in mcmc_fit.lines.items():
-            assert limits[name] == pytest.approx(lr.upper_limit(3.0), rel=1e-12)
+            assert limits[name] == pytest.approx(lr.upper_limit(3.0), rel=1e-12, abs=0.0)
 
     def test_missing_cached_noise_is_measured_from_the_model(self, mcmc_fit):
         """A result without cached noise (e.g. built by hand) still gets
@@ -668,7 +668,7 @@ class TestMCMCIntegration:
             bare, z=6.0, Av=None, dust_law="salim",
         )
         for name, lr in mcmc_fit.lines.items():
-            assert limits[name] == pytest.approx(lr.upper_limit(3.0), rel=1e-6)
+            assert limits[name] == pytest.approx(lr.upper_limit(3.0), rel=1e-6, abs=0.0)
 
     def test_to_fit_result_carries_the_limits(self, mcmc_fit):
         converted = mcmc_fit.to_fit_result()
@@ -707,7 +707,7 @@ class TestMCMCIntegration:
         loaded = load_mcmc_result(tmp_path / "ew.npz")
         for name, lr in mcmc_fit.lines.items():
             back = loaded.lines[name]
-            assert back.cont_flam == pytest.approx(lr.cont_flam, rel=1e-12)
+            assert back.cont_flam == pytest.approx(lr.cont_flam, rel=1e-12, abs=0.0)
             assert back.z == lr.z
             assert back.ew0_upper_limit() == pytest.approx(lr.ew0_upper_limit(), rel=1e-9)
 
