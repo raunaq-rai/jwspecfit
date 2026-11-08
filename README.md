@@ -29,18 +29,16 @@ Three packages, one pipeline — from 1-D NIRSpec spectra to element abundances.
 pip install jwspecfit
 ```
 
-Or with all optional extras (MCMC backends, abundances, DLA fitter):
-
-```bash
-pip install "jwspecfit[nuts,mcmc,abund,dla]"
-```
+This installs everything: the least-squares fitter, all MCMC backends
+(NUTS/JAX, emcee, nautilus), PyNeb for abundances, the DLA fitter, and the
+Jupyter widgets the progress bars and interactive plots need.
 
 For development (editable install from source):
 
 ```bash
 git clone https://github.com/raunaq-rai/jwspecfit.git
 cd jwspecfit
-pip install -e ".[dev,nuts,mcmc,abund]"
+pip install -e ".[dev]"
 ```
 
 Requires Python ≥ 3.10. See the [installation guide](https://jwspecfit.readthedocs.io/en/latest/installation.html) for individual extras.

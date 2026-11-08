@@ -116,9 +116,7 @@ print(abund.NO)               # log(N/O)
 For high-redshift spectra with damped Lyα absorption, fit the column
 density via Pollock+26-style joint nested sampling:
 
-```bash
-pip install jwspecfit[dla]
-```
+(`dynesty` is installed with `jwspecfit`.)
 
 ```python
 result = jwspecfit.fit_NHI(

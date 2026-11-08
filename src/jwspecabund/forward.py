@@ -683,7 +683,7 @@ def _run_dynesty(
     except ImportError as exc:
         raise ImportError(
             "dynesty is required for nested sampling. "
-            "Install with: pip install dynesty"
+            "Reinstall jwspecfit (pip install -U jwspecfit), which installs it."
         ) from exc
 
     n_dim = len(param_names)
@@ -946,7 +946,7 @@ def forward_model(
     except ImportError as exc:
         raise ImportError(
             "PyNEB is required for the forward model. "
-            "Install with: pip install 'jwspecfit[abund]'"
+            "Reinstall jwspecfit (pip install -U jwspecfit), which installs it."
         ) from exc
 
     # Build observables.
