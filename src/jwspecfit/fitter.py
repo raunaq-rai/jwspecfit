@@ -405,6 +405,49 @@ class FitResult:
         return uls
 
 
+def _seed_peak(
+    flam: np.ndarray,
+    flam_err: np.ndarray,
+    valid: np.ndarray,
+    idx_near: np.ndarray,
+    is_abs: bool,
+) -> float:
+    """Peak flux density used to seed and bound a line's amplitude.
+
+    The peak (or, for absorption, the trough depth) of the valid pixels
+    near the line, floored at the local noise level.  The floor keeps
+    the seed on the data's flux scale when a faint line sits on a
+    negative noise dip, where the old fallback of 1.0 erg/s/cm^2/A put
+    the seed and bound ~1e19 times too high and broke the joint fit.
+
+    Parameters
+    ----------
+    flam, flam_err : np.ndarray
+        Continuum-subtracted flux density and its error (F_lambda).
+    valid : np.ndarray
+        Valid-pixel mask.
+    idx_near : np.ndarray
+        Pixel indices near the line.
+    is_abs : bool
+        Absorption line (seed from the trough depth).
+
+    Returns
+    -------
+    float
+        Positive peak flux density.
+    """
+    near = idx_near[valid[idx_near]] if len(idx_near) else idx_near
+    if len(near) == 0:
+        near = np.where(valid)[0]
+    if len(near) == 0:
+        return 1e-30
+    vals = flam[near]
+    peak = abs(np.nanmin(vals)) if is_abs else np.nanmax(vals)
+    noise = float(np.nanmedian(flam_err[near]))
+    peak = max(peak if np.isfinite(peak) else 0.0, noise if np.isfinite(noise) else 0.0)
+    return peak if peak > 0 else 1e-30
+
+
 def _grating_bounds(
     grating: str | None,
     sigma_inst: np.ndarray,
@@ -854,20 +897,7 @@ def fit_lines(
         idx_near = np.where(near < 5 * sig_seed)[0]
         is_abs = name.startswith("abs_")
 
-        if is_abs:
-            # Absorption line: seed from the deepest trough.
-            if len(idx_near) > 0:
-                peak_flam = abs(np.nanmin(flam[idx_near]))
-            else:
-                peak_flam = 1.0
-        else:
-            # Emission line: seed from the peak.
-            if len(idx_near) > 0:
-                peak_flam = np.nanmax(flam[idx_near])
-            else:
-                peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
-        if not np.isfinite(peak_flam) or peak_flam <= 0:
-            peak_flam = 1.0
+        peak_flam = _seed_peak(flam, flam_err, valid, idx_near, is_abs)
 
         # Amplitude seed = peak × sqrt(2π) × σ (area under Gaussian).
         A_seed = max(peak_flam * _SQRT2PI * sig_seed, 1e-30)

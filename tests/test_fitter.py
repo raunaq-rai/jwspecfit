@@ -100,3 +100,20 @@ class TestLineResult:
             assert lr.sigma_A > 0
             assert lr.snr >= 0
             assert np.isfinite(lr.ew0_A)
+
+
+def test_faint_line_on_negative_dip_keeps_sane_seed_and_errors():
+    """A faint line with no positive pixel nearby must not get a ~1 erg/s/cm2/A seed.
+
+    The old fallback seeded such a line at peak = 1.0 (~1e19 x the real flux
+    scale); the joint fit then mis-converged and the bootstrap collapsed to
+    identical garbage, returning flux_err = 0 for the bright lines.
+    """
+    import numpy as np
+
+    from jwspecfit.fitter import _seed_peak
+
+    flam = np.array([-3e-21, -2e-21, -4e-21, -1e-21])
+    err = np.full(4, 1e-21)
+    peak = _seed_peak(flam, err, np.ones(4, bool), np.arange(4), is_abs=False)
+    assert peak == pytest.approx(1e-21)

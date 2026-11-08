@@ -16,7 +16,7 @@ import numpy as np
 
 from jwspecfit.constraints import ConstraintSet
 from jwspecfit.continuum import fit_continuum
-from jwspecfit.fitter import _grating_bounds
+from jwspecfit.fitter import _grating_bounds, _seed_peak
 from jwspecfit.io import Spectrum, _flam_to_ujy, _ujy_to_flam
 from jwspecfit.limits import flux_noise_for_lines, resolution_of
 from jwspecfit.lines import (
@@ -497,18 +497,7 @@ def _fit_lines_mcmc(
         idx_near = np.where(near < 5 * sig_seed)[0]
         is_abs = name.startswith("abs_")
 
-        if is_abs:
-            if len(idx_near) > 0:
-                peak_flam = abs(np.nanmin(flam[idx_near]))
-            else:
-                peak_flam = 1.0
-        else:
-            if len(idx_near) > 0:
-                peak_flam = np.nanmax(flam[idx_near])
-            else:
-                peak_flam = np.nanmax(flam[valid]) if np.any(valid) else 1.0
-        if not np.isfinite(peak_flam) or peak_flam <= 0:
-            peak_flam = 1.0
+        peak_flam = _seed_peak(flam, flam_err, valid, idx_near, is_abs)
 
         A_seed = max(peak_flam * _SQRT2PI * sig_seed, 1e-30)
 
