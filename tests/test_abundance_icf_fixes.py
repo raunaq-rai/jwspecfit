@@ -358,3 +358,61 @@ def test_co_logu_marginalised_without_ciii_density():
     s_on = on.CO_err if np.isscalar(on.CO_err) else 0.5 * sum(on.CO_err)
     s_off = off.CO_err if np.isscalar(off.CO_err) else 0.5 * sum(off.CO_err)
     assert s_on > 1.3 * s_off
+
+
+# ---------------------------------------------------------------------------
+# Forward model
+# ---------------------------------------------------------------------------
+
+class TestForwardModelFixes:
+
+    def _result(self, logs):
+        from jwspecabund.forward import _build_forward_result
+        names = ["log_Te", "log_ne", *logs]
+        samples = np.tile([4.2, 2.5, *logs.values()], (50, 1))
+        return _build_forward_result(samples, names, [])
+
+    def test_n_over_o_with_optical_nitrogen_only(self):
+        r = self._result({"log_Op": -4.5, "log_Opp": -4.0, "log_Np": -5.7})
+        assert r["NO"] == pytest.approx(-5.7 + 4.5, abs=1e-12)
+
+    def test_n_over_o_all_zones_and_no_n_v(self):
+        r = self._result({"log_Op": -4.5, "log_Opp": -4.0, "log_Np": -5.7,
+                          "log_Npp": -5.0, "log_Npppp": -4.0})
+        expect = np.log10((10**-5.7 + 10**-5.0) / (10**-4.5 + 10**-4.0))
+        assert r["NO"] == pytest.approx(expect, abs=1e-12)
+
+    def test_cii_lines_build_one_multiplet_observable(self):
+        from jwspecabund.forward import (_PRIOR_BOUNDS, _build_observables,
+                                         _determine_free_params)
+        f = {"HBETA": 1.0, "OIII_5007": 5.0, "CII]_2324": 0.02, "CII]_2326": 0.03}
+        e = {k: 0.05 * v for k, v in f.items()}
+        names, obs, _, comps = _build_observables(f, e)
+        assert "CII_multiplet/Hb" in names
+        assert obs[names.index("CII_multiplet/Hb")] == pytest.approx(0.05, abs=0, rel=1e-12)
+        assert all(p in _PRIOR_BOUNDS for p in _determine_free_params(comps))
+
+    def test_fitter_merged_niv_key_used(self):
+        from jwspecabund.forward import _build_observables
+        names, *_ = _build_observables({"HBETA": 1.0, "NIV_doublet": 0.1},
+                                       {"HBETA": 0.02, "NIV_doublet": 0.01})
+        assert names == ["NIV_doublet/Hb"]
+
+    def test_shared_hbeta_covariance(self):
+        from jwspecabund.forward import _build_observables
+        f = {"HBETA": 1.0, "OIII_5007": 5.0, "OIII_4363": 0.05}
+        e = {"HBETA": 0.1, "OIII_5007": 0.1, "OIII_4363": 0.001}
+        names, r, icov, _ = _build_observables(f, e)
+        fr = np.array([e[n.split("/")[0]] / f[n.split("/")[0]] for n in names])
+        cov = np.diag((r * fr) ** 2) + np.outer(r, r) * 0.1**2
+        np.testing.assert_allclose(np.linalg.inv(icov), cov, rtol=1e-10, atol=0)
+
+    def test_zero_hbeta_error_keeps_line_errors(self):
+        from jwspecabund.forward import _build_observables
+        names, r, icov, _ = _build_observables(
+            {"HBETA": 1.0, "OIII_5007": 5.0}, {"HBETA": 0.0, "OIII_5007": 0.005})
+        assert np.sqrt(np.linalg.inv(icov)[0, 0]) == pytest.approx(0.005, rel=1e-10, abs=0)
+
+    def test_density_prior_reaches_1e6(self):
+        from jwspecabund.forward import _PRIOR_BOUNDS
+        assert _PRIOR_BOUNDS["log_ne"][1] >= 6.0

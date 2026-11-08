@@ -202,13 +202,17 @@ _LINE_COMPONENTS: dict[str, list[tuple[str, int, int]]] = {
     # UV semi-forbidden lines
     "NIV_1483":    [("N", 4, 1483)],
     "NIV_1486":    [("N", 4, 1487)],
+    "NIV_doublet": [("N", 4, 1483), ("N", 4, 1487)],
     # N III] 1750 quintuplet: one observable for the whole blend.  The
     # members share one fitted flux, so they are collapsed into
     # "NIII_doublet" by _build_observables rather than entered as five
     # (fully correlated) observables.
     "NIII_doublet": [("N", 3, w) for w in (1747, 1749, 1750, 1752, 1754)],
-    "CII]_2324":   [("C", 2, 2324)],
-    "CII]_2326":   [("C", 2, 2326)],
+    # C II] 2326 multiplet: the two fitted Gaussians (CII]_2324, CII]_2326)
+    # together capture the blend of all five transitions, so, as in
+    # direct.py, they are summed by _build_observables into one observable
+    # carrying all five emissivities.
+    "CII_multiplet": [("C", 2, w) for w in (2323, 2325, 2326, 2327, 2328)],
     "CIII]_1907":  [("C", 3, 1907)],
     "CIII]_1909":       [("C", 3, 1909)],
     "CIV_1":       [("C", 4, 1548)],
@@ -261,7 +265,7 @@ _PARAM_LABELS: dict[str, str] = {
 # Uniform prior bounds for each parameter.
 _PRIOR_BOUNDS: dict[str, tuple[float, float]] = {
     "log_Te":    (3.5, 5.0),
-    "log_ne":    (0.0, 5.0),
+    "log_ne":    (0.0, 6.0),  # Cullen+25 Table 2 goes to 1e6; high-z gas reaches 1e5+
     "log_Opp":   (-7.0, -2.0),
     "log_Op":    (-7.0, -2.0),
     "log_Np":    (-8.0, -3.0),
@@ -271,6 +275,7 @@ _PRIOR_BOUNDS: dict[str, tuple[float, float]] = {
     "log_Sp":    (-9.0, -4.0),
     "log_Spp":   (-9.0, -4.0),
     "log_Arpp":  (-9.0, -4.0),
+    "log_Cp":    (-8.0, -3.0),
     "log_Cpp":   (-8.0, -3.0),
     "log_Cppp":  (-8.0, -3.0),
     "log_Npppp": (-9.0, -3.0),
@@ -305,8 +310,12 @@ def _build_observables(
         Human-readable labels for each observable, e.g. ``"OIII_5007/Hb"``.
     obs_ratios : ndarray
         Observed line/Hbeta ratios.
-    ratio_errors : ndarray
-        1-sigma errors on the ratios (Gaussian propagation).
+    ratio_icov : ndarray
+        Inverse covariance matrix of the ratios.  Every ratio shares the
+        one H-beta flux, so their errors are correlated:
+        C_ij = r_i r_j (s_Hb/F_Hb)^2 + delta_ij r_i^2 (s_i/F_i)^2.
+        A line with no error falls back to a 10 % line error; a missing
+        H-beta error contributes nothing.
     obs_components : list of list of tuple
         For each observable, the list of PyNEB ``(elem, ion, wave)``
         components that sum to give the line flux.
@@ -318,7 +327,7 @@ def _build_observables(
 
     ratio_names: list[str] = []
     obs_ratios: list[float] = []
-    ratio_errs: list[float] = []
+    line_fracs: list[float] = []
     obs_components: list[list[tuple[str, int, int]]] = []
 
     # Collapse the fitted N III] quintuplet members into one observable,
@@ -331,6 +340,14 @@ def _build_observables(
         line_fluxes = {**line_fluxes, "NIII_doublet": f_n3}
         line_errors = {**line_errors, "NIII_doublet": e_n3}
         n3_components = [("N", 3, w) for w in w_n3]
+
+    # Likewise the C II] 2326 multiplet: one observable for the blend.
+    _cii = [n for n in ("CII]_2324", "CII]_2326") if line_fluxes.get(n, 0.0) > 0]
+    if _cii and line_fluxes.get("CII_multiplet", 0.0) <= 0:
+        line_fluxes = {**line_fluxes,
+                       "CII_multiplet": sum(line_fluxes[n] for n in _cii)}
+        line_errors = {**line_errors, "CII_multiplet": float(np.sqrt(
+            sum(line_errors.get(n, 0.0) ** 2 for n in _cii)))}
 
     # Lines that require more atomic levels than PyNEB's default data
     # provides (e.g. [OIII] 1661/1666 need a 6-level O++ atom).
@@ -348,26 +365,23 @@ def _build_observables(
         e_line = line_errors.get(name, 0.0)
 
         ratio = f_line / f_hb
-        # Error propagation: sigma_R = R * sqrt((sigma_l/f_l)^2 + (sigma_hb/f_hb)^2)
-        if e_line > 0 and e_hb > 0:
-            rel_err = ratio * np.sqrt(
-                (e_line / f_line) ** 2 + (e_hb / f_hb) ** 2
-            )
-        else:
-            rel_err = 0.1 * ratio  # 10 % default
+        line_frac = e_line / f_line if e_line > 0 else 0.1  # 10 % default
 
         ratio_names.append(f"{name}/Hb")
         obs_ratios.append(ratio)
-        ratio_errs.append(rel_err)
+        line_fracs.append(line_frac)
         obs_components.append(components)
 
     if not ratio_names:
         raise ValueError("No valid emission lines found for forward modelling.")
 
+    r = np.array(obs_ratios)
+    hb_frac = e_hb / f_hb if e_hb > 0 else 0.0
+    cov = np.diag((r * np.array(line_fracs)) ** 2) + np.outer(r, r) * hb_frac**2
     return (
         ratio_names,
-        np.array(obs_ratios),
-        np.array(ratio_errs),
+        r,
+        np.linalg.inv(cov),
         obs_components,
     )
 
@@ -485,8 +499,10 @@ def _log_likelihood(
     if not np.all(np.isfinite(predicted)) or np.any(predicted <= 0):
         return -np.inf
 
-    residuals = (obs_ratios - predicted) / ratio_errors
-    return -0.5 * np.sum(residuals ** 2)
+    d = obs_ratios - predicted
+    if np.ndim(ratio_errors) == 2:  # inverse covariance (shared H-beta)
+        return -0.5 * float(d @ ratio_errors @ d)
+    return -0.5 * np.sum((d / ratio_errors) ** 2)
 
 
 def _log_prior(theta: np.ndarray, param_names: list[str]) -> float:
@@ -773,33 +789,30 @@ def _build_forward_result(
         result["OH_err"] = np.nan
         result["OH_posterior"] = None
 
-    # log(N/O) — sum all available nitrogen ions in linear space, divide
-    # by total oxygen.  Falls back to N+/O+ if only optical N+ is available.
-    n_ion_keys = [
-        ("log_Np", "N+"),
-        ("log_Npp", "N2+"),
-        ("log_Nppp", "N3+"),
-        ("log_Npppp", "N4+"),
-    ]
-    n_posteriors_lin = []
-    for key, _label in n_ion_keys:
-        if key in ionic_posteriors:
-            n_posteriors_lin.append(10.0 ** ionic_posteriors[key])
+    # log(N/O), no ICF, pairing each nitrogen set with the oxygen ions of
+    # the same zones (the direct method's direct-sum tiers):
+    #   N+ and UV N ions -> (N+ + N2+ + N3+) / (O+ + O2+)
+    #   N+ only          -> N+ / O+          (the classical N+/O+ = N/O)
+    #   UV N ions only   -> (N2+ + N3+) / O2+
+    # Dividing N+ alone by O+ + O2+ would bias N/O low by log(O/O+).
+    # N4+ (N V) is never used: it is stellar-wind/AGN dominated.
+    def _lin(key):
+        return 10.0 ** ionic_posteriors[key] if key in ionic_posteriors else None
 
-    o_posteriors_lin = []
-    for key in ("log_Op", "log_Opp"):
-        if key in ionic_posteriors:
-            o_posteriors_lin.append(10.0 ** ionic_posteriors[key])
+    Np, Npp, Nppp = _lin("log_Np"), _lin("log_Npp"), _lin("log_Nppp")
+    Op, Opp = _lin("log_Op"), _lin("log_Opp")
+    uv = [a for a in (Npp, Nppp) if a is not None]
+    num = den = None
+    if Np is not None and uv and Op is not None and Opp is not None:
+        num, den = Np + sum(uv), Op + Opp
+    elif Np is not None and Op is not None:
+        num, den = Np, Op
+    elif uv and Opp is not None:
+        num, den = sum(uv), Opp
 
-    if n_posteriors_lin and o_posteriors_lin:
-        N_total = sum(n_posteriors_lin)
-        O_total = sum(o_posteriors_lin)
+    if num is not None:
         with np.errstate(invalid="ignore", divide="ignore"):
-            NO_post = np.where(
-                (N_total > 0) & (O_total > 0),
-                np.log10(N_total / O_total),
-                np.nan,
-            )
+            NO_post = np.where((num > 0) & (den > 0), np.log10(num / den), np.nan)
         valid = np.isfinite(NO_post)
         if np.any(valid):
             result["NO_posterior"] = NO_post

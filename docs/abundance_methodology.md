@@ -1049,6 +1049,23 @@ This method self-consistently accounts for the T_e–n_e coupling and
 non-Gaussian posterior distributions, but is more computationally
 expensive than the direct method.
 
+Details:
+
+- **Likelihood.** Every observable is a line/Hbeta ratio, so all share the
+  Hbeta error; the Gaussian likelihood uses the full covariance
+  C_ij = r_i r_j (s_Hb/F_Hb)^2 + delta_ij r_i^2 (s_i/F_i)^2 (a diagonal
+  likelihood overstated the T_e error ~5x when Hbeta dominates the noise).
+- **Blends.** The N III] 1750 quintuplet and the C II] 2326 multiplet are
+  each one observable carrying all of their transitions' emissivities.
+- **Priors.** Uniform; log n_e in [0, 6] (Cullen+25 Table 2 goes to 10^6).
+- **N/O** has no ICF and pairs ions by zone: (N+ + N2+ + N3+)/(O+ + O2+)
+  when both optical and UV nitrogen are fitted, N+/O+ with optical only,
+  (N2+ + N3+)/O2+ with UV only.  N4+ (N V) is never used.
+- **Limitations.** One T_e and one n_e for every ion (the direct method
+  uses three zones), so low-ionisation ions inherit T_e(O2+); C/O is the
+  ionic (C2+ + C3+)/O2+ with no ICF; O III] 1661/1666 are not modelled;
+  A_V is held fixed; non-detections are dropped.
+
 
 ---
 
@@ -1076,9 +1093,12 @@ The dust correction is applied per-sample:
 F_corr,i = F_obs,i × 10^(0.4 × k(lambda) × A_V,i)
 ```
 
-where A_V,i is re-derived from the Balmer decrement in each sample.
-This propagates the full posterior covariance between line fluxes
-through to the final abundances.
+where A_V,i ~ N(A_V, Av_err) (or the uniform *Av_prior*), clipped at 0,
+drawn independently of that sample's Balmer lines; this happens only when
+a positive `Av_err` is passed (otherwise one A_V corrects every draw).
+The same per-draw A_V is applied to the Gaussian MC of least-squares input.
+Posterior draws propagate the full covariance between line fluxes through
+to the final abundances.
 
 ### 11.3 Out-of-bounds resampling and the O/H–N/O decoupling
 
