@@ -384,7 +384,9 @@ def _fit_lines_mcmc(
     _kept: list[str] = []
     for name in line_names:
         lam_obs_A = REST_LINES_A[name] * (1.0 + z)
-        _, sig_seed, _ = _grating_bounds(grating, sig_inst, dlam, lam_obs_A, sigma_factor)
+        _, sig_seed, _ = _grating_bounds(
+            grating, sig_inst, dlam, lam_obs_A, sigma_factor, wave_A=spec.wave_A,
+        )
         near_mask = np.abs(spec.wave_A - lam_obs_A) < 5 * sig_seed
         n_valid = int(np.sum(valid & near_mask))
         n_total = int(np.sum(near_mask))
@@ -490,7 +492,9 @@ def _fit_lines_mcmc(
 
     for i, name in enumerate(line_names):
         lam_obs_A = REST_LINES_A[name] * (1.0 + z)
-        sig_lo, sig_seed, sig_hi = _grating_bounds(grating, sig_inst, dlam, lam_obs_A, sigma_factor)
+        sig_lo, sig_seed, sig_hi = _grating_bounds(
+            grating, sig_inst, dlam, lam_obs_A, sigma_factor, wave_A=spec.wave_A,
+        )
 
         # Peak flux near the line for amplitude seeding.
         near = np.abs(spec.wave_A - lam_obs_A)

@@ -454,6 +454,8 @@ def _grating_bounds(
     dlam_A: np.ndarray,
     line_wave_obs_A: float,
     sigma_factor: float = 1.0,
+    *,
+    wave_A: np.ndarray,
 ) -> tuple[float, float, float]:
     """Return (sigma_lo, sigma_seed, sigma_hi) in Å for a given grating.
 
@@ -471,15 +473,16 @@ def _grating_bounds(
         Multiplicative factor applied to the upper width bound.
         Use values > 1 for stacked spectra where redshift scatter
         broadens lines beyond the instrumental resolution (default 1.0).
+    wave_A : np.ndarray
+        Pixel-centre wavelengths (Å), on which *sigma_inst* is sampled.
 
     Returns
     -------
     tuple of float
         ``(sigma_lo, sigma_seed, sigma_hi)`` in Å.
     """
-    # Find σ_inst at the line wavelength.
-    idx = np.argmin(np.abs(dlam_A.cumsum() - line_wave_obs_A + dlam_A.cumsum()[0]))
-    sig = sigma_inst[min(idx, len(sigma_inst) - 1)]
+    # σ_inst at the pixel nearest the line.
+    sig = sigma_inst[np.argmin(np.abs(wave_A - line_wave_obs_A))]
     pix = np.median(dlam_A)
 
     g = (grating or "").upper()
@@ -749,7 +752,9 @@ def fit_lines(
     _kept: list[str] = []
     for name in line_names:
         lam_obs_A = REST_LINES_A[name] * (1.0 + z)
-        _, sig_seed, _ = _grating_bounds(grating, sig_inst, spec.dlam_A, lam_obs_A, sigma_factor)
+        _, sig_seed, _ = _grating_bounds(
+            grating, sig_inst, spec.dlam_A, lam_obs_A, sigma_factor, wave_A=spec.wave_A,
+        )
         near_mask = np.abs(spec.wave_A - lam_obs_A) < 5 * sig_seed
         n_valid = int(np.sum(valid & near_mask))
         n_total = int(np.sum(near_mask))
@@ -890,7 +895,9 @@ def fit_lines(
 
     for i, name in enumerate(line_names):
         lam_obs_A = REST_LINES_A[name] * (1.0 + z)
-        sig_lo, sig_seed, sig_hi = _grating_bounds(grating, sig_inst, dlam, lam_obs_A, sigma_factor)
+        sig_lo, sig_seed, sig_hi = _grating_bounds(
+            grating, sig_inst, dlam, lam_obs_A, sigma_factor, wave_A=spec.wave_A,
+        )
 
         # Find peak/trough flux near the line for amplitude seeding.
         near = np.abs(spec.wave_A - lam_obs_A)

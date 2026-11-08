@@ -117,3 +117,21 @@ def test_faint_line_on_negative_dip_keeps_sane_seed_and_errors():
     err = np.full(4, 1e-21)
     peak = _seed_peak(flam, err, np.ones(4, bool), np.arange(4), is_abs=False)
     assert peak == pytest.approx(1e-21)
+
+
+@pytest.mark.parametrize("grating,lo,hi,n", [("G395M", 2.87, 5.2, 3000), ("PRISM", 0.6, 5.3, 430)])
+def test_grating_bounds_use_sigma_inst_at_the_line(grating, lo, hi, n):
+    """Width bounds must use σ_inst at the line's own pixel, not elsewhere."""
+    import numpy as np
+
+    from jwspecfit.fitter import _grating_bounds
+    from jwspecfit.resolution import sigma_inst_A
+
+    w_um = np.geomspace(lo, hi, n)
+    wave_A = w_um * 1e4
+    dlam = np.gradient(wave_A)
+    sig = sigma_inst_A(w_um, grating=grating)
+    for lam in np.linspace(wave_A[50], wave_A[-50], 5):
+        seed = _grating_bounds(grating, sig, dlam, lam, wave_A=wave_A)[1]
+        expect = (0.90 if grating == "PRISM" else 0.60) * sig[np.argmin(abs(wave_A - lam))]
+        assert seed == pytest.approx(expect)
