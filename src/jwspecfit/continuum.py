@@ -102,13 +102,14 @@ def fit_continuum(
     wave_A = wave_um * 1e4
     valid = np.isfinite(flux_ujy) & np.isfinite(err_ujy) & (err_ujy > 0)
 
-    # Mask everything blueward of Lyman-alpha (1215.67 Å rest-frame).
-    # The IGM absorbs flux shortward of Ly-α, making the continuum
-    # unreliable there.
+    # Exclude everything blueward of Lyman-alpha (1215.67 Å rest-frame)
+    # from the fit.  The IGM absorbs flux shortward of Ly-α, so those pixels
+    # are not continuum: with lya_break the output is zeroed there anyway,
+    # and fitting them used to drag the red-side continuum down (to 0.3x
+    # on a G140M test).
     _LYA_REST_A = 1215.670
     lya_obs_A = _LYA_REST_A * (1.0 + z)
-    if not lya_break:
-        valid &= wave_A >= lya_obs_A
+    valid &= wave_A >= lya_obs_A
 
     # Resolve moving_average window size.
     if moving_average is True:

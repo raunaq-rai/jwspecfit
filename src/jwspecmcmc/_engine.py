@@ -16,7 +16,7 @@ import numpy as np
 
 from jwspecfit.constraints import ConstraintSet
 from jwspecfit.continuum import fit_continuum
-from jwspecfit.fitter import _grating_bounds, _seed_peak
+from jwspecfit.fitter import _grating_bounds, _lya_sigma_bounds, _seed_peak
 from jwspecfit.io import Spectrum, _flam_to_ujy, _ujy_to_flam
 from jwspecfit.limits import flux_noise_for_lines, resolution_of
 from jwspecfit.lines import (
@@ -436,9 +436,8 @@ def _fit_lines_mcmc(
 
         # Single asymmetric Gaussian: [A_peak, mu, sigma, alpha].
         # σ controls blue-side sharpness; α handles the red tail.
-        sig_seed = max(local_sig, 0.5)
-        sig_lo = 0.2
-        sig_hi = 3.0 * sigma_factor
+        sig_lo, sig_seed, sig_hi = _lya_sigma_bounds(local_sig, sigma_factor)
+        lya_sig_inst = local_sig
 
         A_peak_seed = 0.5 * peak_lya
         alpha_seed = 5.0
@@ -662,8 +661,9 @@ def _fit_lines_mcmc(
                     lya_ub[2] = min(lya_ub[2], 1.3 * _mle_sig_n)
                     # Also tighten centroid.
                     _mle_mu_n = _mle_lya[1]
-                    lya_lb[1] = max(lya_lb[1], _mle_mu_n - 0.5)
-                    lya_ub[1] = min(lya_ub[1], _mle_mu_n + 0.5)
+                    _mu_win = max(0.5, lya_sig_inst)
+                    lya_lb[1] = max(lya_lb[1], _mle_mu_n - _mu_win)
+                    lya_ub[1] = min(lya_ub[1], _mle_mu_n + _mu_win)
                     # Update the master bounds arrays (Lyα is at the end).
                     _lya_start = len(lb_free) - _n_lya
                     lb_free[_lya_start:] = lya_lb

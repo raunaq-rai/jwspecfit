@@ -838,6 +838,7 @@ def fit_lines(
 
         idx_lya = np.argmin(np.abs(spec.wave_A - lya_obs_A))
         local_sig = sig_inst[idx_lya]
+        lya_sig_inst = local_sig
         near_lya = np.abs(spec.wave_A - lya_obs_A) < 10 * local_sig
         # Find the actual peak pixel location.
         _near_idx = np.where(near_lya & valid)[0]
@@ -855,11 +856,8 @@ def fit_lines(
         cent_margin = max(centroid_vmax / _C_KMS * lya_obs_A, 5.0)
 
         # σ controls the blue-side sharpness of the profile; the red
-        # tail width comes from α (the skewness).  For stacked spectra
-        # the Lyα peak is resolution-limited, so σ should be tight.
-        sig_seed = max(local_sig, 0.5)
-        sig_lo = 0.2
-        sig_hi = 3.0 * sigma_factor  # keep narrow — asymmetry handles the tail
+        # tail width comes from α (the skewness).
+        sig_lo, sig_seed, sig_hi = _lya_sigma_bounds(local_sig, sigma_factor)
 
         # A_peak seed: with α>0 the actual peak exceeds A_peak, so
         # seed below the observed peak to leave room.
@@ -867,9 +865,14 @@ def fit_lines(
 
         # α seed: Lyα is generically red-asymmetric; start with
         # moderate skewness.
-        alpha_seed = 5.0
+        alpha_seed = 3.0
 
-        lya_p0 = np.array([A_peak_seed, peak_wave_A, sig_seed, alpha_seed])
+        # mu is the location parameter, not the peak: for alpha > 0 the peak
+        # lies redward of mu by ~ sigma * delta * sqrt(2/pi), so seed mu that
+        # far blueward of the peak pixel.
+        _delta = alpha_seed / np.sqrt(1.0 + alpha_seed**2)
+        mu_seed = peak_wave_A - sig_seed * _delta * np.sqrt(2.0 / np.pi)
+        lya_p0 = np.array([A_peak_seed, mu_seed, sig_seed, alpha_seed])
         lya_lb = np.array([0.0, lya_obs_A - cent_margin, sig_lo, 0.0])
         lya_ub = np.array([
             150.0 * peak_lya, lya_obs_A + cent_margin, sig_hi, 30.0,
@@ -1108,9 +1111,12 @@ def fit_lines(
     if _lya_params is not None:
         lya_p0, lya_lb, lya_ub = _lya_params
 
-        # --- Pre-fit: asymmetric Gaussian on ±10 Å with unweighted residuals ---
+        # --- Pre-fit: asymmetric Gaussian near the peak, unweighted residuals ---
         # Locks onto peak shape before the full error-weighted joint fit.
-        _lya_region = np.abs(spec.wave_A - peak_wave_A) < 10.0
+        # At least +/-5 sigma_inst: a fixed 10 A held only ~3 G140M pixels
+        # for 4 parameters, and the degenerate pre-fit then seeded the
+        # joint fit into a half-Gaussian.
+        _lya_region = np.abs(spec.wave_A - peak_wave_A) < max(10.0, 5.0 * lya_sig_inst)
         _centres_lya = _centres[_lya_region]
         _flam_lya = flam[_lya_region]
         _valid_lya = valid[_lya_region]
@@ -1118,7 +1124,10 @@ def fit_lines(
         def _lya_prefit_resid(p: np.ndarray) -> np.ndarray:
             """Unweighted residuals for Lyα pre-fit."""
             model = asymmetric_gaussian(_centres_lya, p[0], p[1], p[2], p[3])
-            resid = _flam_lya - model
+            # In units of the peak: raw ~1e-19 residuals tripped
+            # least_squares' absolute gradient tolerance on the first
+            # evaluation, returning an unfitted (bounds-midpoint) amplitude.
+            resid = (_flam_lya - model) / peak_lya
             resid[~_valid_lya] = 0.0
             return resid
 
@@ -1131,8 +1140,12 @@ def fit_lines(
         lya_p0[:] = _pre_result.x
         # Tighten μ bounds around pre-fit centroid.
         _prefit_mu = _pre_result.x[1]
-        lya_lb[1] = max(lya_lb[1], _prefit_mu - 1.0)
-        lya_ub[1] = min(lya_ub[1], _prefit_mu + 1.0)
+        # The pre-fit centroid sits on the peak pixel, so the window must
+        # span at least the resolution (a fixed 1 A pinned mu on G140M's
+        # 6 A pixels).
+        _mu_win = max(1.0, 2.0 * lya_sig_inst)
+        lya_lb[1] = max(lya_lb[1], _prefit_mu - _mu_win)
+        lya_ub[1] = min(lya_ub[1], _prefit_mu + _mu_win)
         logger.info(
             "Lyα pre-fit: A=%.3e, μ=%.1f Å, σ=%.2f Å, α=%.1f",
             *_pre_result.x,
@@ -1408,6 +1421,22 @@ def _analytic_flux_err(
     n_eff = _SQRT2PI * sigma_A / dlam if dlam > 0 else 1.0
     rms = np.sqrt(np.nanmean(err_flam[sel] ** 2))
     return rms * dlam * sqrt(n_eff)
+
+
+def _lya_sigma_bounds(sigma_inst: float, sigma_factor: float = 1.0) -> tuple[float, float, float]:
+    """``(lo, seed, hi)`` for the Lyα profile's sigma (Angstrom).
+
+    The fitted profile is not convolved with the LSF, so its sigma cannot
+    usefully fall below the instrumental width; the floor is half of it,
+    allowing for a compact source whose true R exceeds the assumed one.  A
+    fixed 3 A cap used to sit below sigma_inst on every grating (~4 A at
+    1 um on G140M) and far below a PRISM pixel, biasing Lyα by -47% (G140M)
+    and +66% (PRISM).  The red tail comes from the skewness, not sigma.
+    """
+    lo = 0.5 * sigma_inst
+    hi = max(3.0, 3.0 * sigma_inst) * sigma_factor
+    seed = float(np.clip(sigma_inst, lo, hi))
+    return lo, seed, hi
 
 
 def _finite_or_none(x: float) -> float | None:

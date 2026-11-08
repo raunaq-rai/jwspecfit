@@ -186,3 +186,38 @@ def test_bootstrap_errors_finite_when_lya_is_fitted():
     for n in ["Lya"] + names:
         lr = res.lines[n]
         assert np.isfinite(lr.flux_err) and 0 < lr.flux_err < 0.3 * lr.flux, n
+
+
+@pytest.mark.parametrize("grating,sigma_A", [("G140M", 6.0), ("PRISM", 150.0)])
+def test_lya_flux_recovered_on_gratings_and_prism(grating, sigma_A):
+    """Lyα at instrumental-or-wider width, with an IGM-zeroed blue continuum.
+
+    Four bugs used to bias this: sigma capped at 3 A (below sigma_inst), the
+    continuum fitted through the IGM-absorbed blue pixels, a 1 A centroid
+    window narrower than a pixel, and an unscaled pre-fit that stopped after
+    one evaluation.  G140M came back at ~0.6x, the PRISM at ~3.5x.
+    """
+    import numpy as np
+
+    from jwspecfit.fitter import fit_lines
+    from jwspecfit.io import Spectrum, _flam_to_ujy
+    from jwspecfit.lines import REST_LINES_A
+    from jwspecfit.models import asymmetric_gaussian
+
+    z = 7.5
+    lam = REST_LINES_A["Lya"] * (1 + z)
+    step = 0.0006 if grating == "G140M" else 0.006
+    wave = np.arange(lam * 1e-4 - 0.3, lam * 1e-4 + 0.3, step)
+    err = np.full_like(wave, 0.002)
+    s0 = Spectrum(wave_um=wave, flux_ujy=0 * wave, err_ujy=err, grating=grating)
+    c = 0.5 * (s0.wave_edges_A[1:] + s0.wave_edges_A[:-1])
+    a_peak = 3e-18 / (sigma_A * np.sqrt(2 * np.pi))
+    flam = asymmetric_gaussian(c, a_peak, lam, sigma_A, 3.0)
+    # A continuum step at the line is only resolvable on the grating; on the
+    # PRISM the real break is LSF-smeared, which a sharp-break model cannot
+    # follow pixel for pixel, so the PRISM case isolates the line itself.
+    cont = np.where(wave * 1e4 > lam, 0.05, 0.0) if grating == "G140M" else 0.0
+    flux = cont + _flam_to_ujy(flam, wave)
+    spec = Spectrum(wave_um=wave, flux_ujy=flux, err_ujy=err, grating=grating)
+    res = fit_lines(spec, z, lines=["Lya"], n_boot=0, _label="t")
+    assert res.lines["Lya"].flux == pytest.approx(3e-18, rel=0.05, abs=0)
