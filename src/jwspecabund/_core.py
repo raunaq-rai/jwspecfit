@@ -2778,6 +2778,13 @@ def _run_direct(
                 )
                 if logU_co_mc is not None and np.isfinite(logU_co_mc):
                     logU_co_sample = float(logU_co_mc)
+            elif (marginalize_logU and logU_mc_val is not _NO_DRAW
+                    and (ne_mid is None or logU_ne is not None)):
+                # No C2+-zone density (or a pinned one): the point estimate
+                # uses the one log(U) for both zones, so this draw's log(U)
+                # must serve C/O too, or C/O would ignore its scatter.
+                if logU_mc_val is not None and np.isfinite(logU_mc_val):
+                    logU_co_sample = float(logU_mc_val)
             logU_co_icf = logU_co_sample if marginalize_logU else logU_co
 
             Te_high_mc.append(Te_h)
@@ -3457,6 +3464,13 @@ def _run_direct_mcmc(
                 )
                 if logU_co_val is not None and np.isfinite(logU_co_val):
                     logU_co_sample = float(logU_co_val)
+            elif (marginalize_logU and logU_val is not _NO_DRAW
+                    and (ne_mid is None or logU_ne is not None)):
+                # No C2+-zone density (or a pinned one): the point estimate
+                # uses the one log(U) for both zones, so this draw's log(U)
+                # must serve C/O too, or C/O would ignore its scatter.
+                if logU_val is not None and np.isfinite(logU_val):
+                    logU_co_sample = float(logU_val)
             logU_co_icf = logU_co_sample if marginalize_logU else logU_co_pt
 
             Te_high_post.append(Te_h)

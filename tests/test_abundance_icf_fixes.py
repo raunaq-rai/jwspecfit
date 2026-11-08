@@ -319,3 +319,42 @@ def test_av_err_propagates_for_least_squares_input():
     sb = b.OH_err if np.isscalar(b.OH_err) else 0.5 * sum(b.OH_err)
     assert sb > 1.5 * sa
     assert b.Av_posterior is not None and len(b.Av_posterior) > 0
+
+
+def _direct_fluxes(Te=1.5e4, ne=300.0):
+    """PyNeb fluxes for O/H + C III] (Hbeta = 100), 3-tier Garnett zones."""
+    import pyneb as pn
+    from jwspecabund.direct import _hbeta_emissivity
+    Te_low, Te_int = 0.70 * Te + 3000, 0.83 * Te + 1700
+
+    def f(el, ion, X, T, w):
+        return 100 * X * pn.Atom(el, ion).getEmissivity(T, ne, wave=w) / _hbeta_emissivity(T, ne)
+
+    fl = {"HBETA": 100.0}
+    for w in (5007, 4959, 4363):
+        fl[f"OIII_{w}"] = f("O", 3, 1e-4, Te, w)
+    for w in (3726, 3729):
+        fl[f"OII_{w}"] = f("O", 2, 2e-5, Te_low, w)
+    for w in (1907, 1909):
+        fl[f"CIII]_{w}"] = f("C", 3, 2.5e-5, Te_int, w)
+    return fl
+
+
+def test_co_logu_marginalised_without_ciii_density():
+    """No C2+-zone density: C/O must still carry the log(U) scatter."""
+    from jwspecabund import compute_abundances
+    fl = _direct_fluxes()
+    err = {k: 0.002 * v for k, v in fl.items()}
+    err["OII_3726"], err["OII_3729"] = 0.15 * fl["OII_3726"], 0.15 * fl["OII_3729"]
+    kw = dict(z=0.0, method="direct", dust_correct=False, n_mc=200, progress=False,
+              self_consistent_OIII=False, logU_diagnostic="O32", snr_ne=1e9)
+
+    def run(marg):
+        return compute_abundances(_M({k: SimpleLine(fl[k], err[k]) for k in fl}),
+                                  marginalize_logU=marg, **kw)
+
+    on, off = run(True), run(False)
+    assert on.ne_mid is None and on.CO is not None and np.isfinite(on.CO)
+    s_on = on.CO_err if np.isscalar(on.CO_err) else 0.5 * sum(on.CO_err)
+    s_off = off.CO_err if np.isscalar(off.CO_err) else 0.5 * sum(off.CO_err)
+    assert s_on > 1.3 * s_off
