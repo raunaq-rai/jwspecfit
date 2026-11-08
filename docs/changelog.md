@@ -4,6 +4,71 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+Fixes from an injection–recovery audit of the line fitting and MCMC
+(synthetic lines of known flux on real NIRSpec grids; every fix has a
+regression test that fails on the previous code).
+
+### Changed defaults: C III] and N IV] doublets fitted free
+
+- `tie_uv_widths` and `fix_blended_ratios` now default to `False` in
+  `jwspecfit.fit_lines`, `fit_with_broad`, `jwspecmcmc.fit_lines` and
+  `jwspecmcmc.fit_with_broad`: each UV doublet keeps its own width and
+  both amplitudes stay free whatever the resolution.  Pass
+  `fix_blended_ratios=True` / `tie_uv_widths=True` for the old behaviour.
+
+### Fixed: line fitting
+
+- **N IV] 1483 was never modelled** when C III] 1907 and N IV] 1486/1483
+  were fitted with `tie_uv_widths=True`: its width was copied before
+  N IV] 1486's was set, leaving σ = 0.  It was reported as noise with
+  zero error and biased C III] 1907 by ~+14%.  Fits with
+  `tie_uv_widths=False` were unaffected.
+- **Width ties by intrinsic velocity.**  Tied widths (Balmer → [O III],
+  UV) scaled the observed σ with wavelength, exact only at constant R.
+  On the PRISM this biased Hα/Hβ by −14% to +23% (noise-free); ties now
+  share the intrinsic dispersion and add each line's own σ_inst.
+- Width bounds used σ_inst at the wrong pixel (up to 1.9× too wide on M
+  gratings); merged blends (`OII_doublet` etc.) were capped below their
+  intrinsic width (an R = 2500 [O II] blend lost 21%).
+- A faint line with no positive pixel nearby was seeded at 1 erg/s/cm²/Å,
+  wrecking the joint fit; bright lines then came back with `flux_err = 0`.
+- **Lyα**: fluxes were ~0.6× (G140M) and ~3.5× (PRISM) on injected
+  spectra (σ capped at 3 Å, continuum fitted through IGM-absorbed
+  pixels, a pre-fit that stopped after one step, fixed-Å windows); now
+  within 2%.  With Lyα fitted, every other line's bootstrap error was NaN.
+
+### Fixed: uncertainties
+
+- **Least-squares EWs now have errors** (`ew0_err`), and the bootstrap
+  propagates the continuum uncertainty into fluxes and EWs; on faint
+  continua it raised EW errors by up to 2.6×.  `cont_err_flam` and
+  `cont_snr` are now filled for least-squares fits.
+- **MCMC posterior widths no longer rescaled** by a pixel-width weight
+  (`(median Δλ/Δλ)^0.35`), which changed PRISM MCMC errors by −33% to
+  +29%; every likelihood is now plain inverse-variance χ².
+- NUTS (the default sampler) ignored Gaussian / log-uniform
+  `prior_overrides`, used tying rules that had drifted from the NumPy
+  ones (missing C II], `niv/ciii_doublet_ratio`), and could not start
+  from a seed on a prior bound.
+
+### Fixed: broad components
+
+- Bootstrap BIC scored draws with half their real noise variance and
+  compared unpaired medians; it is now paired and correctly scaled, and
+  seeded (`seed=`, default 42) so a rerun selects the same model.
+- [N II] was held at ~2.6× its true flux, with zero error, by a floor
+  built from the narrow-only fit; the Balmer gate ignored whether Hα was
+  covered; `wave_range_A`, `clip_sigma`, `lya_break`,
+  `fix_blended_ratios` and `save_path` were dropped on the broad path.
+
+### Added
+
+- `docs/measurement_methodology.md`: how every reported number and its
+  uncertainty is computed.
+- `docs/notebooks/example.ipynb` with `data/spurs437_a2744_combined-medium_spec1d.fits`.
+
 ## 1.1.15 — 2026-11-07
 
 ### Fixed: the Salim+18 attenuation curve now follows the paper

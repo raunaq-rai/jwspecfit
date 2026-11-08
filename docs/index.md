@@ -112,6 +112,7 @@ plotting
 :caption: Methodology
 :maxdepth: 2
 
+measurement_methodology
 abundance_methodology
 abundance
 references
