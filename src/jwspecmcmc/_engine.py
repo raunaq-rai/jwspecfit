@@ -166,12 +166,12 @@ def _fit_lines_mcmc(
     tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
-    tie_uv_widths: bool = True,
+    tie_uv_widths: bool = False,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
-    fix_blended_ratios: bool = True,
+    fix_blended_ratios: bool = False,
     continuum: np.ndarray | None = None,
     continuum_err: np.ndarray | None = None,
 ) -> MCMCResult:
@@ -236,16 +236,17 @@ def _fit_lines_mcmc(
         well-resolved spectra.
     tie_uv_widths : bool
         Tie UV intercombination line widths to a shared velocity
-        dispersion (default ``True``).  Set ``False`` for
-        well-resolved spectra.
+        dispersion.  Default ``False``: each keeps its own width.
     sigma_overrides : dict, optional
         Per-line sigma (width) bounds in Angstroms, keyed by line name.
         Each value is ``(sigma_lo, sigma_hi)``.  Overrides the automatic
         grating-based bounds for the specified lines.
     fix_blended_ratios : bool
-        If ``True`` (default), a UV doublet closer than 4.71 sigma_inst
-        (2 x FWHM) has its flux ratio fixed to the low-density limit.  Set
-        ``False`` to keep both amplitudes free (kinematics stay tied).
+        If ``True``, a UV doublet closer than 4.71 sigma_inst (2 x FWHM)
+        has its flux ratio fixed to the low-density limit.  Default
+        ``False``: both amplitudes stay free whatever the resolution
+        (kinematics stay tied); fix the ratio only when you judge the
+        doublet unresolved.
     continuum : np.ndarray, optional
         External continuum in µJy on the input spectrum's pixel grid (e.g.
         an SPS fit with the lines masked).  Replaces the internal
@@ -1081,11 +1082,12 @@ def _fit_with_broad_mcmc(
     tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
-    tie_uv_widths: bool = True,
+    tie_uv_widths: bool = False,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    fix_blended_ratios: bool = False,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad selection, then MCMC.
 
@@ -1182,6 +1184,7 @@ def _fit_with_broad_mcmc(
         grating=grating, R=R, lines=lines,
         wave_range_A=wave_range_A, deg=deg, clip_sigma=clip_sigma,
         tie_balmer_to_oiii=tie_balmer_to_oiii, seed=seed,
+        fix_blended_ratios=fix_blended_ratios,
         fit_balmer_broad=fit_balmer_broad,
         balmer_broad_lines=balmer_broad_lines,
         fit_oiii_broad=fit_oiii_broad,
@@ -1254,6 +1257,7 @@ def _fit_with_broad_mcmc(
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
+        fix_blended_ratios=fix_blended_ratios,
     )
 
     return MCMCBroadFitResult(

@@ -524,13 +524,13 @@ def fit_lines(
     tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
-    tie_uv_widths: bool = True,
+    tie_uv_widths: bool = False,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     lya_break: bool = False,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
-    fix_blended_ratios: bool = True,
+    fix_blended_ratios: bool = False,
     continuum: np.ndarray | None = None,
     _label: str = "",
     _p0_hint: dict[str, tuple[float, float, float]] | None = None,
@@ -606,9 +606,11 @@ def fit_lines(
         automatic centroid bounds for the specified lines.  Useful for
         anchoring closely-spaced doublet members in noisy spectra.
     fix_blended_ratios : bool
-        If ``True`` (default), a UV doublet closer than 4.71 sigma_inst
-        (2 x FWHM) has its flux ratio fixed to the low-density limit.  Set
-        ``False`` to keep both amplitudes free (kinematics stay tied).
+        If ``True``, a UV doublet closer than 4.71 sigma_inst (2 x FWHM)
+        has its flux ratio fixed to the low-density limit.  Default
+        ``False``: both amplitudes stay free whatever the resolution
+        (kinematics stay tied); fix the ratio only when you judge the
+        doublet unresolved.
     continuum : np.ndarray, optional
         External continuum in µJy on the input spectrum's pixel grid (e.g.
         an SPS fit with the lines masked).  Replaces the internal

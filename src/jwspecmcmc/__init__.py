@@ -104,12 +104,12 @@ def fit_lines(
     tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
-    tie_uv_widths: bool = True,
+    tie_uv_widths: bool = False,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
-    fix_blended_ratios: bool = True,
+    fix_blended_ratios: bool = False,
     continuum: np.ndarray | None = None,
     continuum_err: np.ndarray | None = None,
 ) -> MCMCResult | MCMCBroadFitResult:
@@ -254,9 +254,9 @@ def fit_lines(
         centroid to its primary in velocity space; if ``False`` the
         secondary centroids are free (default ``True``).
     tie_uv_widths : bool
-        If ``True`` (default), tie the widths of the UV intercombination
-        lines (CIII], NIV, NIII, SiIII) to a single shared velocity
-        dispersion.
+        If ``True``, tie the widths of the UV intercombination lines
+        (CIII], NIV, NIII) to a single shared velocity dispersion.
+        Default ``False``: each keeps its own width.
     niv_doublet_ratio : float or None
         If given, fix the N IV] flux ratio ``F(1483) / F(1486)`` to this
         value; ``None`` (default) leaves the two amplitudes free.
@@ -264,9 +264,11 @@ def fit_lines(
         If given, fix the C III] flux ratio ``F(1909) / F(1907)`` to this
         value; ``None`` (default) leaves the two amplitudes free.
     fix_blended_ratios : bool
-        If ``True`` (default), a UV doublet closer than 4.71 sigma_inst
-        (2 x FWHM) has its flux ratio fixed to the low-density limit.  Set
-        ``False`` to keep both amplitudes free (kinematics stay tied).
+        If ``True``, a UV doublet closer than 4.71 sigma_inst (2 x FWHM)
+        has its flux ratio fixed to the low-density limit.  Default
+        ``False``: both amplitudes stay free whatever the resolution
+        (kinematics stay tied); fix the ratio only when you judge the
+        doublet unresolved.
         Narrow-only fits.
     sigma_overrides : dict, optional
         Per-line width bounds ``{line_name: (sigma_lo, sigma_hi)}`` in
@@ -347,12 +349,9 @@ def fit_lines(
         raise NotImplementedError(
             "An external continuum is only supported for narrow-only fits."
         )
-    if not fix_blended_ratios:
-        raise NotImplementedError(
-            "fix_blended_ratios=False is only supported for narrow-only fits."
-        )
     return _fit_with_broad_mcmc(
         spectrum, z,
+        fix_blended_ratios=fix_blended_ratios,
         sampler=sampler,
         grating=grating,
         R=R,
@@ -439,11 +438,12 @@ def fit_with_broad(
     tie_balmer_to_oiii: bool = True,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
-    tie_uv_widths: bool = True,
+    tie_uv_widths: bool = False,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
+    fix_blended_ratios: bool = False,
 ) -> MCMCBroadFitResult:
     """Fit emission lines with BIC-based broad selection, then MCMC.
 
@@ -512,6 +512,10 @@ def fit_with_broad(
         :doc:`/user_guide/jwspecmcmc`.  (``init_from_mle`` is not exposed
         here because Phase 2 always initialises from the Phase 1 fit.)
 
+    fix_blended_ratios : bool
+        Fix the flux ratio of UV doublets closer than two FWHM (default
+        ``False``: both amplitudes free).
+
     Returns
     -------
     MCMCBroadFitResult
@@ -560,6 +564,7 @@ def fit_with_broad(
         centroid_overrides=centroid_overrides,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
+        fix_blended_ratios=fix_blended_ratios,
     )
 
 

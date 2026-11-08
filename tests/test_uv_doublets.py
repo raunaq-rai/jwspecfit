@@ -765,8 +765,14 @@ class TestFixBlendedRatiosSwitch:
             R=1000.0, noise_level=0.002,
         )
 
-    def test_default_fixes_the_ratio(self):
+    def test_default_leaves_the_ratio_free(self):
+        """Since 2026-11 the ratio is fixed only on request, whatever the resolution."""
         res = fit_lines(self._spec(), z=3.0, R=1000.0, lines=self._LINES, n_boot=0)
+        assert not res.constraints.blended_doublets
+
+    def test_switch_on_fixes_the_ratio(self):
+        res = fit_lines(self._spec(), z=3.0, R=1000.0, lines=self._LINES, n_boot=0,
+                        fix_blended_ratios=True)
         assert res.constraints.blended_doublets == {"CIII]_1909"}
 
     def test_switch_frees_the_ratio(self):
@@ -786,3 +792,20 @@ class TestFixBlendedRatiosSwitch:
             fix_blended_ratios=False,
         )
         assert not res.constraints.blended_doublets
+
+
+@pytest.mark.parametrize("func", [
+    "jwspecfit.fit_lines", "jwspecfit.fitter.fit_lines", "jwspecfit.broad.fit_with_broad",
+    "jwspecmcmc.fit_lines", "jwspecmcmc.fit_with_broad", "jwspecmcmc._engine._fit_lines_mcmc",
+    "jwspecmcmc._engine._fit_with_broad_mcmc",
+])
+def test_uv_doublets_free_by_default(func):
+    """C III] / N IV] keep their own widths and free amplitudes unless asked (2026-11)."""
+    import importlib
+    import inspect
+
+    mod, name = func.rsplit(".", 1)
+    params = inspect.signature(getattr(importlib.import_module(mod), name)).parameters
+    for arg in ("tie_uv_widths", "fix_blended_ratios"):
+        if arg in params:
+            assert params[arg].default is False, f"{func}: {arg}"

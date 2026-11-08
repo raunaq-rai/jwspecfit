@@ -377,7 +377,7 @@ def _bic_bootstrap_single(
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
-    tie_uv_widths: bool = True,
+    tie_uv_widths: bool = False,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
@@ -392,7 +392,7 @@ def _bic_bootstrap_single(
     centroid_max_sigma: float = 1.0,
     balmer_broad_lines: list[str] | None = None,
     tie_balmer_to_oiii: bool = True,
-    fix_blended_ratios: bool = True,
+    fix_blended_ratios: bool = False,
 ) -> dict[str, float]:
     """Run one BIC bootstrap iteration for all model variants.
 
@@ -694,7 +694,7 @@ def _fit_model_variant(
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
-    tie_uv_widths: bool = True,
+    tie_uv_widths: bool = False,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
@@ -704,7 +704,7 @@ def _fit_model_variant(
     centroid_max_sigma: float = 1.0,
     balmer_broad_lines: list[str] | None = None,
     tie_balmer_to_oiii: bool = True,
-    fix_blended_ratios: bool = True,
+    fix_blended_ratios: bool = False,
 ) -> tuple[FitResult, float]:
     """Fit a specific model variant and return (FitResult, BIC).
 
@@ -817,7 +817,7 @@ def fit_with_broad(
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
-    tie_uv_widths: bool = True,
+    tie_uv_widths: bool = False,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     niv_doublet_ratio: float | None = None,
@@ -826,7 +826,7 @@ def fit_with_broad(
     clip_sigma: float = 2.5,
     lya_break: bool = False,
     tie_balmer_to_oiii: bool = True,
-    fix_blended_ratios: bool = True,
+    fix_blended_ratios: bool = False,
     seed: int | None = 42,
     _print_R: bool = True,
 ) -> BroadFitResult:
@@ -916,7 +916,7 @@ def fit_with_broad(
         compared.
     fix_blended_ratios : bool
         Fix the flux ratio of UV doublets closer than two FWHM (default
-        ``True``), as in :func:`jwspecfit.fitter.fit_lines`.
+        ``False``), as in :func:`jwspecfit.fitter.fit_lines`.
     seed : int or None
         Seed of the BIC bootstrap noise (default 42), so a rerun selects
         the same model.  ``None`` draws fresh noise each call.

@@ -212,13 +212,13 @@ def fit_lines(
     moving_average: bool | int = False,
     tie_uv_doublets: bool = True,
     tie_uv_centroids: bool = True,
-    tie_uv_widths: bool = True,
+    tie_uv_widths: bool = False,
     sigma_overrides: dict[str, tuple[float, float]] | None = None,
     centroid_overrides: dict[str, tuple[float, float]] | None = None,
     lya_break: bool = False,
     niv_doublet_ratio: float | None = None,
     ciii_doublet_ratio: float | None = None,
-    fix_blended_ratios: bool = True,
+    fix_blended_ratios: bool = False,
 ) -> FitResult | BroadFitResult:
     """Fit emission lines in a spectrum.
 
@@ -315,9 +315,11 @@ def fit_lines(
         Recommended for stacked spectra where doublets are poorly
         resolved (default ``True``).
     fix_blended_ratios : bool
-        If ``True`` (default), a UV doublet closer than 4.71 sigma_inst
-        (2 x FWHM) has its flux ratio fixed to the low-density limit.  Set
-        ``False`` to keep both amplitudes free (kinematics stay tied).
+        If ``True``, a UV doublet closer than 4.71 sigma_inst (2 x FWHM)
+        has its flux ratio fixed to the low-density limit.  Default
+        ``False``: both amplitudes stay free whatever the resolution
+        (kinematics stay tied); fix the ratio only when you judge the
+        doublet unresolved.
         Narrow-only fits.
 
     Returns
@@ -333,11 +335,6 @@ def fit_lines(
     """
     lines = canonical_line_names(lines)
     balmer_broad_lines = canonical_line_names(balmer_broad_lines)
-    if not fix_blended_ratios and (fit_balmer_broad or fit_oiii_broad or fit_hei_broad):
-        raise NotImplementedError(
-            "fix_blended_ratios=False is only supported for narrow-only fits."
-        )
-
     # --- Multi-window fitting ---
     if wave_windows_A is not None:
         if wave_range_A is not None:
