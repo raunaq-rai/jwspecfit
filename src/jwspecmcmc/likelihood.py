@@ -42,8 +42,6 @@ class LikelihoodSpec:
         Number of emission lines.
     constraints : ConstraintSet
         Parameter constraints.
-    w_pix : np.ndarray
-        Pixel weights from :func:`jwspecfit.models.pixel_weight`.
     n_lya : int
         Number of extra Lyα parameters appended to the free vector
         (4 when Lyα is being fit, 0 otherwise).
@@ -59,7 +57,6 @@ class LikelihoodSpec:
     edges: np.ndarray
     n_lines: int
     constraints: ConstraintSet
-    w_pix: np.ndarray
     n_lya: int = 0
     lya_model_fn: Callable | None = None
 
@@ -68,7 +65,7 @@ def log_likelihood(p_free: np.ndarray, spec: LikelihoodSpec) -> float:
     """Gaussian log-likelihood for free parameters.
 
     Mirrors the residual function in ``jwspecfit.fitter.fit_lines``:
-    ``-0.5 * sum(((flam - model) / flam_err * w_pix)^2)``.
+    ``-0.5 * sum(((flam - model) / flam_err)^2)``.
 
     Parameters
     ----------
@@ -93,7 +90,7 @@ def log_likelihood(p_free: np.ndarray, spec: LikelihoodSpec) -> float:
 
     resid = np.zeros_like(spec.flam)
     v = spec.valid
-    resid[v] = (spec.flam[v] - model[v]) / spec.flam_err[v] * spec.w_pix[v]
+    resid[v] = (spec.flam[v] - model[v]) / spec.flam_err[v]
 
     return -0.5 * np.dot(resid, resid)
 

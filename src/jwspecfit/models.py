@@ -142,29 +142,6 @@ def asymmetric_gaussian(
     return gauss * skew_term
 
 
-def pixel_weight(dlam_A: np.ndarray, power: float = 0.35) -> np.ndarray:
-    """Pixel-width weighting to down-weight overly narrow/wide pixels.
-
-    Weight = (median_dλ / dλ)^power.  Pixels with atypical widths
-    (edges of the detector, bad pixels) get reduced influence.
-
-    Parameters
-    ----------
-    dlam_A : np.ndarray
-        Pixel widths in Angstroms.
-    power : float
-        Weighting exponent (default 0.35).
-
-    Returns
-    -------
-    np.ndarray
-        Multiplicative weight for each pixel.
-    """
-    med = np.nanmedian(dlam_A)
-    w = np.where(dlam_A > 0, (med / dlam_A) ** power, 0.0)
-    return w
-
-
 def build_model(
     params: np.ndarray,
     wave_edges_A: np.ndarray,

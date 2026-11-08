@@ -18,7 +18,7 @@ from .continuum import fit_continuum
 from .fitter import FitResult, LineResult, _grating_bounds, fit_lines
 from .io import Spectrum, _flam_to_ujy, _ujy_to_flam
 from .lines import REST_LINES_A, canonical_line_names, get_line_list, observable_lines
-from .models import build_model, pixel_weight
+from .models import build_model
 from .resolution import resolve_R, sigma_inst_A
 
 logger = logging.getLogger(__name__)

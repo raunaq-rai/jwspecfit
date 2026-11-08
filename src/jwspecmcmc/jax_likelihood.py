@@ -79,11 +79,10 @@ def make_jax_log_likelihood(
     widths = right - left
     flam = jnp.array(_flam_safe, dtype=jnp.float64)
     flam_err = jnp.array(_err_safe, dtype=jnp.float64)
-    w_pix = jnp.array(spec.w_pix, dtype=jnp.float64)
     valid = jnp.array(spec.valid, dtype=jnp.bool_)
 
-    # Combined weight: 1/(err) * w_pix, zeroed for invalid pixels.
-    inv_err_w = jnp.where(valid, w_pix / flam_err, 0.0)
+    # Inverse error, zeroed for invalid pixels.
+    inv_err_w = jnp.where(valid, 1.0 / flam_err, 0.0)
 
     n_full = 3 * nL
     _n_lya = spec.n_lya

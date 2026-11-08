@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from jwspecfit.models import gaussian_binned, build_model, pixel_weight
+from jwspecfit.models import gaussian_binned, build_model
 
 
 class TestGaussianBinned:
@@ -104,16 +104,3 @@ class TestBuildModel:
             np.array([1.0, 5000.0, 10.0]), edges, n_lines=1
         )
         np.testing.assert_allclose(model, model_single, rtol=1e-12)
-
-
-class TestPixelWeight:
-    def test_uniform_pixels(self):
-        dlam = np.full(100, 5.0)
-        w = pixel_weight(dlam)
-        np.testing.assert_array_almost_equal(w, 1.0)
-
-    def test_narrow_pixel_downweighted(self):
-        dlam = np.full(100, 5.0)
-        dlam[50] = 1.0
-        w = pixel_weight(dlam)
-        assert w[50] > w[49]  # Narrow pixel gets higher weight (med/dlam > 1)

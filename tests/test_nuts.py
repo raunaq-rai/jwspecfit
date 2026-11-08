@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from jwspecfit.constraints import ConstraintSet
-from jwspecfit.models import build_model, pixel_weight
+from jwspecfit.models import build_model
 from jwspecmcmc.jax_likelihood import _compile_tying_ops, make_jax_log_likelihood
 from jwspecmcmc.likelihood import LikelihoodSpec, log_likelihood
 from jwspecmcmc.priors import priors_from_bounds
@@ -13,8 +13,6 @@ from jwspecmcmc.priors import priors_from_bounds
 def _make_synthetic_spec(line_names, true_params, nL, noise_level=5e-18):
     """Build a synthetic LikelihoodSpec for testing."""
     wave_edges = np.linspace(4800, 5100, 301)
-    dlam = np.diff(wave_edges)
-    w_pix = pixel_weight(dlam)
     model_true = build_model(true_params, wave_edges, nL)
     rng = np.random.default_rng(42)
     flam = model_true + rng.normal(0, noise_level, len(model_true))
@@ -23,7 +21,7 @@ def _make_synthetic_spec(line_names, true_params, nL, noise_level=5e-18):
     cs = ConstraintSet(line_names, tie_nii=False, tie_balmer_to_oiii=True)
     return LikelihoodSpec(
         flam=flam, flam_err=flam_err, valid=valid,
-        edges=wave_edges, n_lines=nL, constraints=cs, w_pix=w_pix,
+        edges=wave_edges, n_lines=nL, constraints=cs,
     ), cs
 
 

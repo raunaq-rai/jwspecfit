@@ -60,9 +60,32 @@ def test_jax_loglike_equals_numpy(label, names, kw):
     flam = build_model(cs.expand_free_to_full(pf), edges, len(names)) + rng.normal(0, 0.05, 3000)
     spec = LikelihoodSpec(
         flam=flam, flam_err=np.full(3000, 0.05), valid=np.ones(3000, bool), edges=edges,
-        n_lines=len(names), constraints=cs, w_pix=np.ones(3000),
+        n_lines=len(names), constraints=cs,
     )
     f_jax, _ = make_jax_log_likelihood(spec)
     for _ in range(3):
         q = pf * rng.uniform(0.9, 1.1, len(pf))
         assert float(f_jax(q)) == pytest.approx(log_likelihood(q, spec), rel=1e-10)
+
+
+def test_likelihood_is_plain_chi2_on_nonuniform_pixels():
+    """No pixel-width weight: ln L = -chi2/2 exactly, so posterior widths are not rescaled.
+
+    A (median dlam / dlam)^0.35 weight used to multiply every residual, which
+    scaled MCMC posterior widths by 1/w (up to -33%/+29% on the PRISM).
+    """
+    from jwspecmcmc.likelihood import LikelihoodSpec, log_likelihood
+
+    rng = np.random.default_rng(2)
+    edges = np.cumsum(np.r_[5000.0, np.geomspace(5.0, 40.0, 400)])  # 8x range of pixel widths
+    names = ["HBETA"]
+    cs = ConstraintSet(names)
+    p = np.array([3e-17, 0.5 * (edges[0] + edges[-1]), 30.0])
+    model = build_model(p, edges, 1)
+    err = rng.uniform(1e-19, 3e-19, 400)
+    flam = model + rng.normal(0, 1, 400) * err
+    spec = LikelihoodSpec(flam=flam, flam_err=err, valid=np.ones(400, bool), edges=edges,
+                          n_lines=1, constraints=cs)
+    q = p * 1.01
+    chi2 = np.sum(((flam - build_model(q, edges, 1)) / err) ** 2)
+    assert log_likelihood(q, spec) == pytest.approx(-0.5 * chi2, rel=1e-12)

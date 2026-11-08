@@ -29,7 +29,7 @@ from .lines import (
     get_line_list,
     observable_lines,
 )
-from .models import asymmetric_gaussian, build_model, gaussian_binned, pixel_weight
+from .models import asymmetric_gaussian, build_model, gaussian_binned
 from .resolution import resolve_R, sigma_inst_A
 
 logger = logging.getLogger(__name__)
@@ -792,9 +792,6 @@ def fit_lines(
     left = edges[:-1]
     right = edges[1:]
 
-    # Pixel weights.
-    w_pix = pixel_weight(dlam)
-
     # Detect unresolved intercombination doublets: if the doublet
     # separation is < 2×FWHM (≈ 4.71 × sigma_inst), the components
     # cannot be reliably decomposed.  Fix the amplitude ratio to the
@@ -1085,7 +1082,6 @@ def fit_lines(
         if _n_lya > 0:
             model = model + _lya_component(p_combined[-_n_lya:])
         resid = (flam - model) / flam_err
-        resid *= w_pix
         resid[~valid] = 0.0
         return resid
 
@@ -1168,7 +1164,7 @@ def fit_lines(
     # Bootstrap uncertainties.
     flux_errs = _bootstrap_uncertainties(
         flam, flam_err, valid, edges, nL, constraints, free_mask,
-        lb_free, ub_free, p0_free, w_pix, n_boot, label=_label,
+        lb_free, ub_free, p0_free, n_boot, label=_label,
         n_jobs=n_jobs,
     )
 
@@ -1398,7 +1394,6 @@ def _run_single_bootstrap(
     lb_free: np.ndarray,
     ub_free: np.ndarray,
     p0_free: np.ndarray,
-    w_pix: np.ndarray,
 ) -> np.ndarray:
     """Run a single bootstrap iteration.
 
@@ -1418,7 +1413,6 @@ def _run_single_bootstrap(
         p_full = constraints.expand_free_to_full(p_free)
         model = build_model(p_full, edges, nL)
         resid = (flam_b - model) / flam_err
-        resid *= w_pix
         resid[~valid] = 0.0
         return resid
 
@@ -1445,7 +1439,6 @@ def _bootstrap_uncertainties(
     lb_free: np.ndarray,
     ub_free: np.ndarray,
     p0_free: np.ndarray,
-    w_pix: np.ndarray,
     n_boot: int,
     label: str = "",
     n_jobs: int = -1,
@@ -1474,7 +1467,7 @@ def _bootstrap_uncertainties(
     shared_kwargs = dict(
         flam=flam, flam_err=flam_err, valid=valid, edges=edges,
         nL=nL, constraints=constraints, lb_free=lb_free, ub_free=ub_free,
-        p0_free=p0_free, w_pix=w_pix,
+        p0_free=p0_free,
     )
 
     desc = f"Bootstrap ({label})" if label else "Bootstrap"

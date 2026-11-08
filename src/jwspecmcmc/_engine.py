@@ -26,7 +26,7 @@ from jwspecfit.lines import (
     get_line_list,
     observable_lines,
 )
-from jwspecfit.models import asymmetric_gaussian, build_model, pixel_weight
+from jwspecfit.models import asymmetric_gaussian, build_model
 from jwspecfit.resolution import resolve_R, sigma_inst_A
 
 from .diagnostics import summarise_convergence
@@ -376,7 +376,6 @@ def _fit_lines_mcmc(
 
     edges = spec.wave_edges_A
     dlam = spec.dlam_A
-    w_pix = pixel_weight(dlam)
 
     # ------------------------------------------------------------------
     # 3b. Drop lines in detector gaps (< 50% valid pixels within ±5σ)
@@ -756,7 +755,6 @@ def _fit_lines_mcmc(
         edges=edges,
         n_lines=nL,
         constraints=constraints,
-        w_pix=w_pix,
         n_lya=_n_lya,
         lya_model_fn=_lya_model_fn,
     )
