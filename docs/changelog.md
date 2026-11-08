@@ -4,6 +4,75 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased — abundance audit (2026-11-08)
+
+Fixes from a source-by-source audit of `jwspecabund` (every coefficient
+checked against the papers or the authors' released code, ionic
+abundances against an independent PyNeb calculation, and end-to-end
+recovery of known abundances).  Each fix has a regression test that fails
+on the previous code.
+
+### Verified correct (no change)
+
+All 450 Martinez+25 N/O and C/O coefficients (and the authors' C/O
+script to 2e-7), the Izotov+06 forms and coefficients, every PyNeb ionic
+abundance (< 1e-5 dex), the T_e / n_e solvers, Garnett (1992) zones, the
+Sanders+25 coefficients, Calzetti, Salim+18 Eqs. 3-4, CCM89, the Case B
+Balmer ratios and the A_V estimators.
+
+### Changed behaviour
+
+- **Abundances are normalised to narrow H-beta only.**  Broad Balmer
+  components (`*_BROAD`) are no longer added to HBETA/HALPHA before every
+  X/H and the Balmer decrement; a BLR/outflow component biased every X/H
+  low by log(1 + F_broad/F_narrow).
+- **N4+ (N V 1240) is no longer used in any N/O** (stellar-wind / AGN
+  dominated); it is still reported as an ionic abundance.
+- **Strong-line O/H needs [O II].**  O3 and R23 are double-valued, so O3
+  alone now gives O/H = NaN with the reason in `failures` instead of an
+  arbitrary branch; the solution is confined to the calibrated range
+  7.3-8.6.
+- **S/O needs both S+ and S2+** (the Izotov ICF has no single-ion form).
+- With `dust_correct=False`, `Av_err` no longer triggers a per-draw dust
+  correction on MCMC input (the caller's fluxes are final).
+
+### Fixed
+
+- **[S III] 9069 and [Ar III] 7136 were never read from fit results**:
+  the abundance code looked for `SIII_9069` / `ArIII_7136` (and the forward
+  model for `NII_6550`), but the fitter names them `SIII_9071`,
+  `ArIII_7138`, `NII_6549`.  S2+ and Ar2+ were never computed, so Ar/O was
+  always missing and S/O used S+ alone (0.5-0.8 dex low).  The old names
+  are accepted with a warning.
+- **N V emissivity**: no Boltzmann factor and collision strengths ~14x too
+  low (cited to a Fe X paper); N4+/H+ was 0.7-3.9 dex too low.  Now Stout
+  (Lykins+2015) data with exp(-dE/kT).
+- **Garnett+97 C/O fallback** applied the O+ correction twice: C/O was
+  high by log(O/O2+) (+0.05 dex at O2+/O = 0.9).
+- **Strong-line solver** took whichever local chi-squared minimum it met
+  (true 8.5 -> 7.4 on an O3-dominated fit); now a global search.  On MCMC
+  input an undetected line could enter individual draws (-1.2 dex), and
+  with `Av_err > 0` the posteriors were used without any dust correction
+  (-0.12 dex at A_V = 1).
+- **Forward model**: N/O divided N+ by O+ + O2+ (-0.6 dex); any C II] line
+  crashed; `NIV_doublet` was dropped; log n_e prior capped at 1e5
+  (T_e +26% for a 3e5 cm^-3 object; now 1e6 as in Cullen+25); the shared
+  H-beta error is now a full covariance (diagonal overstated the T_e error
+  ~5x); a zero H-beta error no longer sets every ratio error to 10%.
+- **H-beta emissivity** jumped 6.7% at 30 kK (switch to the Aller fit);
+  SH95 is now continued with its own slope, and the forward model uses
+  the same emissivity.
+- **Uncertainties**: the N III] quintuplet members were drawn independently
+  (N2+ error 1.8x too small); `Av_err` was ignored for least-squares input;
+  the C/O log(U) was not marginalised without a C III] density; the Lya
+  escape-fraction error counted the one Lya flux once per Balmer line
+  (~sqrt(N) too small) and dropped the A_V error on the analytic path.
+- The O+ upper limit used only the 3726 emissivity (2.2x too high); the
+  He I 4714 deblend of [Ar IV] failed above 25 kK (He I table limit), so
+  n_e(O2+) silently fell back; the Izotov N/O row of `NO_tiers` was
+  ~1 dex high; a forced ICF4 tier accepted draws missing an ion; a NaN n_e
+  crashed the Martinez interpolation.
+
 ## 1.1.16 — 2026-11-08
 
 Fixes from an injection–recovery audit of the line fitting and MCMC
