@@ -199,3 +199,27 @@ class TestRunNuts:
             assert 0.3 * p0_free[i] < median[i] < 3.0 * p0_free[i], (
                 f"Param {i}: median={median[i]:.3e}, truth={p0_free[i]:.3e}"
             )
+
+
+def test_nuts_honours_gaussian_and_loguniform_priors():
+    """Non-uniform prior_overrides must change the NUTS posterior, as in emcee.
+
+    run_nuts used to sample every parameter from Uniform(lo, hi) and silently
+    ignore Gaussian (and log-uniform) prior densities.
+    """
+    from jwspecmcmc.priors import GaussianPrior, LogUniformPrior
+    from jwspecmcmc.samplers import run_nuts
+
+    true_params = np.array([1e-16, 3e-17, 5007.0, 4861.0, 2.0, 2.0 * 4861.0 / 5007.0])
+    spec, cs = _make_synthetic_spec(["OIII_5007", "HBETA"], true_params, 2)
+    p0 = true_params[cs.free_mask()]
+    # free: A_5007, A_Hb, mu_5007, sigma_5007.  A tight prior at 2x truth on A_Hb
+    # dominates the likelihood (width ~1e-17), so the posterior must sit on it.
+    overrides = {1: GaussianPrior(mean=6e-17, std=3e-19),
+                 3: LogUniformPrior(lo=0.5, hi=8.0)}
+    prior_set = priors_from_bounds(p0 * 0.1, p0 * 10.0, overrides=overrides)
+    res = run_nuts(spec, prior_set, p0 * np.array([1, 2, 1, 1]), n_warmup=300, n_samples=500,
+                   n_chains=1, progress=False, seed=1)
+    a_hb = res["flat_chains"][:, 1]
+    assert abs(np.median(a_hb) - 6e-17) < 3 * 3e-19
+    assert np.std(a_hb) < 1e-18

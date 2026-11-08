@@ -307,6 +307,51 @@ def run_nautilus(
     }
 
 
+def _prior_support(prior_set: PriorSet) -> tuple[np.ndarray, np.ndarray]:
+    """Finite ``(lower, upper)`` support of every prior, for NUTS.
+
+    Gaussian priors with an open side are boxed at mean +/- 20 sigma.
+    """
+    from .priors import GaussianPrior
+
+    lo, hi = [], []
+    for p in prior_set.priors:
+        if isinstance(p, GaussianPrior):
+            lo.append(p.lo if np.isfinite(p.lo) else p.mean - 20.0 * p.std)
+            hi.append(p.hi if np.isfinite(p.hi) else p.mean + 20.0 * p.std)
+        else:
+            lo.append(p.lo)
+            hi.append(p.hi)
+    return np.array(lo, dtype=float), np.array(hi, dtype=float)
+
+
+def _jax_log_prior_extra(prior_set: PriorSet):
+    """JAX log-density of the priors beyond a flat box, or None if all flat."""
+    import jax.numpy as jnp
+
+    from .priors import GaussianPrior, LogUniformPrior
+
+    gauss = [(i, p.mean, p.std) for i, p in enumerate(prior_set.priors)
+             if isinstance(p, GaussianPrior)]
+    logu = [i for i, p in enumerate(prior_set.priors) if isinstance(p, LogUniformPrior)]
+    if not gauss and not logu:
+        return None
+    gi = jnp.array([g[0] for g in gauss], dtype=jnp.int32)
+    gm = jnp.array([g[1] for g in gauss], dtype=jnp.float64)
+    gs = jnp.array([g[2] for g in gauss], dtype=jnp.float64)
+    li = jnp.array(logu, dtype=jnp.int32)
+
+    def extra(p):
+        out = 0.0
+        if gauss:
+            out = out - 0.5 * jnp.sum(((p[gi] - gm) / gs) ** 2)
+        if logu:
+            out = out - jnp.sum(jnp.log(p[li]))
+        return out
+
+    return extra
+
+
 def run_nuts(
     spec: LikelihoodSpec,
     prior_set: PriorSet,
@@ -361,37 +406,32 @@ def run_nuts(
     from numpyro.infer import MCMC, NUTS
 
     from .jax_likelihood import make_jax_log_likelihood
-    from .priors import GaussianPrior, LogUniformPrior, UniformPrior
 
     n_dim = prior_set.n_dim
 
     # Build JIT-compiled log-likelihood.
     log_likelihood_jax, static_data = make_jax_log_likelihood(spec)
 
-    # Build bounds arrays for the uniform priors.
-    lb = np.array([
-        p.lo if isinstance(p, (UniformPrior, LogUniformPrior)) else -np.inf
-        for p in prior_set.priors
-    ])
-    ub = np.array([
-        p.hi if isinstance(p, (UniformPrior, LogUniformPrior)) else np.inf
-        for p in prior_set.priors
-    ])
+    # Support box for the vector site, plus each prior's own log-density
+    # added as a factor, so non-uniform prior_overrides mean the same thing
+    # here as in emcee and nautilus.  A Gaussian with an open side is boxed
+    # at mean +/- 20 sigma, which changes nothing numerically.
+    lb, ub = _prior_support(prior_set)
     lb_jax = jnp.array(lb, dtype=jnp.float64)
     ub_jax = jnp.array(ub, dtype=jnp.float64)
+    log_prior_extra = _jax_log_prior_extra(prior_set)
 
-    # Pre-compute log-prior normalisation for uniform priors.
-    log_prior_norm = 0.0
-    for prior in prior_set.priors:
-        if isinstance(prior, UniformPrior):
-            log_prior_norm -= np.log(prior.hi - prior.lo)
+    # Constant normalisation of the box, for reporting log-probabilities.
+    log_prior_norm = -float(np.sum(np.log(ub - lb)))
 
     def numpyro_model():
-        # Sample each free parameter with its prior.
+        # Sample each free parameter within its prior support.
         p_free = numpyro.sample(
             "params",
             dist.Uniform(lb_jax, ub_jax),
         )
+        if log_prior_extra is not None:
+            numpyro.factor("log_prior", log_prior_extra(p_free))
         # Add log-likelihood as a factor.
         ll = log_likelihood_jax(p_free)
         numpyro.factor("log_likelihood", ll)
@@ -517,7 +557,11 @@ def run_nuts(
     flat_chains = chains.reshape(-1, chains.shape[-1])  # (n_chains * n_samples, n_dim)
 
     # Compute log-probabilities for each sample.
-    log_prob_fn = jax.jit(lambda p: log_likelihood_jax(p) + log_prior_norm)
+    def _log_prob(p):
+        lp = log_likelihood_jax(p) + log_prior_norm
+        return lp + log_prior_extra(p) if log_prior_extra is not None else lp
+
+    log_prob_fn = jax.jit(_log_prob)
     flat_log_prob = np.array(jax.vmap(log_prob_fn)(jnp.array(flat_chains)))
     log_prob_chains = flat_log_prob.reshape(chains.shape[:2])  # (n_chains, n_samples)
 
