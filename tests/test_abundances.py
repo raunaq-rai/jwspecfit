@@ -1645,8 +1645,8 @@ class TestDirectSum:
         # N/O should be ICF(N) × N+/O+, which is > 0.
         assert totals["N/O"] > 0
 
-    def test_direct_sum_includes_n4plus(self):
-        """N4+ (NV) should be included in the sum when detected."""
+    def test_direct_sum_excludes_n4plus(self):
+        """N4+ (N V) is not a nebular tracer: kept out of the N/O sum."""
         from jwspecabund.direct import compute_total_abundances
 
         ionic = {
@@ -1660,8 +1660,8 @@ class TestDirectSum:
         totals = compute_total_abundances(ionic, icf_method="direct_sum")
 
         OH = 1e-5 + 5e-5
-        expected_NO = (3e-7 + 1e-5 + 8e-6 + 1e-7) / OH
-        np.testing.assert_allclose(totals["N/O"], expected_NO)
+        expected_NO = (3e-7 + 1e-5 + 8e-6) / OH
+        np.testing.assert_allclose(totals["N/O"], expected_NO, rtol=1e-12)
 
     def test_gate_nitrogen_ions_removes_low_snr(self):
         """Low-SNR UV nitrogen doublets should be excluded."""

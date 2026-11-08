@@ -259,11 +259,11 @@ Tiered fallback chain (no ICF, no logU needed):
 
 ```
 Tier 1: N+ > 0 AND (N2+ + N3+) > 0
-  N/O = (N+ + N2+ + N3+ + N4+) / (O+ + O2+)
+  N/O = (N+ + N2+ + N3+) / (O+ + O2+)
   Label: "Np_Npp_Nppp"
 
 Tier 2/3: (N2+ + N3+) > 0 AND O2+ > 0
-  N/O = (N2+ + N3+ + N4+) / O2+
+  N/O = (N2+ + N3+) / O2+
   Label: "Npp_Nppp_Opp" | "Nppp_Opp" | "Npp_Opp"
   (sub-label depends on which UV ions are present)
 
@@ -300,7 +300,7 @@ Simple: `N/O = ICF_N(Izotov+06) * N+/O+`. Requires N+ and O+ only.
   C²⁺/O²⁺ ICF** — `ICF_C(Martinez) × C2+/O2+` — whenever logU, Z, C²⁺ and O²⁺
   are available; otherwise the legacy path — `(C+ + C2+ + C3+) / (O+ + O2+)`
   when CII] 2326 detected, else `ICF_C(Garnett+97) × (C2+ + C3+) / O2+`
-- **N/O_UV_raw:** `(N2+ + N3+ + N4+) / O2+` (for comparison, no ICF)
+- **N/O_UV_raw:** `(N2+ + N3+) / O2+` (for comparison, no ICF; N4+ from N V is never included)
 
 **ICF tier locking:** When `icf_tier` is set (e.g. `"NppNppp_Opp"`), the
 specified Martinez+25 ICF tier is used for both the point estimate and all

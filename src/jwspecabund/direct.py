@@ -2405,15 +2405,17 @@ def compute_total_abundances(
         totals["O/H"] = OH
 
         # N/O — direct_sum: sum all detected nitrogen ions (no ICF/logU).
+        # N4+ (N V 1240) is reported as an ionic abundance but kept out of
+        # N/O: N V in galaxies is dominated by stellar-wind P-Cygni and AGN
+        # emission, so it is not a reliable nebular N4+ tracer.
         if icf_method == "direct_sum":
             N_plus = ionic.get("N+/H+", 0.0)
             N_pp = ionic.get("N++/H+", 0.0)
             N_ppp = ionic.get("N+++/H+", 0.0)
-            N_pppp = ionic.get("N4+/H+", 0.0)
 
             if N_plus > 0 and (N_pp + N_ppp) > 0:
                 # Tier 1: all zones — Topping+2024
-                totals["N/O"] = (N_plus + N_pp + N_ppp + N_pppp) / OH
+                totals["N/O"] = (N_plus + N_pp + N_ppp) / OH
                 totals["icf_method"] = "direct_sum"
                 totals["NO_icf_name"] = "Np_Npp_Nppp"
                 icf_dict["N/O"] = {
@@ -2423,7 +2425,7 @@ def compute_total_abundances(
                 }
             elif (N_pp + N_ppp) > 0 and O_pp > 0:
                 # Tier 2/3: UV only — Yanagisawa+25 / Cameron+23
-                totals["N/O"] = (N_pp + N_ppp + N_pppp) / O_pp
+                totals["N/O"] = (N_pp + N_ppp) / O_pp
                 totals["icf_method"] = "direct_sum"
                 if N_pp > 0 and N_ppp > 0:
                     totals["NO_icf_name"] = "Npp_Nppp_Opp"
@@ -2594,13 +2596,12 @@ def compute_total_abundances(
                     N_plus = ionic.get("N+/H+", 0.0)
                     N_pp = ionic.get("N++/H+", 0.0)
                     N_ppp = ionic.get("N+++/H+", 0.0)
-                    N_pppp = ionic.get("N4+/H+", 0.0)
                     if N_plus > 0 and (N_pp + N_ppp) > 0:
-                        totals["N/O"] = (N_plus + N_pp + N_ppp + N_pppp) / OH
+                        totals["N/O"] = (N_plus + N_pp + N_ppp) / OH
                         totals["icf_method"] = "direct_sum"
                         totals["NO_icf_name"] = "Np_Npp_Nppp"
                     elif (N_pp + N_ppp) > 0 and O_pp > 0:
-                        totals["N/O"] = (N_pp + N_ppp + N_pppp) / O_pp
+                        totals["N/O"] = (N_pp + N_ppp) / O_pp
                         totals["icf_method"] = "direct_sum"
                         if N_pp > 0 and N_ppp > 0:
                             totals["NO_icf_name"] = "Npp_Nppp_Opp"
@@ -2649,7 +2650,7 @@ def compute_total_abundances(
         # Record N/O failure reason if not computed, unless a more specific
         # one (e.g. a locked oxygen tracer that could not be formed) is set.
         if "N/O" not in totals and "N/O" not in failures:
-            _n_ions = [k for k in ("N+/H+", "N++/H+", "N+++/H+", "N4+/H+")
+            _n_ions = [k for k in ("N+/H+", "N++/H+", "N+++/H+")
                        if ionic.get(k, 0.0) > 0]
             _o_ions = [k for k in ("O+/H+", "O++/H+")
                        if ionic.get(k, 0.0) > 0]
@@ -2672,7 +2673,6 @@ def compute_total_abundances(
         N_plus = ionic.get("N+/H+", 0.0)
         N_pp = ionic.get("N++/H+", 0.0)
         N_ppp = ionic.get("N+++/H+", 0.0)
-        N_pppp = ionic.get("N4+/H+", 0.0)
 
         # Martinez+25 — compute ALL individual ICFs (not just the priority pick)
         if logU is not None and Z_Zsun is not None:
@@ -2724,13 +2724,13 @@ def compute_total_abundances(
 
         # Direct sum: (N⁺ + N²⁺ + N³⁺) / (O⁺ + O²⁺)  (Berg+2025 Eq. 5)
         if N_plus > 0 and (N_pp + N_ppp) > 0:
-            t1 = (N_plus + N_pp + N_ppp + N_pppp) / OH
+            t1 = (N_plus + N_pp + N_ppp) / OH
             if t1 > 0:
                 NO_tiers["Direct sum: (N⁺+N²⁺+N³⁺)/(O⁺+O²⁺)"] = np.log10(t1)
 
         # UV-only direct sum: (N²⁺ + N³⁺) / O²⁺
         if (N_pp + N_ppp) > 0 and O_pp > 0:
-            t23 = (N_pp + N_ppp + N_pppp) / O_pp
+            t23 = (N_pp + N_ppp) / O_pp
             if t23 > 0:
                 NO_tiers["Direct sum UV: (N²⁺+N³⁺)/O²⁺"] = np.log10(t23)
 
@@ -2924,8 +2924,7 @@ def compute_total_abundances(
         # UV N/O — raw ionic sum without ICF (for comparison).
         N_pp = ionic.get("N++/H+", 0.0)
         N_ppp = ionic.get("N+++/H+", 0.0)
-        N_pppp = ionic.get("N4+/H+", 0.0)
-        N_uv = N_pp + N_ppp + N_pppp
+        N_uv = N_pp + N_ppp
         if N_uv > 0 and O_pp > 0:
             totals["N/O_UV_raw"] = N_uv / O_pp
 

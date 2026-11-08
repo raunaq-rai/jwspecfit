@@ -613,10 +613,14 @@ Li-like atom model:
 - **Level 3:** 2p ^2P_{3/2} (g = 4), lambda = 1238.821 A,
   A_{31} = 3.40 × 10^8 s^-1
 
-Effective collision strengths Upsilon(T) are interpolated from the
-tabulation of Aggarwal & Keenan (2004) / CHIANTI v10.  Statistical
-equilibrium is solved for the three-level system, and the emissivity
-follows from:
+Effective collision strengths Upsilon(T) and level energies come from the
+Stout database (Lykins et al. 2015) as distributed with Cloudy
+(Upsilon(2s-2p1/2) = 2.16, Upsilon(2s-2p3/2) = 4.32 at 10^4 K).  Excitation
+rates carry the Boltzmann factor exp(-Delta E/kT) (Delta E/k = 1.16 × 10^5 K),
+so the emissivity rises steeply with T_e.  (Before v1.1.17 the factor was
+missing and Upsilon ~14x too low: N4+/H+ came out 0.7-3.9 dex too low.)
+Statistical equilibrium is solved for the three-level system, and the
+emissivity follows from:
 
 ```
 epsilon = (n_upper / n_total) × A × h × nu / n_e
@@ -627,8 +631,12 @@ epsilon = (n_upper / n_total) × A × h × nu / n_e
 The raw ionic sum is:
 
 ```
-(N/O)_raw = (N+ + N2+ + N3+ + N4+) / (O+ + O2+)
+(N/O)_raw = (N+ + N2+ + N3+) / (O+ + O2+)
 ```
+
+N4+ is reported as an ionic abundance but never enters N/O: N V 1240 in
+star-forming galaxies is dominated by stellar-wind P-Cygni and AGN emission,
+so it does not trace nebular N4+.
 
 This is biased because the ionisation structure is non-uniform — the
 N3+/N ratio differs from O2+/O.  An ICF is required to correct this
@@ -1273,7 +1281,7 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 |-----------|---------|
 | Abdurro'uf et al., 2024, ApJ, 973, 47 (arXiv:2404.16201) | Low-ionisation n_e redshift-evolution fallback: 54·(1+z)^1.2 |
 | Aggarwal, K. M. & Keenan, F. P., 1999, ApJS, 123, 311 | Alternative 6-level O III collision strengths (oiii_coll_file) |
-| Aggarwal, K. M. & Keenan, F. P., 2004, A&A, 427, 763 | N V effective collision strengths (CHIANTI v10) |
+| Lykins, M. L. et al., 2015, ApJ, 807, 118 | Stout database: N V collision strengths and energies |
 | Aller, L. H., 1984, Physics of Thermal Gaseous Nebulae (Reidel) | Hbeta Case B recombination formula for T_e > 30,000 K |
 | Asplund, M. et al., 2009, ARA&A, 47, 481 | Solar oxygen abundance: 12 + log(O/H)_sun = 8.69 |
 | Berg, D. A. et al., 2025, arXiv:2511.13591 | Six-step UV nitrogen abundance procedure |

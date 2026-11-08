@@ -47,3 +47,31 @@ class TestGarnettCarbonNotDoubleCounted:
         tot = compute_total_abundances(ionic, co_icf_method="garnett97")
         assert tot["CO_method"] == "garnett97_icf"
         assert tot["C/O"] == pytest.approx(CO_true, rel=1e-12, abs=0)
+
+
+class TestNVEmissivity:
+    """N V 1239/1243 collisional emissivity (forward._nv_emissivity)."""
+
+    def test_low_density_limit_matches_analytic(self):
+        # n_e -> 0: every excitation decays radiatively, eps = q_13 h nu.
+        from jwspecabund.forward import _nv_emissivity
+        T = 1.5e4
+        q13 = 8.629e-6 / (2 * np.sqrt(T)) * 4.32 * np.exp(-80721.9 * 1.4387769 / T)
+        hnu = 6.62607015e-27 * 2.99792458e10 / 1238.821e-8
+        # Upsilon interpolates in log T between 1.25e4 and 2.5e4 K.
+        assert _nv_emissivity(T, 1.0, 1239) == pytest.approx(q13 * hnu, rel=0.01, abs=0)
+
+    def test_boltzmann_temperature_dependence(self):
+        from jwspecabund.forward import _nv_emissivity
+        r = _nv_emissivity(2.0e4, 1e2, 1239) / _nv_emissivity(1.0e4, 1e2, 1239)
+        # exp(-dE/k (1/2e4 - 1/1e4)) / sqrt(2) ~ 230
+        assert 150 < r < 350
+
+    def test_n4plus_excluded_from_n_over_o(self):
+        ionic = {"O+/H+": 1e-5, "O++/H+": 9e-5, "N+/H+": 1e-6,
+                 "N++/H+": 2e-6, "N4+/H+": 5e-6}
+        with_nv = compute_total_abundances(ionic, icf_method="direct_sum")
+        ionic.pop("N4+/H+")
+        without = compute_total_abundances(ionic, icf_method="direct_sum")
+        assert with_nv["N/O"] == without["N/O"]
+        assert with_nv["N/O_UV_raw"] == without["N/O_UV_raw"]

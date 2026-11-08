@@ -69,27 +69,23 @@ def hbeta_emissivity_aller84(Te: float) -> float:
 #   Level 2: 2p ²P₁/₂  (g = 2), λ₂₁ = 1242.804 Å, A₂₁ = 3.37×10⁸ s⁻¹
 #   Level 3: 2p ²P₃/₂  (g = 4), λ₃₁ = 1238.821 Å, A₃₁ = 3.40×10⁸ s⁻¹
 #
-# Effective collision strengths Υ(T) from Aggarwal & Keenan (2004,
-# A&A, 427, 763) / CHIANTI v10.  We store a table and interpolate.
+# Effective collision strengths Υ(T) and level energies from the Stout
+# database (Lykins et al. 2015, ApJ 807, 118) as distributed with Cloudy
+# (n_5.coll, n_5.nrg).  An earlier table here, cited to a Fe X paper, was
+# ~14x too low.  Υ is nearly flat over nebular temperatures.
 
 _NV_A21 = 3.37e8   # s⁻¹
 _NV_A31 = 3.40e8   # s⁻¹
 _NV_G = np.array([2, 2, 4])  # statistical weights
 _NV_WAVE = {2: 1242.804, 3: 1238.821}  # Angstroms
+_NV_E_CM = np.array([0.0, 80463.2, 80721.9])  # level energies, cm⁻¹
+_HC_OVER_K = 1.4387769  # cm K
 
-# Υ(T) table: log10(T) and effective collision strengths (Aggarwal & Keenan 2004)
 # Transitions: 1→2, 1→3, 2→3
-_NV_LOGTEMP = np.array([3.5, 3.7, 3.9, 4.0, 4.1, 4.2, 4.3, 4.4, 4.5,
-                         4.6, 4.7, 4.8, 4.9, 5.0, 5.2, 5.4])
-_NV_UPS_12 = np.array([0.112, 0.126, 0.142, 0.151, 0.161, 0.174, 0.190,
-                        0.210, 0.233, 0.258, 0.280, 0.295, 0.300, 0.296,
-                        0.266, 0.224])
-_NV_UPS_13 = np.array([0.224, 0.252, 0.283, 0.301, 0.322, 0.348, 0.380,
-                        0.419, 0.466, 0.516, 0.559, 0.589, 0.600, 0.592,
-                        0.532, 0.448])
-_NV_UPS_23 = np.array([0.262, 0.291, 0.327, 0.349, 0.375, 0.408, 0.449,
-                        0.500, 0.560, 0.624, 0.682, 0.725, 0.744, 0.738,
-                        0.668, 0.563])
+_NV_LOGTEMP = np.log10([5.0e3, 1.25e4, 2.5e4, 5.0e4, 1.25e5])
+_NV_UPS_12 = np.array([2.15, 2.16, 2.19, 2.24, 2.38])
+_NV_UPS_13 = np.array([4.28, 4.32, 4.37, 4.48, 4.77])
+_NV_UPS_23 = np.array([0.749, 0.742, 0.729, 0.716, 0.777])
 
 
 def _nv_emissivity(Te: float, ne: float, wave: int) -> float:
@@ -121,14 +117,18 @@ def _nv_emissivity(Te: float, ne: float, wave: int) -> float:
     ups_13 = float(np.interp(logT, _NV_LOGTEMP, _NV_UPS_13))
     ups_23 = float(np.interp(logT, _NV_LOGTEMP, _NV_UPS_23))
 
-    # Collision rate coefficients: q_ij = 8.629e-6 / (g_i * T^0.5) * Υ_ij
+    # De-excitation q_ji = 8.629e-6 Υ / (g_j T^0.5); excitation adds the
+    # Boltzmann factor, q_ij = (g_j/g_i) q_ji exp(-ΔE_ij / kT).
     coeff = 8.629e-6 / np.sqrt(Te)
 
-    q12 = coeff * ups_12 / _NV_G[0]
-    q13 = coeff * ups_13 / _NV_G[0]
+    def _boltz(i: int, j: int) -> float:
+        return float(np.exp(-(_NV_E_CM[j] - _NV_E_CM[i]) * _HC_OVER_K / Te))
+
+    q12 = coeff * ups_12 / _NV_G[0] * _boltz(0, 1)
+    q13 = coeff * ups_13 / _NV_G[0] * _boltz(0, 2)
     q21 = coeff * ups_12 / _NV_G[1]
     q31 = coeff * ups_13 / _NV_G[2]
-    q23 = coeff * ups_23 / _NV_G[1]
+    q23 = coeff * ups_23 / _NV_G[1] * _boltz(1, 2)
     q32 = coeff * ups_23 / _NV_G[2]
 
     # Statistical equilibrium:  Σ n_j (A_ji + n_e q_ji) = n_i Σ (A_ij + n_e q_ij)
