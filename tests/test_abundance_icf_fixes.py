@@ -416,3 +416,14 @@ class TestForwardModelFixes:
     def test_density_prior_reaches_1e6(self):
         from jwspecabund.forward import _PRIOR_BOUNDS
         assert _PRIOR_BOUNDS["log_ne"][1] >= 6.0
+
+
+def test_hbeta_emissivity_continuous_at_30kK():
+    from jwspecabund.direct import _hbeta_emissivity
+    for ne in (1e2, 1e5):
+        below = _hbeta_emissivity(30000.0, ne)
+        above = _hbeta_emissivity(30000.001, ne)
+        assert above == pytest.approx(below, rel=1e-6, abs=0)
+        # Keeps falling with the SH95 slope (~T^-0.97).
+        r = _hbeta_emissivity(40000.0, ne) / below
+        assert r == pytest.approx((4 / 3) ** -0.97, rel=0.02)

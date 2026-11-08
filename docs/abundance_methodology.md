@@ -526,14 +526,19 @@ components are summed before dividing.
   wave=4861)`, based on the Storey & Hummer (1995) recombination tables.
 
 - **T_e > 30,000 K:** The Storey & Hummer tables do not extend beyond
-  30,000 K.  We use the Aller (1984) Case B formula:
+  30,000 K.  The SH95 value at 30,000 K is continued as a power law with
+  the local SH95 slope between 25,000 and 30,000 K (at the same n_e):
 
   ```
-  alpha_Hbeta_eff = 3.03 × 10^-14 × (T_e / 10^4)^(-0.874)   [cm^3 s^-1]
-  epsilon_Hbeta   = alpha_Hbeta_eff × h × nu_Hbeta
+  epsilon_Hbeta(T) = epsilon_SH95(30 kK) × (T / 30 kK)^s,
+  s = ln[eps(30 kK)/eps(25 kK)] / ln(30/25)  ~ -0.97
   ```
 
-  where h × nu_Hbeta = hc / lambda_Hbeta with lambda_Hbeta = 4862.68 A.
+  This is continuous at the switch.  The Aller (1984) fit
+  alpha = 3.03e-14 (T/10^4)^-0.874, used before v1.1.17 (and throughout
+  the forward model), matches SH95 at 10^4 K but runs +2.6 % high at
+  20,000 K and +6.7 % at 30,000 K, so every X/H jumped by +0.028 dex
+  across the switch.  `hbeta_emissivity_aller84` is kept for reference.
 
 ### 5.3 O2+/H+ from [OIII] 5007
 
@@ -1041,8 +1046,9 @@ uncertainty is the standard deviation of the posterior.
 An alternative approach following Cullen et al. (2025): free
 parameters (T_e, n_e, ionic abundances) are sampled via MCMC or nested
 sampling.  For each parameter vector, collisionally-excited line
-emissivities from PyNEB and the Aller (1984) Hbeta recombination
-formula predict line flux ratios that are compared to observations
+emissivities from PyNEB and the same Case B Hbeta emissivity as the
+direct method (Storey & Hummer 1995, continued above 30,000 K) predict line
+flux ratios that are compared to observations
 via a Gaussian likelihood.
 
 This method self-consistently accounts for the T_e–n_e coupling and
@@ -1309,7 +1315,7 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 | Abdurro'uf et al., 2024, ApJ, 973, 47 (arXiv:2404.16201) | Low-ionisation n_e redshift-evolution fallback: 54·(1+z)^1.2 |
 | Aggarwal, K. M. & Keenan, F. P., 1999, ApJS, 123, 311 | Alternative 6-level O III collision strengths (oiii_coll_file) |
 | Lykins, M. L. et al., 2015, ApJ, 807, 118 | Stout database: N V collision strengths and energies |
-| Aller, L. H., 1984, Physics of Thermal Gaseous Nebulae (Reidel) | Hbeta Case B recombination formula for T_e > 30,000 K |
+| Aller, L. H., 1984, Physics of Thermal Gaseous Nebulae (Reidel) | Hbeta Case B fit (reference only; `hbeta_emissivity_aller84`) |
 | Asplund, M. et al., 2009, ARA&A, 47, 481 | Solar oxygen abundance: 12 + log(O/H)_sun = 8.69 |
 | Berg, D. A. et al., 2025, arXiv:2511.13591 | Six-step UV nitrogen abundance procedure |
 | Arellano-Córdova, K. Z. et al., 2020, MNRAS, 496, 1051 | Self-consistent T_e-n_e from UV + optical O III |

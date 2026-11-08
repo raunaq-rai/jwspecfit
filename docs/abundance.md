@@ -410,7 +410,7 @@ _build_forward_result()  -->  posterior summary (median, 16/84 percentiles)
 ```
 
 The model predicts `F_line/F_Hb = (X^i+/H+) * eps_line / eps_Hb` for each
-observable, using PyNEB emissivities and the Aller (1984) Hb formula.
+observable, using PyNEB emissivities and the direct method's Case B Hb emissivity.
 
 NV lines use `_nv_emissivity()` (3-level atom, Aggarwal & Keenan 2004 collision
 strengths).

@@ -12,6 +12,7 @@ References
 
 from __future__ import annotations
 
+import functools
 import logging
 from dataclasses import dataclass, field
 from typing import Any
@@ -1790,11 +1791,20 @@ def Te_int_from_high(Te_high: float, relation: str = "3_tier") -> float | None:
 _PYNEB_HI_TMAX = 30000.0
 
 
-def _hbeta_emissivity(Te: float, ne: float) -> float:
-    """Return the Hbeta volume emissivity, using Aller (1984) beyond 30,000 K.
+@functools.lru_cache(maxsize=1)
+def _h1_atom():
+    """PyNEB H I recombination atom (Storey & Hummer 1995), built once."""
+    return _get_pyneb().RecAtom("H", 1)
 
-    Uses PyNEB directly for T <= 30,000 K.  For higher temperatures,
-    uses the Aller (1984) formula which has no upper-bound limitation.
+
+def _hbeta_emissivity(Te: float, ne: float) -> float:
+    """Return the Case B H-beta volume emissivity.
+
+    PyNEB (Storey & Hummer 1995) up to its 30,000 K table limit.  Above it
+    the SH95 value at 30,000 K is continued as a power law with the local
+    SH95 slope d ln(eps)/d ln(T) between 25,000 and 30,000 K (about
+    -0.97).  The Aller (1984) fit used here before is +6.7 % above SH95 at
+    30,000 K, so switching to it made every X/H jump by +0.028 dex there.
 
     Parameters
     ----------
@@ -1808,14 +1818,13 @@ def _hbeta_emissivity(Te: float, ne: float) -> float:
     float
         Hbeta emissivity (same units as PyNEB's ``RecAtom.getEmissivity``).
     """
-    pn = _get_pyneb()
+    H1 = _h1_atom()
     if Te <= _PYNEB_HI_TMAX:
-        H1 = pn.RecAtom("H", 1)
         return H1.getEmissivity(Te, ne, wave=4861)
-
-    # Aller (1984) Case B formula, valid at any temperature.
-    from .forward import hbeta_emissivity_aller84
-    return hbeta_emissivity_aller84(Te)
+    e_hi = H1.getEmissivity(_PYNEB_HI_TMAX, ne, wave=4861)
+    e_lo = H1.getEmissivity(25000.0, ne, wave=4861)
+    slope = np.log(e_hi / e_lo) / np.log(_PYNEB_HI_TMAX / 25000.0)
+    return float(e_hi * (Te / _PYNEB_HI_TMAX) ** slope)
 
 
 def _ionic_abundance(
@@ -2072,7 +2081,7 @@ def compute_ionic_abundances(
     _nv1 = fluxes.get("NV_1", 0.0)
     _nv2 = fluxes.get("NV_2", 0.0)
     if _nv1 > 0 or _nv2 > 0:
-        from .forward import _nv_emissivity, hbeta_emissivity_aller84
+        from .forward import _nv_emissivity
         eps_Hb = _hbeta_emissivity(Te_high, ne_hi)
         if _nv1 > 0 and _nv2 > 0:
             nv_flux = _nv1 + _nv2

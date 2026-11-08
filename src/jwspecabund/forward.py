@@ -451,7 +451,11 @@ def _predict_ratios(
     Te = 10.0 ** params["log_Te"]
     ne = 10.0 ** params["log_ne"]
 
-    eps_hb = hbeta_emissivity_aller84(Te)
+    # Same H-beta emissivity as the direct method (SH95, continued above
+    # 30 kK), so the two methods share one normalisation.  The Aller (1984)
+    # fit runs +2.6 % / +6.7 % high at 20 / 30 kK.
+    from .direct import _hbeta_emissivity
+    eps_hb = _hbeta_emissivity(Te, ne)
 
     predicted = np.empty(len(obs_components))
     for i, components in enumerate(obs_components):
