@@ -2754,7 +2754,10 @@ def compute_total_abundances(
         # S/O
         S_plus = ionic.get("S+/H+", 0.0)
         S_pp = ionic.get("S++/H+", 0.0)
-        if S_plus > 0 or S_pp > 0:
+        # Izotov+06 Eq. 20 is ICF(S+ + S2+): it corrects for S3+ only, so it
+        # needs both ions.  With [S III] 9069 missing (z > ~4.8 on NIRSpec)
+        # S+ alone misses the dominant S2+ and S/O would be 0.5-0.8 dex low.
+        if S_plus > 0 and S_pp > 0:
             S_total_ion = S_plus + S_pp
             icf_s = icf_sulfur(O_plus, OH)
             raw_so = S_total_ion / OH if OH > 0 else 0
@@ -2764,6 +2767,12 @@ def compute_total_abundances(
                 "raw": np.log10(raw_so) if raw_so > 0 else None,
                 "corrected": np.log10(totals["S/O"]) if totals["S/O"] > 0 else None,
             }
+        elif S_plus > 0 or S_pp > 0:
+            missing = "S++ ([SIII] 9069)" if S_pp <= 0 else "S+ ([SII] 6718,6732)"
+            failures["S/O"] = (
+                f"needs both S+ and S++; {missing} not measured, and the "
+                "Izotov+06 ICF has no single-ion form"
+            )
         else:
             failures["S/O"] = "no S+ or S++ ions detected ([SII]/[SIII] missing)"
 
