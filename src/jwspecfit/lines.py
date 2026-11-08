@@ -118,6 +118,30 @@ REST_LINES_A: dict[str, float] = {
 # ---------------------------------------------------------------------------
 # Pre-defined line groups for different spectral resolutions.
 #
+# Merged entries: one Gaussian standing for a blend of these components.
+MERGED_COMPONENTS: dict[str, tuple[str, ...]] = {
+    "NV_doublet": ("NV_1", "NV_2"),
+    "NIV_doublet": ("NIV_1483", "NIV_1486"),
+    "CIV_doublet": ("CIV_1", "CIV_2"),
+    "NIII_doublet": ("NIII_1747", "NIII_1749", "NIII_1750", "NIII_1752", "NIII_1754"),
+    "OII_doublet": ("OII_3726", "OII_3729"),
+}
+
+
+def merged_sigma_A(name: str) -> float:
+    """Rest-frame RMS spread (Å) of a merged entry's components; 0 otherwise.
+
+    Equal weights are assumed.  A blend is wider than one line by this
+    amount in quadrature, so width bounds built from the instrumental
+    width alone would clip it once the components are partly resolved.
+    """
+    comps = MERGED_COMPONENTS.get(name)
+    if not comps:
+        return 0.0
+    lam = np.array([REST_LINES_A[c] for c in comps])
+    return float(np.std(lam))
+
+
 # Prism (R ~ 30–300):  merged doublet entries for unresolvable pairs.
 # Grating (R ~ 1000+): individual doublet components resolved.
 #

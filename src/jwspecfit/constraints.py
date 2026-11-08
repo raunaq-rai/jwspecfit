@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from math import sqrt
 
 import numpy as np
 
@@ -112,6 +113,42 @@ _UV_INTERCOM = ("CIII]_1907", "NIV_1486", "NIII_1750")
 _ALWAYS_TIE_WIDTH = (("CIII]_1907", "CIII]_1909"),)
 
 
+def tied_width(sigma_src: float, ratio: float, var_inst_src: float,
+               var_inst_dst: float) -> float:
+    """Width of a line that shares another line's intrinsic velocity dispersion.
+
+    Resolved source (``sigma_src**2 > var_inst_src``): remove the source's
+    instrumental width, scale the intrinsic part by ``ratio`` (the
+    wavelength ratio), and add the target's instrumental width back,
+
+    ``sigma_dst**2 = ratio**2 (sigma_src**2 - var_inst_src) + var_inst_dst``.
+
+    Source at or below its assumed instrumental width -- unresolved, or a
+    compact source whose true R exceeds the assumed one -- scale by the
+    instrumental-width ratio instead, ``sigma_src * sqrt(var_inst_dst /
+    var_inst_src)``, which is exact for unresolved lines even when R is
+    off by a constant factor.  The two branches meet at
+    ``sigma_src**2 = var_inst_src``.
+
+    Parameters
+    ----------
+    sigma_src : float
+        Observed Gaussian sigma of the source line (Angstrom).
+    ratio : float
+        Rest-wavelength ratio ``lambda_dst / lambda_src``.
+    var_inst_src, var_inst_dst : float
+        Instrumental variances (Angstrom^2) at the two lines.
+
+    Returns
+    -------
+    float
+        Observed Gaussian sigma of the target line (Angstrom).
+    """
+    if sigma_src * sigma_src <= var_inst_src:
+        return sigma_src * sqrt(var_inst_dst / var_inst_src)
+    return sqrt(ratio * ratio * (sigma_src * sigma_src - var_inst_src) + var_inst_dst)
+
+
 def _check_op_order(ops: list[tuple[int, int, float]]) -> None:
     """Raise if an op copies a source that a later op still overwrites."""
     written_later: set[int] = set()
@@ -144,6 +181,12 @@ class ConstraintSet:
         Fix every pair in :data:`BRANCHING_RATIOS` (flux ratio, velocity and
         width, overriding ``tie_uv_centroids`` for O III] 1661) and H8 to
         :data:`H8_H9_RATIO` x H9.
+    sigma_inst_A : dict of str to float, optional
+        Instrumental Gaussian sigma (Angstrom) at each line's observed
+        wavelength.  When given, width ties share the *intrinsic* velocity
+        dispersion and each line keeps its own instrumental width (see
+        :func:`tied_width`); without it widths scale with wavelength, which
+        is exact only at constant R.
     """
 
     line_names: list[str]
@@ -156,10 +199,16 @@ class ConstraintSet:
     niv_doublet_ratio: float | None = None
     ciii_doublet_ratio: float | None = None
     fix_branching_ratios: bool = True
+    sigma_inst_A: dict[str, float] | None = None
 
     def __post_init__(self) -> None:
         # Constraints saved before a line key was renamed carry the old name.
         self.line_names = canonical_line_names(list(self.line_names), warn=False)
+        if self.sigma_inst_A is not None:
+            self.sigma_inst_A = {
+                canonical_line_names([k], warn=False)[0]: float(v)
+                for k, v in self.sigma_inst_A.items()
+            }
         if self.blended_doublets is not None:
             self.blended_doublets = canonical_line_names(
                 set(self.blended_doublets), warn=False,
@@ -305,9 +354,33 @@ class ConstraintSet:
             Constrained parameter vector.
         """
         p = np.array(params, dtype=float, copy=True)
-        for dst, src, ratio in self.tying_ops():
-            p[dst] = p[src] * ratio
+        for dst, src, ratio, a_src, a_dst in self.tying_ops_full():
+            p[dst] = tied_width(p[src], ratio, a_src, a_dst) if a_src > 0 else p[src] * ratio
         return p
+
+    def tying_ops_full(self) -> list[tuple[int, int, float, float, float]]:
+        """:meth:`tying_ops` with the instrumental terms of each width tie.
+
+        Returns
+        -------
+        list of (int, int, float, float, float)
+            ``(dst, src, ratio, sigma_inst_src**2, sigma_inst_dst**2)``.  The
+            two variances are zero for amplitude and centroid ties, and for
+            every tie when :attr:`sigma_inst_A` is not set; a zero means
+            ``p[dst] = p[src] * ratio``.
+        """
+        nL = len(self.line_names)
+        si = self.sigma_inst_A or {}
+        out = []
+        for dst, src, ratio in self.tying_ops():
+            a_src = a_dst = 0.0
+            if dst >= 2 * nL:
+                s_src = si.get(self.line_names[src - 2 * nL], 0.0)
+                s_dst = si.get(self.line_names[dst - 2 * nL], 0.0)
+                if s_src > 0 and s_dst > 0:
+                    a_src, a_dst = s_src**2, s_dst**2
+            out.append((dst, src, ratio, a_src, a_dst))
+        return out
 
     def free_mask(self) -> np.ndarray:
         """Boolean mask of free (unconstrained) parameters.

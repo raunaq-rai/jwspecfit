@@ -116,7 +116,7 @@ def test_faint_line_on_negative_dip_keeps_sane_seed_and_errors():
     flam = np.array([-3e-21, -2e-21, -4e-21, -1e-21])
     err = np.full(4, 1e-21)
     peak = _seed_peak(flam, err, np.ones(4, bool), np.arange(4), is_abs=False)
-    assert peak == pytest.approx(1e-21)
+    assert peak == pytest.approx(1e-21, abs=0)
 
 
 @pytest.mark.parametrize("grating,lo,hi,n", [("G395M", 2.87, 5.2, 3000), ("PRISM", 0.6, 5.3, 430)])

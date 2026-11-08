@@ -61,10 +61,12 @@ def make_jax_log_likelihood(
     nL = spec.n_lines
     free_mask = constraints.free_mask()
     free_idx = np.where(free_mask)[0]
-    ops = _compile_tying_ops(constraints)
+    ops_full = constraints.tying_ops_full()
 
     # Convert to Python tuples for static tracing.
-    ops_tuples = [(int(d), int(s), float(r)) for d, s, r in ops]
+    ops_tuples = [(int(d), int(s), float(r)) for d, s, r, _, _ in ops_full]
+    ops_jax = [(int(d), int(s), float(r), float(a_s), float(a_d))
+               for d, s, r, a_s, a_d in ops_full]
     free_idx_jax = jnp.array(free_idx, dtype=jnp.int32)
 
     # Pre-compute static data as JAX arrays.
@@ -106,8 +108,17 @@ def make_jax_log_likelihood(
         full = full.at[free_idx_jax].set(p_gauss)
 
         # Apply tying ops (loop unrolled at trace time).
-        for d, s, r in ops_tuples:
-            full = full.at[d].set(full[s] * r)
+        for d, s, r, a_s, a_d in ops_jax:
+            x = full[s]
+            if a_s > 0:
+                # Shared intrinsic velocity, own instrumental width
+                # (jwspecfit.constraints.tied_width).  The floor keeps the
+                # unselected branch finite so its gradient is not NaN.
+                quad = jnp.sqrt(jnp.maximum(r * r * (x * x - a_s) + a_d, 1e-300))
+                x = jnp.where(x * x <= a_s, x * sqrt(a_d / a_s), quad)
+            else:
+                x = x * r
+            full = full.at[d].set(x)
 
         # Unpack parameters.
         amps = full[:nL]

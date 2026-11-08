@@ -223,3 +223,29 @@ def test_nuts_honours_gaussian_and_loguniform_priors():
     a_hb = res["flat_chains"][:, 1]
     assert abs(np.median(a_hb) - 6e-17) < 3 * 3e-19
     assert np.std(a_hb) < 1e-18
+
+
+def test_nuts_seed_on_a_prior_bound_still_samples():
+    """A least-squares seed that converged onto a bound must not stall NUTS.
+
+    NUTS works in a logit-transformed space where a point on a bound sits
+    at +/-infinity.  On the combined SPURS 437 spectrum several widths end
+    on their caps; started there NUTS either could not initialise or
+    diverged on every transition (R-hat NaN, ESS ~4).
+    """
+    from pathlib import Path
+
+    import jwspecfit
+    import jwspecmcmc
+
+    z = 5.771060469361607
+    path = Path(__file__).resolve().parent.parent / "data" / "spurs437_a2744_combined-medium_spec1d.fits"
+    spec = jwspecfit.read_fits(path, z=z)
+    lines = ["NIV_1483", "NIV_1486", "CIV_1", "CIV_2", "HEII_1640", "OIII_1661", "OIII_1666",
+             "NIII_1750", "CIII]_1907", "CIII]_1909", "OII_doublet", "NeIII_3869", "HDELTA",
+             "HGAMMA", "OIII_4363", "HBETA", "OIII_4959", "OIII_5007", "HALPHA", "NII_6585"]
+    m = jwspecmcmc.fit_lines(spec, z=z, lines=lines, deg=3, tie_uv_widths=False,
+                             fix_blended_ratios=False, n_chains=1, n_warmup=100,
+                             n_samples_nuts=100, progress=False, seed=1)
+    assert m.sampler_meta["n_divergent"] < 10
+    assert m.lines["OIII_5007"].flux_err[0] > 0

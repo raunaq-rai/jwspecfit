@@ -24,6 +24,7 @@ from jwspecfit.lines import (
     canonical_line_name,
     canonical_line_names,
     get_line_list,
+    merged_sigma_A,
     observable_lines,
 )
 from jwspecfit.models import asymmetric_gaussian, build_model
@@ -483,6 +484,10 @@ def _fit_lines_mcmc(
         blended_doublets=_blended if _blended else None,
         niv_doublet_ratio=niv_doublet_ratio,
         ciii_doublet_ratio=ciii_doublet_ratio,
+        sigma_inst_A=dict(zip(line_names, sigma_inst_A(
+            np.array([REST_LINES_A[n] * (1.0 + z) * 1e-4 for n in line_names]),
+            grating=grating, R=R,
+        ).tolist())),
     )
 
     p0 = np.zeros(3 * nL)
@@ -494,6 +499,10 @@ def _fit_lines_mcmc(
         sig_lo, sig_seed, sig_hi = _grating_bounds(
             grating, sig_inst, dlam, lam_obs_A, sigma_factor, wave_A=spec.wave_A,
         )
+        # A merged blend is wider than one line by its components' spread.
+        spread = merged_sigma_A(name) * (1.0 + z)
+        if spread > 0:
+            sig_seed, sig_hi = np.hypot(sig_seed, spread), np.hypot(sig_hi, spread)
 
         # Peak flux near the line for amplitude seeding.
         near = np.abs(spec.wave_A - lam_obs_A)

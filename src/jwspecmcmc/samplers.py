@@ -436,6 +436,12 @@ def run_nuts(
         ll = log_likelihood_jax(p_free)
         numpyro.factor("log_likelihood", ll)
 
+    # Start strictly inside the prior box.  NUTS samples in a logit-transformed
+    # space where a point on a bound sits at +/-infinity, so a least-squares
+    # seed that converged onto a bound makes every transition diverge.
+    margin = 1e-3 * (ub - lb)
+    p0_free = np.clip(p0_free, lb + margin, ub - margin)
+
     # Validate initial parameters before passing to NumPyro.
     p0_jax = jnp.array(p0_free, dtype=jnp.float64)
     oob_lo = p0_free <= lb
@@ -468,13 +474,8 @@ def run_nuts(
             print(f"  [{idx:3d}] p0={p0_free[idx]:+.6e}  "
                   f"lb={lb[idx]:+.6e}  ub={ub[idx]:+.6e}{flag}")
         # Also check for zero sigmas in the full param vector.
-        free_mask = spec.constraints.free_mask()
-        full = np.zeros(3 * spec.n_lines)
-        full[free_mask] = p0_free
-        from .jax_likelihood import _compile_tying_ops
-        ops = _compile_tying_ops(spec.constraints)
-        for d, s, r in ops:
-            full[d] = full[s] * r
+        n_gauss = len(p0_free) - spec.n_lya
+        full = spec.constraints.expand_free_to_full(p0_free[:n_gauss])
         nL = spec.n_lines
         sigs = full[2 * nL:]
         for i, sig in enumerate(sigs):
