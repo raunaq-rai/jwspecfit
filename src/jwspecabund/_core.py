@@ -2378,8 +2378,16 @@ def _run_direct(
     snr_auroral: float = 3.0,
     oiii_coll_file: str | None = None,
     Av: float | None = None,
+    Av_err: float | None = None,
+    Av_prior: str = "gaussian",
+    dust_law: str = "salim",
+    dust_kwargs: dict | None = None,
 ) -> dict[str, Any]:
     """Run the direct T_e method following Berg+2025's 6-step procedure.
+
+    With ``Av_err > 0`` (and ``Av`` set) every MC draw is re-corrected to
+    its own A_V drawn from *Av_prior*: the input fluxes are corrected at
+    ``Av``, so each draw is scaled by the correction for ``A_V,i - Av``.
 
     Steps: (1) multi-phase ne, (2) zone-appropriate Te, (3) ionic
     abundances, (4) O/H and Z/Zsun, (5) logU from N43 or O32,
@@ -2634,6 +2642,22 @@ def _run_direct(
     # the Martinez+2025 bounds; O/H, Te and the other X/O ratios do not use
     # the Martinez ICF, so they are recorded for *every* drawn sample and
     # their posteriors therefore hold >= n_mc finite draws.
+    # Per-draw A_V (least-squares input): A_lambda/A_V for each line.
+    from .dust import _draw_Av, cardelli_extinction, salim_attenuation
+    _resample_dust = (Av_err is not None and Av_err > 0 and Av is not None)
+    Av_mc: list[float] | None = [] if _resample_dust else None
+    _dust_kappa: dict[str, float] = {}
+    if _resample_dust:
+        for name in fluxes:
+            wave = _LINE_WAVES.get(name)
+            if wave is None:
+                continue
+            w = np.array([wave])
+            _dust_kappa[name] = float(
+                salim_attenuation(w, 1.0, **(dust_kwargs or {}))[0]
+                if dust_law == "salim" else cardelli_extinction(w, 1.0)[0]
+            )
+
     max_attempts = n_mc * _RESAMPLE_MAX_ATTEMPT_FACTOR
     attempts = 0
     n_collected = 0  # draws counted toward n_mc (in-bounds N/O or solver fail)
@@ -2661,6 +2685,12 @@ def _run_direct(
             else:
                 for name in _n3:
                     mc_fluxes[name] = max(rng.normal(fluxes[name], errors.get(name, 0.0)), 1e-50)
+        if _resample_dust:
+            _Av_i = _draw_Av(rng, Av, Av_err, prior=Av_prior)
+            Av_mc.append(_Av_i)
+            for name, kap in _dust_kappa.items():
+                if name in mc_fluxes:
+                    mc_fluxes[name] *= 10.0 ** (0.4 * kap * (_Av_i - Av))
 
         try:
             # The other zones' densities are held fixed (varying them per
@@ -2992,6 +3022,7 @@ def _run_direct(
         "NO_tiers": NO_tiers,
         "icf_values": icf_values,
         "NO_is_upper_limit": NO_is_upper_limit,
+        "Av_posterior": np.array(Av_mc) if Av_mc is not None else None,
     }
 
 
@@ -4061,7 +4092,8 @@ def compute_abundances(
         median Balmer decrement, or taken from *Av* if supplied — and
         applies a single deterministic dust correction to all draws.
         Passing a positive value here switches on per-draw resampling:
-        each posterior draw is dust-corrected with an A_V drawn from
+        each posterior draw (MCMC input) or Monte Carlo draw
+        (least-squares input) is dust-corrected with an A_V drawn from
         the chosen *Av_prior* (centred on *Av*, or on the Balmer-derived
         value when *Av* is ``None``).  The Balmer-derived error is
         *always* reported on the result; it is used for resampling
@@ -4841,7 +4873,10 @@ def compute_abundances(
                     self_consistent_point=self_consistent_point,
                     snr_auroral=snr_auroral,
                     oiii_coll_file=oiii_coll_file,
-                    Av=Av_derived, Av_err=Av_err,
+                    Av=Av_derived,
+                    # dust_correct=False: the caller's fluxes are final, so
+                    # no per-draw correction (it used to be applied anyway).
+                    Av_err=Av_err if dust_correct else None,
                     Av_prior=Av_prior, dust_law=dust_law,
                     dust_kwargs=dust_kwargs,
                 )
@@ -4867,6 +4902,10 @@ def compute_abundances(
                     snr_auroral=snr_auroral,
                     oiii_coll_file=oiii_coll_file,
                     Av=Av_derived,
+                    # Resample A_V only when this call applied the correction.
+                    Av_err=Av_err if dust_correct else None,
+                    Av_prior=Av_prior, dust_law=dust_law,
+                    dust_kwargs=dust_kwargs,
                 )
 
             primary_result = AbundanceResult(
@@ -5071,7 +5110,8 @@ def compute_abundances(
                             self_consistent_point=self_consistent_point,
                             snr_auroral=snr_auroral,
                             oiii_coll_file=oiii_coll_file,
-                            Av=Av_derived, Av_err=Av_err,
+                            Av=Av_derived,
+                            Av_err=Av_err if dust_correct else None,
                             Av_prior=Av_prior, dust_law=dust_law,
                             dust_kwargs=dust_kwargs,
                         )
@@ -5096,6 +5136,9 @@ def compute_abundances(
                             snr_auroral=snr_auroral,
                             oiii_coll_file=oiii_coll_file,
                             Av=Av_derived,
+                            Av_err=Av_err if dust_correct else None,
+                            Av_prior=Av_prior, dust_law=dust_law,
+                            dust_kwargs=dust_kwargs,
                         )
                     alt["direct"] = AbundanceResult(
                         method="direct",

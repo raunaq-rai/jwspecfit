@@ -294,3 +294,28 @@ def test_niii_quintuplet_mc_error_is_correlated():
     expect = 0.4343 * sum(err[n] for n in NIII_MULTIPLET) / tot
     sig = res.NO_err if np.isscalar(res.NO_err) else 0.5 * sum(res.NO_err)
     assert sig == pytest.approx(expect, rel=0.15)
+
+
+def test_av_err_propagates_for_least_squares_input():
+    """Least-squares fit: a positive Av_err must widen the O/H error."""
+    import pyneb as pn
+    from jwspecabund import compute_abundances
+    from jwspecabund.direct import _hbeta_emissivity
+
+    Te, ne = 1.5e4, 300.0
+    Te_low = 0.70 * Te + 3000
+    o3, o2 = pn.Atom("O", 3), pn.Atom("O", 2)
+    fl = {"HBETA": 100.0}
+    for w in (5007, 4959, 4363):
+        fl[f"OIII_{w}"] = 100 * 1e-4 * o3.getEmissivity(Te, ne, wave=w) / _hbeta_emissivity(Te, ne)
+    for w in (3726, 3729):
+        fl[f"OII_{w}"] = 100 * 3e-5 * o2.getEmissivity(Te_low, ne, wave=w) / _hbeta_emissivity(Te_low, ne)
+    mk = lambda: _M({k: SimpleLine(v, 0.01 * v) for k, v in fl.items()})
+    kw = dict(z=0.0, method="direct", Av=0.5, n_mc=300, progress=False,
+              self_consistent_OIII=False)
+    a = compute_abundances(mk(), Av_err=None, **kw)
+    b = compute_abundances(mk(), Av_err=0.5, **kw)
+    sa = a.OH_err if np.isscalar(a.OH_err) else 0.5 * sum(a.OH_err)
+    sb = b.OH_err if np.isscalar(b.OH_err) else 0.5 * sum(b.OH_err)
+    assert sb > 1.5 * sa
+    assert b.Av_posterior is not None and len(b.Av_posterior) > 0
