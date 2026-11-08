@@ -75,12 +75,16 @@ result ──> _extract_fluxes() ──> (fluxes, errors, is_mcmc)
 
 ## 3. Dust Correction
 
-1. **Derive Av** (if not user-supplied): `compute_Av_from_balmer()` using Hgamma/Hbeta.
-   Falls back to Av=0 if neither Hgamma nor Hbeta is available.
+1. **Derive Av** (if not user-supplied): by default `compute_Av_multi_balmer()`
+   combines every available Balmer decrement anchored on Hβ (`balmer_anchor`);
+   `balmer_method="joint"` fits the whole ladder at once and `balmer_pair`
+   forces a single decrement.  Falls back to Av=0 if no Balmer pair is available.
 2. **Apply correction**: `_apply_dust_correction()` -> `dust_correct_fluxes()`.
    Each line corrected by `F_corr = F_obs * 10^(0.4 * A_lambda)`.
 3. **Posteriors**: If MCMC, each posterior array is also dust-corrected with the
-   same Av (not re-derived per sample).
+   same Av (not re-derived from that sample's Balmer lines).  Only when a positive
+   `Av_err` is passed are the posteriors kept uncorrected and each draw corrected
+   with its own A_V ~ N(Av, Av_err) (or the uniform `Av_prior`), clipped at 0.
 
 ---
 
@@ -94,7 +98,7 @@ Removes lines with `flux / error < snr_line` (default 2.0).
 _SNR_PROTECTED = {
     "OIII_4363", "OIII_5007", "OIII_4959", "HBETA",
     "NII_6585",
-    "NIII_1749", "NIII_1752",
+    "NIII_1747", "NIII_1749", "NIII_1750", "NIII_1752", "NIII_1754",
     "NIV_1483", "NIV_1486",
     "NV_1", "NV_2",
     "CIV_1", "CIV_2",
@@ -134,10 +138,13 @@ fluxes (`n_mc`), while `_run_direct_mcmc()` draws from MCMC posterior chains
 **Function:** `_compute_multi_ne(fluxes, errors, snr_ne, ne_high_max)`
 
 ```
-ne_low:  [SII] 6718/6732  -->  compute_ne(..., doublet="SII")
-         fallback: [OII] 3726/3729  -->  compute_ne(..., doublet="OII")
-         fallback: [Si III] 1883/1892 (UV)  -->  compute_ne_SiIII()
+ne_low:  [Si III] 1883/1892 (UV)  -->  compute_ne_SiIII()
+         then: [SII] 6718/6732  -->  compute_ne(..., doublet="SII")
+         then: [OII] 3726/3729  -->  compute_ne(..., doublet="OII")
          fallback: redshift-dependent ne_zone_fallback("low", z)
+         (fall-through: a doublet that is missing, below snr_ne or fails to
+          solve hands over to the next; [Si III] below 3e3 cm^-3
+          (_NE_SIIII_FLOOR) is flagged as effectively an upper limit)
 
 ne_mid:  CIII] 1907/1909  -->  compute_ne_CIII()
 
@@ -150,8 +157,10 @@ ne_Opp:  O2+/Ne2+ zone density -- [Ar IV] 4711/4740 (preferred),
          else ne_mid, else ne_zone_fallback("mid", z)
 ```
 
-**SNR gate:** Each doublet requires both members to have `flux/error >= snr_ne`
-(default 3.0), checked by `_doublet_snr_ok()`.
+**SNR gate:** checked by `_doublet_snr_ok()` against `snr_ne` (default 3.0).
+[SII] and [OII] require both members individually above it; the blended UV and
+[Ar IV] doublets ([Si III], CIII], NIV], [Ar IV]) use the summed flux over the
+quadrature-summed error.
 
 ### Step 1b — Density overrides
 
@@ -168,10 +177,10 @@ sol = compute_Te_ne_OIII(flux_1666, flux_4363, flux_5007, flux_4959)
 Te_high, ne_Opp = sol.Te, sol.ne
 
 # Primary single ratio: [OIII] 4363
-Te_high = compute_Te_OIII(flux_4363, flux_5007, flux_4959, ne_high)
+Te_high = compute_Te_OIII(flux_4363, flux_5007, flux_4959, ne_Opp)
 
 # Fallback: O III] 1666 (when 4363 is unavailable)
-Te_high = compute_Te_OIII_1666(flux_1666, flux_5007, flux_4959, ne_high)
+Te_high = compute_Te_OIII_1666(flux_1666, flux_5007, flux_4959, ne_Opp)
 
 Te_low  = Te_low_from_high(Te_high, relation=Te_relation)
 ```
@@ -194,14 +203,17 @@ Te_low  = Te_low_from_high(Te_high, relation=Te_relation)
 
 ### Step 3 — Ionic abundances
 
-**Function:** `compute_ionic_abundances(fluxes, Te_high, Te_low, ne_low, ne_high)`
+**Function:** `compute_ionic_abundances(fluxes, Te_high, Te_low, ne_low, ne_mid=, ne_high=, Te_int=, ne_Opp=)`
 
 For each ion, computes `X^i+/H+ = (F_line/F_Hb) * (eps_Hb/eps_line)` using PyNEB.
 
 Zone assignments:
-- **Te_high, ne_high:** O2+, Ne2+, C2+, C3+, N2+, N3+, N4+
-- **Te_low, ne_low:** O+, N+, S+
-- **Te_mid = (Te_high+Te_low)/2, ne_low:** S2+, Ar2+
+- **Te_high, ne_Opp** (O2+ zone: [Ar IV] → CIII] → z-fallback): O2+, Ne2+
+- **Te_high, ne_high:** C3+, N3+, N4+
+- **Te_int, ne_mid** (CIII]; ne_Opp if no CIII] density): C2+, N2+ (full NIII] 1750
+  quintuplet), S2+, Ar2+.  Te_int comes from `Te_int_from_high()`; only if it is
+  not supplied does the legacy midpoint (Te_high+Te_low)/2 apply.
+- **Te_low, ne_low:** O+, N+, S+, C+
 
 UV doublet handling: if both members present, sums fluxes and uses total emissivity.
 If only one member present, uses single-member flux with single-line emissivity.
@@ -222,12 +234,16 @@ Z_Zsun = 10^(OH_12 - 8.69)
 **Function:** `_compute_logU(fluxes, Z_Zsun, ne_high, errors, snr_logU)`
 
 ```
-Priority 1: N43 = NIV]/NIII]  -->  log_U_from_N43(log_N43, Z_Zsun, ne)
+Priority 1: N43 = NIV]/NIII] 1750  -->  log_U_from_N43(log_N43, Z_Zsun, ne)
   Requirements:
     - Both NIV] members present with total doublet SNR >= snr_logU
-    - Both NIII] members present with total doublet SNR >= snr_logU
-    - log(N43) within [-3.0, 0.5] validity range
+    - All five NIII] 1750 quintuplet members present with total SNR >= snr_logU
+      (errors summed linearly: one fitted flux)
+    - log(N43) within [-3.0, 0.5] validity range (a ratio above 0.5 is clipped
+      to 0.5, then subject to the next check)
     - Resulting logU within [-3.5, -1.0] validity range
+  N43 is evaluated at ne (= ne_high, or logU_ne if pinned); it is far less
+  density-sensitive than O32 but not density-independent near the upper edge.
 
 Priority 2: O32 = [OIII]5007/[OII]3727  -->  log_U_from_O32(log_O32, Z_Zsun, ne)
   Requirements:
@@ -242,10 +258,12 @@ Priority 2: O32 = [OIII]5007/[OII]3727  -->  log_U_from_O32(log_O32, Z_Zsun, ne)
 
 Runs for **all** ICF methods (not just `direct_sum`). For each nitrogen ion:
 
-- **Doublets** (NIII], NIV], NV): requires both members to have:
-  1. Positive flux AND individual member SNR >= 1.0 (catches machine-zero fluxes
-     like 1e-46 that are technically positive)
-  2. Total doublet SNR >= `snr_NO` (default 1.5)
+- **Multiplets** (NIII] quintuplet, NIV], NV):
+  1. At least one member with positive flux AND individual SNR >= 1.0 (catches
+     machine-zero fluxes like 1e-46 that are technically positive); one member
+     is enough
+  2. Total multiplet SNR >= `snr_NO` (default 1.5), errors summed linearly for
+     the NIII] quintuplet and in quadrature otherwise
   - If either check fails, sets `ionic[ion_key] = 0.0` (excluded from all ICFs)
 
 - **Singles** (NII 6585): requires line SNR >= `snr_NO`
@@ -377,13 +395,19 @@ for i in range(n_mc):
     redo steps 1-6 with mc_fluxes
     accumulate OH, NO, CO posteriors
 ```
-- ne is held fixed (varying it adds noise without improving accuracy)
+- ne is held fixed (varying it adds noise without improving accuracy), except
+  that under the self-consistent O III diagnostic ne_Opp is re-solved with Te
+  for each draw
 - Te_high and Te_low are re-derived per iteration → `Te_high_err`, `Te_low_err`
 - logU is re-derived per iteration → `logU_err`
 - logU diagnostic choice is locked to point estimate (prevents switching between
   N43 and O32 across iterations)
-- logU value is clamped to [-3.5, -1.0] validity range per iteration
-- A_V uncertainty is propagated from the Balmer decrement → `Av_err`
+- logU draws outside the [-3.5, -1.0] validity range are rejected (not clamped):
+  that draw's N/O is NaN, and the loop keeps drawing until `n_mc` in-bounds N/O
+  draws are collected (capped at 20× `n_mc`)
+- A_V: the Balmer-decrement uncertainty is reported as `Av_err`, but each draw
+  is corrected with its own A_V ~ N(Av, Av_err) only when a positive `Av_err`
+  is passed; otherwise one A_V corrects every draw
 - S/O, Ne/O, Ar/O uncertainties are propagated → `SO_err`, `NeO_err`, `ArO_err`
 - Nitrogen gating uses **original** errors (same ions included/excluded as point estimate)
 - ICF tier is locked to match the point estimate (no tier switching in MC loop)
@@ -391,7 +415,7 @@ for i in range(n_mc):
 **`_run_direct_mcmc()` (MCMC input):**
 - Draws from actual posterior chains instead of Gaussian perturbation
 - Thins to `n_posterior` samples if chains are longer
-- Same locking/clamping logic as above, using median errors for gating
+- Same locking and out-of-range rejection logic as above, using median errors for gating
 
 ---
 
@@ -541,9 +565,9 @@ compute_abundances(result, z, ...)
 | `Te_low` | float or None | direct | T_e(O+/N+) in K |
 | `Te_low_err` | float or None | direct | Uncertainty on T_e(low) |
 | `ne` | float or None | direct, forward | n_e (low-ionisation zone) |
-| `ne_low` | float or None | direct | n_e from [SII]/[OII] |
-| `ne_mid` | float or None | direct | n_e from CIII]/SiIII] |
-| `ne_high` | float or None | direct | n_e from NIV]/CIII] |
+| `ne_low` | float or None | direct | n_e from [Si III]/[SII]/[OII] (or z-fallback) |
+| `ne_mid` | float or None | direct | n_e from CIII] |
+| `ne_high` | float or None | direct | n_e from NIV]/[Ar IV] (or z-fallback) |
 | `logU` | float or None | direct | Ionisation parameter log(U) |
 | `logU_err` | float or None | direct | Uncertainty on log(U) |
 | `Av` | float or None | all | V-band attenuation |

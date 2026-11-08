@@ -280,10 +280,13 @@ the curves run parallel, so no density can be picked out — only bounded.
 This is detected by comparing the 1σ lower bound of the density
 posterior against the density at which R_1 first departs from its
 low-density limit by more than the measured error on the ratio.  When it
-falls below, `ne_is_upper_limit` is set, the 84th percentile is reported
-as the 1σ limit, and the single-ratio temperature of §3.1 is adopted
-instead.  Hsiao et al. report exactly such a limit for the one object in
-their sample where the curves do not converge.
+falls below, `ne_is_upper_limit` is set and the 84th percentile is reported
+as the 1σ limit.  The joint T_e is still adopted by default
+(`self_consistent_ne_limits=True`), as Hsiao et al. (2026) and
+Arellano-Córdova et al. (2026) do; pass `self_consistent_ne_limits=False`
+to fall back to the single-ratio temperature of §3.1 instead.  Hsiao et al.
+report exactly such a limit for the one object in their sample where the
+curves do not converge.
 
 The borrowed density is capped at that limit **only if the curves
 actually cross** (and do so in at least half the posterior draws).  When
@@ -391,7 +394,7 @@ and low zones.  Ions are assigned to zones by ionisation potential:
 
 - **High zone** (O2+, Ne2+, N3+, C3+) — T_high = T_e([OIII])
 - **Intermediate zone** (N2+, C2+, S2+, Ar2+) — T_int
-- **Low zone** (O+, N+, S+) — T_low
+- **Low zone** (O+, N+, S+, C+) — T_low
 
 **Default `"3_tier"`** — Garnett (1992) relations throughout, following
 Martinez+2025 ("Under Pressure", arXiv:2510.21960):
@@ -416,7 +419,7 @@ T_low = 0.70 × T_high + 3000 K
 
 ### 4.1 Density-sensitive doublets
 
-Five diagnostic doublets span the full ionisation structure, each
+Six diagnostic doublets span the full ionisation structure, each
 measured via PyNEB's `getTemDen()` at the appropriate zone temperature:
 
 | Doublet | Ion | Zone | T_e used | PyNEB wavelengths |
@@ -424,7 +427,7 @@ measured via PyNEB's `getTemDen()` at the appropriate zone temperature:
 | [S II] 6718/6732 | S+ | Low | T_low | 6718, 6732 |
 | [O II] 3726/3729 | O+ | Low | T_low | 3726, 3729 |
 | C III] 1907/1909 | C2+ | Intermediate | T_int | 1907, 1909 |
-| Si III] 1883/1892 | Si2+ | Intermediate | T_int | 1883, 1892 |
+| Si III] 1883/1892 | Si2+ | Low | T_low | 1883, 1892 |
 | N IV] 1483/1486 | N3+ | High | T_high | 1483, 1487 |
 | [Ar IV] 4711/4740 | Ar3+ | High | T_high | 4711, 4740 |
 
@@ -432,7 +435,12 @@ measured via PyNEB's `getTemDen()` at the appropriate zone temperature:
 
 Each ionisation zone is assigned a representative density:
 
-- **n_e,low:** from [S II] (preferred), [O II], or [Si III] (UV fallback)
+- **n_e,low:** from Si III] 1883/1892 (preferred), then [S II], then [O II],
+  with fall-through: a doublet that is missing, below `snr_ne` or fails to
+  solve hands over to the next one.  Si2+ (16–34 eV) sits close to the O+
+  zone and is covered at high z when [S II] is not; its ratio is only
+  density-sensitive above ~3 × 10³ cm⁻³ (`_NE_SIIII_FLOOR`), so a value
+  below that is effectively an upper limit (flagged in the diagnostics).
 - **n_e,int:** from C III]
 - **n_e,high:** from N IV] (preferred) or [Ar IV]
 - **n_e(O2+):** [Ar IV] 4711/4740 preferred for the O2+/Ne2+ zone, else n_e,int
@@ -449,10 +457,14 @@ T_e and n_e are coupled (density diagnostics require a temperature,
 and the temperature diagnostic requires a density).  The pipeline uses
 a two-pass procedure:
 
-1. **Pass 1:** Compute T_e with an initial density (n_e = 10^4 cm^-3).
-   Derive all zone densities at this T_e.
-2. **Pass 2:** Recompute T_e using the refined high-zone density from
-   Pass 1.  Update zone temperatures via the T_e–T_e relations.
+1. **Pass 1:** Derive all zone densities at the fiducial T_e = 1.5 × 10⁴ K,
+   then solve T_e(O2+) at the O2+-zone density n_e(O2+) and map it to the
+   other zones via the T_e–T_e relations.
+2. **Pass 2:** Re-solve every zone density at its own zone temperature,
+   then recompute T_e(O2+) at the refined n_e(O2+) and update the zone
+   temperatures.  When the self-consistent solve of §3.3 is adopted,
+   T_e(O2+) and n_e(O2+) are kept from it and only the other zones'
+   densities are refined.
 
 This converges in a single iteration because density diagnostics are
 only weakly sensitive to T_e.
@@ -473,7 +485,7 @@ highly ionised N3+/N4+/C3+ use the **high-zone density `n_e,high`** (N IV] /
 | N+  | [N II] 6585 | low | T_low | n_e,low |
 | S+  | [S II] 6718+6732 | low | T_low | n_e,low |
 | C+  | C II] 2324+2326 | low | T_low | n_e,low |
-| N2+ | N III] 1749+1752 | intermediate | T_int | n_e,int |
+| N2+ | N III] 1750 quintuplet (1747–1754) | intermediate | T_int | n_e,int |
 | C2+ | C III] 1907+1909 | intermediate | T_int | n_e,int |
 | S2+ | [S III] 9069 | intermediate | T_int | n_e,int |
 | Ar2+ | [Ar III] 7136 | intermediate | T_int | n_e,int |
@@ -485,7 +497,8 @@ highly ionised N3+/N4+/C3+ use the **high-zone density `n_e,high`** (N IV] /
 
 where `n_e(O2+)` is the O2+/Ne2+-zone density ([Ar IV] 4711/4740 preferred →
 C III] → z-fallback), and `n_e,int` / `n_e,high` are the intermediate / high
-zone densities of §4.2.  Because these collisionally excited lines are
+zone densities of §4.2.  When C III] gives no density, the intermediate-zone
+ions use `n_e(O2+)` instead.  Because these collisionally excited lines are
 density-insensitive below ~10^4–10^5 cm^-3, the density choice affects the
 ionic abundances only weakly; it matters most for the density-interpolated
 Martinez ICFs.
@@ -493,7 +506,9 @@ Martinez ICFs.
 **ICF interpolation densities.**  The Martinez N/O ICFs — e.g. ICF 5,
 `NppNppp_Opp` = (N2+ + N3+) / O2+ — are interpolated at the **high-zone**
 `log(U)` and `n_e,high`; the Martinez C/O ICF is interpolated at the
-**intermediate-zone** `log(U_int)` and `n_e,int` (§8.2–8.3).  So for ICF 5 the
+**intermediate-zone** `log(U_int)` and `n_e,int` (§8.2–8.3); when C III] gives
+no density, the C/O log(U) is the high-zone one and the C/O ICF is
+interpolated at `NE_DEFAULT` = 300 cm⁻³.  So for ICF 5 the
 three ions enter the ratio at their own zones — N2+ at `(T_int, n_e,int)`, N3+
 at `(T_high, n_e,high)`, O2+ at `(T_high, n_e(O2+))` — and the correction
 factor itself is taken at the high-zone `log(U)` and `n_e,high`.
@@ -546,7 +561,7 @@ components are summed before dividing.
 |-----------|-------|
 | Line | [OIII] 5007 |
 | PyNEB ion | `Atom("O", 3)`, wave=5007 |
-| Zone | T_high, n_e,high |
+| Zone | T_high, n_e(O2+) ([Ar IV] → C III] → z-fallback) |
 
 ### 5.4 O+/H+ from [OII] 3726+3729
 
@@ -591,13 +606,17 @@ factor (ICF) then maps the observed ionic ratio to the total N/O.
 | PyNEB ion | `Atom("N", 2)`, wave=6584 |
 | Zone | T_low, n_e,low |
 
-### 6.2 N2+ from NIII] 1749+1752
+### 6.2 N2+ from the NIII] 1750 quintuplet
 
 | Parameter | Value |
 |-----------|-------|
-| Lines | NIII] 1749 + NIII] 1752 (summed) |
-| PyNEB ion | `Atom("N", 3)`, waves=[1749, 1752] |
-| Zone | T_high, n_e,high |
+| Lines | NIII] 1747, 1749, 1750, 1752, 1754 (summed; `NIII_MULTIPLET`) |
+| PyNEB ion | `Atom("N", 3)`, waves=[1747, 1749, 1750, 1752, 1754] (emissivities summed over the members present) |
+| Zone | T_int, n_e,int (intermediate) |
+
+Following Martinez et al. (2025, footnote 1), "N III] 1750" is the whole
+quintuplet, both for N2+ and for the N43 log(U) diagnostic; summing only
+1749 + 1752 captures ~37 % of the emissivity at n_e ≳ 10⁴ cm⁻³.
 
 ### 6.3 N3+ from NIV] 1483+1486
 
@@ -670,8 +689,8 @@ measured from O III] λ1661,1666 instead of [O III] λ5007, the nitrogen
 analogue of the pure-UV C/O of Section 7.4:
 
 ```
-N2+/O2+ = I(NIII] 1749+1752) / I(O III] 1661+1666)
-          x eps_O(1661+1666) / eps_N(1749+1752)
+N2+/O2+ = I(NIII] 1750 quintuplet) / I(O III] 1661+1666)
+          x eps_O(1661+1666) / eps_N(1750 quintuplet)
 N3+/O2+ = I(NIV] 1483+1486)  / I(O III] 1661+1666)
           x eps_O(1661+1666) / eps_N(1483+1486)
 ```
@@ -727,7 +746,10 @@ spectrum with no optical oxygen at all yields no N/O by either route.
 |-----------|-------|
 | Lines | CIII] 1907 + CIII] 1909 (summed) |
 | PyNEB ion | `Atom("C", 3)`, waves=[1907, 1909] |
-| Zone | T_high, n_e,high |
+| Zone | T_int, n_e,int (intermediate) |
+
+C2+ is deliberately kept in the intermediate zone (Martinez et al. 2025),
+not at T_high.
 
 ### 7.2 C3+ from CIV 1548+1551
 
@@ -868,16 +890,25 @@ legacy tiered path is used:
 
 **Source:** `jwspecabund.icf`
 
-These are polynomial fits in x = O+/O_total, calibrated against
-photoionisation models.  Used as the fallback when UV lines or
-log(U) are unavailable.
+These are fits of the form ICF = a·x + b + c/x, calibrated against
+photoionisation models, with three metallicity branches
+(12 + log(O/H) ≤ 7.2, between 7.2 and 8.2, ≥ 8.2; coefficients in
+`jwspecabund.icf`).  The variable is x = v = O+/(O+ + O2+) for N, S and
+Ar, and x = w = O2+/(O+ + O2+) for Ne.  Each ICF is floored at 1, and set
+to 1 when O+ is not detected.  They are elemental ICFs (X/H = ICF × X^i+/H+),
+so every ratio is formed against the total O/H.  They are always used for
+S/O, Ne/O and Ar/O, and for N/O when the Martinez ICFs cannot be applied
+(or `icf_method="izotov06"`).
 
-| Element | Equation | Formula | Applied as |
-|---------|----------|---------|------------|
-| Nitrogen | Eq. 18 | ICF_N = -0.825x^2 + 0.718x + 0.853 | N/O = ICF_N × (N+/O+) |
-| Neon | Eq. 19 | ICF_Ne = -0.385x^2 + 0.405x + 0.335 | Ne/O = ICF_Ne × (Ne2+/O2+) |
-| Sulfur | Eq. 20 | ICF_S = 0.013 + x(5.986 + x(-21.085 + x(26.462 - 11.282x))) | S/O = ICF_S × (S+ + S2+)/O |
-| Argon | Eqs. 22-23 | ICF_Ar = 0.157 + x(3.119 + x(-6.185 + 4.517x)) | Ar/O = ICF_Ar × (Ar2+/O2+) |
+| Element | Equation | Variable | Applied as | Requires |
+|---------|----------|----------|------------|----------|
+| Nitrogen | Eq. 18 | v | N/O = ICF_N × (N+/H+) / (O/H) | N+, O+ |
+| Neon | Eq. 19 | w | Ne/O = ICF_Ne × (Ne2+/H+) / (O/H) | Ne2+, O2+ |
+| Sulfur | Eq. 20 | v | S/O = ICF_S × (S+ + S2+)/H+ / (O/H) | S+ **and** S2+ |
+| Argon | Eq. 22 | v | Ar/O = ICF_Ar × (Ar2+/H+) / (O/H) | Ar2+, O2+ |
+
+S/O is not computed from S+ alone: the Eq. 20 ICF corrects only for S3+,
+and has no single-ion form.
 
 ### 8.2 Martinez et al. (2025) — density-dependent ICFs
 
@@ -898,8 +929,17 @@ estimated from one of two diagnostics:
    log(N43) = log10(NIV] 1486 / NIII] 1750)
    log(U_high) = f(log(N43), Z/Zsun; n_e)
    ```
-   Density-insensitive.  Preferred when NIV] and NIII] are both
-   detected.  Valid range: -3.0 <= log(N43) <= 0.5.
+   NIII] 1750 is the full quintuplet.  Much less density-sensitive
+   than O32 (Martinez et al. describe it as density-insensitive), but
+   the fitted surface still moves with n_e towards the upper edge:
+   across n_e = 10²–10⁶ cm⁻³ log(U) shifts by ≤ 0.15 dex at
+   log(N43) = -2 but by 0.4–1.7 dex at log(N43) = 0 (Z/Z_sun =
+   0.02–0.4), so it is evaluated at n_e,high too.  Preferred when NIV]
+   and NIII] are both detected.  Valid range: -3.0 <= log(N43) <= 0.5;
+   a ratio above the upper edge is clipped to 0.5 and kept only if the
+   resulting log(U) passes the range check below, which at the edge
+   happens only for Z/Z_sun ≲ 0.05 at n_e ≳ 10⁴ cm⁻³ — otherwise O32 is
+   used.
 
 2. **O32 diagnostic (fallback):**
    ```
@@ -909,7 +949,7 @@ estimated from one of two diagnostics:
    Density-sensitive.  Valid range: -1.0 <= log(O32) <= 2.5.
 
 Both diagnostics use bicubic surface fits (Martinez et al. 2025,
-Table 3) interpolated between electron density grid points at
+Table 4) interpolated between electron density grid points at
 log10(n_e) = [2, 3, 4, 5, 6]:
 
 ```
@@ -919,9 +959,14 @@ f(x, y) = A + Bx + Cy + Dxy + Ex^2 + Fy^2 + Gxy^2 + Hyx^2 + Ix^3 + Jy^3
 The metallicity input is Z/Z_sun = 10^(12+log(O/H) - 8.69), where
 12 + log(O/H)_sun = 8.69 (Asplund et al. 2009).
 
-Overall validity ranges: 0.05 <= Z/Z_sun <= 0.40, -3.5 <= log(U) <= -1.0.
+Published validity ranges: 0.05 <= Z/Z_sun <= 0.40, -3.5 <= log(U) <= -1.0.
+The code accepts Z/Z_sun down to 0.02 (extrapolating the metallicity axis
+only; `_Z_ZSUN_VALID`), and the ICF surfaces accept log(U) up to
+`LOG_U_EXTRAP_MARGIN` = 0.05 dex past either edge.  The N43 conversion
+keeps the strict log(U) range; O32 returns its log(U) unchecked and leaves
+the range check to the ICF surfaces.
 
-#### Five N/O ICFs (Table 4)
+#### Five N/O ICFs (Table 5)
 
 Each ICF corrects a specific ionic ratio to total N/O:
 
@@ -960,7 +1005,9 @@ bounded calibration domain (the validity ranges above).  The bicubic
 surface diverges if it is evaluated by extrapolation, so an input that
 falls outside its range — `log(O32)`, `log(N43)`, `Z/Z_sun`, or the
 resulting `log(U)` — is **rejected, not clipped**: the surface returns
-`NaN` rather than a boundary value or an extrapolated number.  This
+`NaN` rather than a boundary value or an extrapolated number (the
+exceptions are those listed above: the N43 upper-edge clip, the Z/Z_sun
+extension to 0.02 and the 0.05 dex log(U) margin on the ICF surfaces).  This
 keeps unphysical, uncalibrated values out of the reported N/O entirely.
 
 This rejection affects the ratios that depend on `log(U)` and `Z/Z_sun` —
@@ -977,8 +1024,11 @@ The default C/O ICF (`co_icf_method="auto"`) is the Martinez (in prep.)
 correction from the C2+/O2+ ionic ratio to total C/O.  Like the N/O ICFs it is
 a density-interpolated function of log(U) and Z/Z_sun, evaluated at the
 intermediate (C2+) ionisation zone: the log(U) is recomputed at the
-intermediate-zone density (from the O32 diagnostic; N43 is density-insensitive)
-and the ICF is interpolated in n_e.  It requires C2+, O2+, log(U) and Z; when
+intermediate-zone density n_e,int with the same diagnostic as the N/O log(U)
+(O32 moves most; N43 moves little except near its upper edge) and the ICF is
+interpolated at n_e,int.  When C III] gives no density, or `logU_ne` pins the
+conversion density, the high-zone log(U) is used instead (and without a C III]
+density the ICF is interpolated at `NE_DEFAULT` = 300 cm⁻³).  It requires C2+, O2+, log(U) and Z; when
 any of these is missing it falls back to the Garnett (1997) ICF or a direct
 ionic sum (Section 7.4).  Inputs outside the calibration domain are rejected
 (NaN), as for the N/O ICFs.
@@ -1084,8 +1134,11 @@ The full abundance pipeline is wrapped in a Monte Carlo loop
 
 1. **Draw perturbed fluxes:** F_perturbed ~ N(F_observed, sigma_F) for
    each emission line.
-2. **Re-derive all quantities:** dust correction, T_e, n_e, ionic
-   abundances, log(U), ICFs, total abundances.
+2. **Re-derive the downstream quantities:** T_e, ionic abundances,
+   log(U), ICFs, total abundances.  The zone densities are held at the
+   point estimate (n_e(O2+) is re-solved per draw only under the
+   self-consistent diagnostic of §3.3), and A_V is not re-derived from the
+   perturbed Balmer lines (see §11.2).
 3. **Accumulate posterior arrays:** {O/H, N/O, C/O, T_e, ...}.
 4. **Report:** median and 16th/84th percentile intervals.
 
@@ -1121,10 +1174,11 @@ handled per draw so the reported sample counts stay meaningful:
 
 2. **O/H and the other ratios are kept.**  O/H (direct `T_e`), `T_e`, and
    the X/O ratios (C/O, S/O, Ne/O, Ar/O) are computed and recorded for
-   **every** drawn sample, in-bounds or not — an out-of-bounds draw only nulls
-   N/O; the default Martinez C/O ICF simply falls back to Garnett+97 for that
-   draw (Section 8.3).  They are never discarded on account of an
-   out-of-bounds N/O.
+   **every** drawn sample, in-bounds or not.  An out-of-bounds draw nulls
+   N/O and, when the point estimate used a Martinez C/O tier, C/O as well:
+   draws are locked to the point estimate's C/O tier (Section 7.4), so such a
+   draw returns `NaN` for C/O rather than falling back to Garnett+97.  The
+   other quantities are never discarded on account of an out-of-bounds N/O.
 
 3. **Resampling to the requested count.**  The loop keeps drawing until
    `n_mc` (Gaussian MC) or `n_posterior` (MCMC pool) *in-bounds* N/O
@@ -1257,8 +1311,10 @@ the detected line fluxes used for ionic abundances.
 
 ### 12.3 Doublet upper limits
 
-For doublets where both members are undetected (e.g. N III] 1749+1752),
-the individual member upper limits are combined in quadrature:
+For doublets where both members are undetected (e.g. C IV 1548+1551),
+the individual member upper limits are combined in quadrature (the N III]
+1750 quintuplet is the exception: it is one blended feature, so the largest
+member limit is taken rather than a sum):
 
 ```
 F_ul,doublet = sqrt(F_ul,1^2 + F_ul,2^2)
@@ -1347,18 +1403,22 @@ each ion (`"method": "continuum_rms"` or `"method": "fit_error"`).
 
 ## Appendix: Zone Assignment Summary
 
+As implemented in `compute_ionic_abundances` (see §4.4).  n_e(O2+) is
+[Ar IV] → C III] → z-fallback; n_e,int is C III], or n_e(O2+) when C III]
+gives no density.
+
 | Ion | Lines | Zone | T_e | n_e |
 |-----|-------|------|-----|-----|
-| O2+ | [OIII] 5007 | High | T_high | n_e,high |
+| O2+ | [OIII] 5007 | High (O2+) | T_high | n_e(O2+) |
 | O+ | [OII] 3726+3729 | Low | T_low | n_e,low |
 | N+ | [NII] 6585 | Low | T_low | n_e,low |
-| N2+ | NIII] 1749+1752 | High | T_high | n_e,high |
+| N2+ | NIII] 1750 quintuplet (1747–1754) | Intermediate | T_int | n_e,int |
 | N3+ | NIV] 1483+1486 | High | T_high | n_e,high |
 | N4+ | NV 1239+1243 | High | T_high | n_e,high |
 | C+ | CII] 2324+2326 | Low | T_low | n_e,low |
-| C2+ | CIII] 1907+1909 | High | T_high | n_e,high |
+| C2+ | CIII] 1907+1909 | Intermediate | T_int | n_e,int |
 | C3+ | CIV 1548+1551 | High | T_high | n_e,high |
 | S+ | [SII] 6718+6732 | Low | T_low | n_e,low |
-| S2+ | [SIII] 9069 | Mid | (T_high+T_low)/2 | n_e,low |
-| Ne2+ | [NeIII] 3869 | High | T_high | n_e,high |
-| Ar2+ | [ArIII] 7136 | Mid | (T_high+T_low)/2 | n_e,low |
+| S2+ | [SIII] 9069 | Intermediate | T_int | n_e,int |
+| Ne2+ | [NeIII] 3869 | High (O2+) | T_high | n_e(O2+) |
+| Ar2+ | [ArIII] 7136 | Intermediate | T_int | n_e,int |

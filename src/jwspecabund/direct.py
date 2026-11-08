@@ -35,7 +35,7 @@ def _get_pyneb():
     except ImportError as exc:
         raise ImportError(
             "PyNEB is required for the direct method. "
-            "Install with: pip install 'jwspecfit[abund]'"
+            "Reinstall jwspecfit (pip install -U jwspecfit), which installs it."
         ) from exc
     return pn
 
@@ -222,7 +222,7 @@ def compute_ne(
     doublet : str
         ``"SII"`` (default) or ``"OII"``.
     Te_guess : float
-        Electron temperature guess in K (default 10^4).
+        Electron temperature guess in K (default 1.5e4).
 
     Returns
     -------
@@ -277,7 +277,7 @@ def compute_ne_CIII(
     flux_1909 : float
         CIII] 1909 flux.
     Te_guess : float
-        Electron temperature guess in K (default 10^4).
+        Electron temperature guess in K (default 1.5e4).
 
     Returns
     -------
@@ -384,7 +384,7 @@ def compute_ne_NIV(
     flux_1486 : float
         NIV] 1486 flux.
     Te_guess : float
-        Electron temperature guess in K (default 10^4).
+        Electron temperature guess in K (default 1.5e4).
 
     Returns
     -------
@@ -1928,27 +1928,26 @@ def compute_ionic_abundances(
         Electron density in cm^-3 (low-ionisation zone).
     ne_mid : float, optional
         Electron density for the intermediate-ionisation zone (cm^-3).
-        Traced by CIII] 1907/1909 (~24 eV).  If ``None``, defaults to
-        *ne*.  Used for O²⁺, Ne²⁺, C²⁺, N²⁺, S²⁺, Ar²⁺.  O²⁺ and Ne²⁺
-        use this intermediate-zone density (not *ne_high*): the
-        [OIII] 5007/Hβ and [NeIII] 3869/Hβ abundances are density-
-        insensitive below ~10⁴–10⁵ cm⁻³, and CIII] (24–48 eV) overlaps
-        the O²⁺ zone (35–55 eV), whereas NIV] (47–77 eV) traces more
-        highly-ionised gas.  This decouples O²⁺/Ne²⁺ from the noisy
-        high-ionisation N IV] density.
+        Traced by CIII] 1907/1909 (~24 eV).  Used for C²⁺, N²⁺, S²⁺,
+        Ar²⁺.  If ``None``, these use the O²⁺-zone density (*ne_Opp*,
+        itself falling back to *ne*).  It is also the fallback for O²⁺
+        and Ne²⁺ when *ne_Opp* is not given.
     ne_high : float, optional
         Electron density for the high-ionisation zone (cm^-3).
-        Traced by NIV] 1483/1486 (~47 eV).  If ``None``, defaults to
-        *ne_mid*.  Used for N³⁺, N⁴⁺, C³⁺.
+        Traced by NIV] 1483/1486 (~47 eV).  If ``None``, defaults to the
+        O²⁺-zone density (*ne_Opp* → *ne_mid* → *ne*).  Used for N³⁺,
+        N⁴⁺, C³⁺.
     Te_int : float, optional
-        Intermediate-zone (S²⁺) electron temperature in K, used for S²⁺
-        and Ar²⁺.  If ``None`` (default), the legacy ``0.5*(Te_high +
+        Intermediate-zone electron temperature in K, used for C²⁺, N²⁺,
+        S²⁺ and Ar²⁺.  If ``None`` (default), the legacy ``0.5*(Te_high +
         Te_low)`` midpoint is used.
     ne_Opp : float, optional
         Electron density for the O²⁺/Ne²⁺ zone (cm^-3), preferentially
-        from [Ar IV] 4711/4740 (Martinez+2025 Table 2).  If ``None``
-        (default), falls back to *ne_mid* (CIII] → *ne*), preserving the
-        previous behaviour.
+        from [Ar IV] 4711/4740 (Martinez+2025 Table 2).  Used for O²⁺ and
+        Ne²⁺ (not *ne_high*): the [OIII] 5007/Hβ and [NeIII] 3869/Hβ
+        abundances are density-insensitive below ~10⁴–10⁵ cm⁻³, and this
+        decouples them from the noisy N IV] density.  If ``None``
+        (default), falls back to *ne_mid*, then *ne*.
 
     Returns
     -------
@@ -2722,7 +2721,7 @@ def compute_total_abundances(
                     NO_tiers["ICF 3: N³⁺/O²⁺ × ICF (Martinez+25)"] = np.log10(val3)
                     NO_tiers["_icf3_value"] = icf3
 
-            # ICF 4: (N⁺+N²⁺)/(O⁺+O²⁺) × ICF  (Martinez+25 Table 4)
+            # ICF 4: (N⁺+N²⁺)/(O⁺+O²⁺) × ICF  (Martinez+25 Table 5)
             if N_plus > 0 and N_pp > 0 and O_plus > 0 and O_pp > 0:
                 icf4 = icf_NpNpp_OpOpp(logU, Z_Zsun, ne_icf)
                 val4 = ((N_plus + N_pp) / (O_plus + O_pp)) * icf4
@@ -2730,7 +2729,7 @@ def compute_total_abundances(
                     NO_tiers["ICF 4: (N⁺+N²⁺)/(O⁺+O²⁺) × ICF (Martinez+25)"] = np.log10(val4)
                     NO_tiers["_icf4_value"] = icf4
 
-            # ICF 5: (N²⁺+N³⁺)/O²⁺ × ICF  (Martinez+25 Table 4, recommended)
+            # ICF 5: (N²⁺+N³⁺)/O²⁺ × ICF  (Martinez+25 Table 5, recommended)
             if N_pp > 0 and N_ppp > 0 and O_pp > 0:
                 icf5 = icf_NppNppp_Opp(logU, Z_Zsun, ne_icf)
                 val5 = ((N_pp + N_ppp) / O_pp) * icf5

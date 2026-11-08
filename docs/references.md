@@ -578,65 +578,47 @@ $$
 No ICF is applied for higher ionisation states; the O<sup>3+</sup>
 contribution is negligible for typical H II regions (Berg et al. 2021).
 
-**Nitrogen:**
+The Izotov et al. (2006) ICFs are elemental (X/H = ICF × X<sup>i+</sup>/H<sup>+</sup>),
+so each ratio is formed against the total O/H.  Every ICF has the form
 
 $$
-\frac{\mathrm{N}}{\mathrm{O}} = \mathrm{ICF}_\mathrm{N} \times \frac{\mathrm{N}^+/\mathrm{H}^+}{\mathrm{O}^+/\mathrm{H}^+}
+\mathrm{ICF} = a\,x + b + c/x
 $$
 
-where ICF<sub>N</sub> is from Izotov et al. (2006, eq. 18):
+with three metallicity branches (12 + log(O/H) ≤ 7.2, between 7.2 and 8.2,
+≥ 8.2; coefficients in `jwspecabund.icf`), is clamped to ICF ≥ 1, and is set
+to 1 when O<sup>+</sup> is not detected.  The variable is
+x = v = O<sup>+</sup>/(O<sup>+</sup> + O<sup>2+</sup>) for N, S and Ar, and
+x = w = O<sup>2+</sup>/(O<sup>+</sup> + O<sup>2+</sup>) for Ne.
+
+**Nitrogen** (eq. 18; needs N<sup>+</sup> and O<sup>+</sup>):
 
 $$
-\mathrm{ICF}_\mathrm{N} = -0.825\,x^2 + 0.718\,x + 0.853, \qquad x = \mathrm{O}^+ / \mathrm{O}_\mathrm{total}
+\mathrm{N/O} = \mathrm{ICF}_\mathrm{N}(v) \times \frac{\mathrm{N}^+/\mathrm{H}^+}{\mathrm{O/H}}
 $$
 
-clamped to ICF<sub>N</sub> ≥ 1.  For many applications the standard
+For many applications the standard
 assumption N/O ≈ N<sup>+</sup>/O<sup>+</sup> (ICF = 1) is used,
 justified by the similar ionisation potentials of O<sup>+</sup> and
 N<sup>+</sup> (e.g. Nava et al. 2006; Amayo et al. 2021).
 
-**Sulfur:**
+**Sulfur** (eq. 20, accounting for S<sup>3+</sup>; needs **both** S<sup>+</sup> and S<sup>2+</sup>):
 
 $$
-\mathrm{S/O} = \mathrm{ICF}_\mathrm{S} \times (\mathrm{S}^+ + \mathrm{S}^{2+}) / \mathrm{O}
+\mathrm{S/O} = \mathrm{ICF}_\mathrm{S}(v) \times \frac{(\mathrm{S}^+ + \mathrm{S}^{2+})/\mathrm{H}^+}{\mathrm{O/H}}
 $$
 
-ICF from Izotov et al. (2006, eq. 20), accounting for S<sup>3+</sup>:
+**Neon** (eq. 19; needs Ne<sup>2+</sup> and O<sup>2+</sup>):
 
 $$
-\mathrm{ICF}_\mathrm{S} = 0.013 + 5.986\,x - 21.085\,x^2 + 26.462\,x^3 - 11.282\,x^4
+\mathrm{Ne/O} = \mathrm{ICF}_\mathrm{Ne}(w) \times \frac{\mathrm{Ne}^{2+}/\mathrm{H}^+}{\mathrm{O/H}}
 $$
 
-clamped to ICF<sub>S</sub> ≥ 1.
-
-**Neon:**
+**Argon** (eq. 22; needs Ar<sup>2+</sup> and O<sup>2+</sup>):
 
 $$
-\mathrm{Ne/O} = \mathrm{ICF}_\mathrm{Ne} \times \mathrm{Ne}^{2+}/\mathrm{O}^{2+}
+\mathrm{Ar/O} = \mathrm{ICF}_\mathrm{Ar}(v) \times \frac{\mathrm{Ar}^{2+}/\mathrm{H}^+}{\mathrm{O/H}}
 $$
-
-ICF from Izotov et al. (2006, eq. 19):
-
-$$
-\mathrm{ICF}_\mathrm{Ne} = -0.385\,x^2 + 0.405\,x + 0.335
-$$
-
-**Argon:**
-
-$$
-\mathrm{Ar/O} = \mathrm{ICF}_\mathrm{Ar} \times \mathrm{Ar}^{2+}/\mathrm{O}^{2+}
-$$
-
-ICF from Izotov et al. (2006, eqs. 22/23):
-
-$$
-\mathrm{ICF}_\mathrm{Ar} = 0.157 + 3.119\,x - 6.185\,x^2 + 4.517\,x^3
-$$
-
-clamped to ICF<sub>Ar</sub> ≥ 1.
-
-In all ICF expressions, x = O<sup>+</sup> / O<sub>total</sub> is the
-fractional ionic abundance of O<sup>+</sup>.
 
 **Reporting convention:**
 

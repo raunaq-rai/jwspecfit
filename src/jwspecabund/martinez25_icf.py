@@ -7,7 +7,7 @@ each evaluated on a grid of electron densities (10^2 to 10^6 cm^-3).
 References
 ----------
 Martinez, M. A., Berg, D. A., et al. 2025, arXiv:2510.21960.
-    Table 3 (ionisation parameter fits) and Table 4 (ICF fits).
+    Table 4 (ionisation parameter fits) and Table 5 (ICF fits).
 Berg, D. A., et al. 2025, arXiv:2511.13591.
     Recommended 6-step procedure for UV N/O abundance determinations.
 
@@ -125,7 +125,7 @@ _Z_ZSUN_VALID_CO = (10 ** (6.95 - LOG_OH_SOLAR), 10 ** (8.55 - LOG_OH_SOLAR))
 # =========================================================================
 # Each dict maps log10(ne) -> [A, B, C, D, E, F, G, H, I, J].
 
-# --- log(U) from O32 = [OIII]5007/[OII]3727 (Table 3, upper) ---
+# --- log(U) from O32 = [OIII]5007/[OII]3727 (Table 4, upper) ---
 # x = log(O32), y = Z/Zsun, returns log(U_int)
 _COEFF_LOG_U_O32: dict[float, list[float]] = {
     2: [-3.00199,  0.61875,  0.41277,  0.96910,  0.11489,  2.10518, -0.88265,  0.55524,  0.18323, -4.65728],
@@ -135,7 +135,7 @@ _COEFF_LOG_U_O32: dict[float, list[float]] = {
     6: [-4.08448,  0.54480,  0.17599, -0.23221,  0.01351,  2.15922, -0.47220,  0.19535,  0.00841, -2.95869],
 }
 
-# --- log(U) from N43 = NIV]1483,1486/NIII]1750 quintuplet (Table 3, lower) ---
+# --- log(U) from N43 = NIV]1483,1486/NIII]1750 quintuplet (Table 4, lower) ---
 # x = log(N43), y = Z/Zsun, returns log(U_high)
 _COEFF_LOG_U_N43: dict[float, list[float]] = {
     2: [-1.29754,  1.60610,  4.10271,  3.82481,  0.52310, 12.37774,  0.22144,  0.74401,  0.09083, -17.63486],
@@ -156,7 +156,7 @@ _COEFF_LOG_U_O32_IONIC: dict[float, list[float]] = {
     6: [-3.03090,  0.68578,  0.30140,  0.25356,  0.07391,  1.42633, -0.25902,  0.13938,  0.01181, -2.90696],
 }
 
-# --- ICF 1: N+/O+ -> N/O (Table 4) ---
+# --- ICF 1: N+/O+ -> N/O (Table 5) ---
 # x = log(U), y = Z/Zsun
 _COEFF_ICF_NpOp: dict[float, list[float]] = {
     2: [ 0.99684,  0.35805,  0.73829, -0.00147,  0.25599, -1.05333, -0.00247, -0.04340,  0.04517,  1.35162],
@@ -166,7 +166,7 @@ _COEFF_ICF_NpOp: dict[float, list[float]] = {
     6: [ 1.05845,  0.58814,  0.28991, -0.33298,  0.31784,  1.11112,  0.20679, -0.06881,  0.05389, -2.03291],
 }
 
-# --- ICF 2: N2+/O2+ -> N/O (Table 4) ---
+# --- ICF 2: N2+/O2+ -> N/O (Table 5) ---
 _COEFF_ICF_NppOpp: dict[float, list[float]] = {
     2: [ 2.71718,  1.40827, -3.80233, -1.98828,  0.41454,  2.86050,  0.89889, -0.26525,  0.04878,  0.13269],
     3: [ 4.18005,  2.73917, -7.42258, -4.08756,  0.81576,  5.91850,  1.77628, -0.56759,  0.08888, -0.43755],
@@ -175,7 +175,7 @@ _COEFF_ICF_NppOpp: dict[float, list[float]] = {
     6: [ 5.32595,  3.82306, -9.73777, -5.65519,  1.15115,  6.66459,  2.20890, -0.82169,  0.12301,  0.41586],
 }
 
-# --- ICF 3: N3+/O2+ -> N/O (Table 4) ---
+# --- ICF 3: N3+/O2+ -> N/O (Table 5) ---
 # NOTE: this surface returns log(ICF), not ICF directly.
 _COEFF_ICF_NpppOpp: dict[float, list[float]] = {
     2: [ 0.33721,  0.24224, -0.65061, -1.33811,  0.27971,  5.83889,  0.31924, -0.26487,  0.00662, -9.33063],
@@ -185,7 +185,7 @@ _COEFF_ICF_NpppOpp: dict[float, list[float]] = {
     6: [ 0.24361,  0.58882, -0.17741, -1.30763,  0.50260,  3.91905,  0.30299, -0.28039,  0.04061, -6.28983],
 }
 
-# --- ICF 4: (N+ + N2+)/(O+ + O2+) -> N/O (Table 4) ---
+# --- ICF 4: (N+ + N2+)/(O+ + O2+) -> N/O (Table 5) ---
 _COEFF_ICF_NpNpp_OpOpp: dict[float, list[float]] = {
     2: [ 2.80532,  1.51853, -4.17309, -2.26441,  0.42943,  3.55046,  1.09105, -0.29179,  0.04290, -0.39350],
     3: [ 4.28328,  2.84543, -7.91458, -4.44062,  0.81553,  6.75686,  2.04896, -0.59753,  0.08034, -0.97013],
@@ -194,7 +194,7 @@ _COEFF_ICF_NpNpp_OpOpp: dict[float, list[float]] = {
     6: [ 5.38109,  3.91911, -9.97970, -5.52784,  1.19788,  8.25633,  2.83279, -0.67993,  0.13442, -0.33026],
 }
 
-# --- ICF 5: (N2+ + N3+)/O2+ -> N/O (Table 4) ---
+# --- ICF 5: (N2+ + N3+)/O2+ -> N/O (Table 5) ---
 _COEFF_ICF_NppNppp_Opp: dict[float, list[float]] = {
     2: [ 0.93486, -0.03453,  0.28011,  0.24291,  0.02786, -0.15188, -0.13845,  0.02356,  0.01429, -0.16515],
     3: [ 0.93562, -0.03369,  0.27477,  0.22211,  0.02993, -0.18937, -0.14771,  0.01550,  0.01478, -0.12369],
@@ -536,7 +536,7 @@ def log_U_from_O32(
     extrapolated (see :data:`_Z_ZSUN_VALID`, and
     :func:`is_Z_extrapolated` to test for it).
     O32 is density-sensitive; prefer N43 when available.
-    Martinez+2025 Table 3 (upper).
+    Martinez+2025 Table 4 (upper).
     """
     log_O32 = _warn_and_reject(log_O32, _LOG_O32_VALID, "log(O32)")
     Z_Zsun = _warn_and_reject(Z_Zsun, _Z_ZSUN_VALID, "Z/Zsun")
@@ -623,9 +623,14 @@ def log_U_from_N43(
     published grid stops at 0.05; below that the surface is being
     extrapolated (see :data:`_Z_ZSUN_VALID`, and
     :func:`is_Z_extrapolated` to test for it).
-    N43 is density-insensitive — **recommended** over O32 when
-    NIV] and NIII] are available (Martinez+2025 Section 4.2).
-    Martinez+2025 Table 3 (lower).
+    N43 is **recommended** over O32 when NIV] and NIII] are available
+    (Martinez+2025 Section 4.2), which describe it as density-insensitive.
+    The fitted surfaces are not density-independent, though: the shift
+    in log(U) across n_e = 10^2--10^6 cm^-3 is <= 0.15 dex at
+    log(N43) = -2 but 0.4--1.7 dex at log(N43) = 0 (Z/Zsun = 0.02--0.4;
+    most of it between 10^2 and 10^3), so *ne* matters towards the upper
+    edge.
+    Martinez+2025 Table 4 (lower).
     """
     log_N43 = _warn_and_reject(log_N43, _LOG_N43_VALID, "log(N43)")
     Z_Zsun = _warn_and_reject(Z_Zsun, _Z_ZSUN_VALID, "Z/Zsun")
@@ -678,7 +683,7 @@ def icf_NpOp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     -----
     At low density (ne ~ 100), the correction is small (< 10%);
     at high density (ne ~ 10^6), can overestimate N/O by up to 40%.
-    Martinez+2025 Table 4, row 1.
+    Martinez+2025 Table 5, row 1.
     """
     logU, Z_Zsun = _reject_icf_inputs(logU, Z_Zsun)
     return _interp_ne(ne, _COEFF_ICF_NpOp, logU, Z_Zsun)
@@ -704,7 +709,7 @@ def icf_NppOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     Notes
     -----
     Overestimates N/O at low logU, underestimates at high logU.
-    Martinez+2025 Table 4, row 2.
+    Martinez+2025 Table 5, row 2.
     """
     logU, Z_Zsun = _reject_icf_inputs(logU, Z_Zsun)
     return _interp_ne(ne, _COEFF_ICF_NppOpp, logU, Z_Zsun)
@@ -784,7 +789,7 @@ def icf_NpppOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     -----
     The bicubic surface returns log(ICF); this function exponentiates
     to return the ICF itself.  N3+/O2+ alone underestimates N/O by
-    100--15000%.  Martinez+2025 Table 4, row 3.
+    100--15000%.  Martinez+2025 Table 5, row 3.
     """
     logU, Z_Zsun = _reject_icf_inputs(logU, Z_Zsun)
     log_icf = _interp_ne(ne, _COEFF_ICF_NpppOpp, logU, Z_Zsun)
@@ -811,7 +816,7 @@ def icf_NpNpp_OpOpp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     Notes
     -----
     Combines optical (N+, O+) and UV (N2+, O2+) ionic abundances.
-    Martinez+2025 Table 4, row 4.
+    Martinez+2025 Table 5, row 4.
     """
     logU, Z_Zsun = _reject_icf_inputs(logU, Z_Zsun)
     return _interp_ne(ne, _COEFF_ICF_NpNpp_OpOpp, logU, Z_Zsun)
@@ -838,7 +843,7 @@ def icf_NppNppp_Opp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
     -----
     Pure UV diagnostic.  Most robust at log(U) > -2.75 with
     corrections < 5%.  **Recommended** when both NIII] and NIV]
-    are detected.  Martinez+2025 Table 4, row 5.
+    are detected.  Martinez+2025 Table 5, row 5.
     """
     logU, Z_Zsun = _reject_icf_inputs(logU, Z_Zsun)
     return _interp_ne(ne, _COEFF_ICF_NppNppp_Opp, logU, Z_Zsun)
@@ -849,7 +854,7 @@ def icf_NppNppp_Opp(logU: float, Z_Zsun: float, ne: float = 100.0) -> float:
 # =========================================================================
 
 #: Valid tier names for locking the Martinez+25 N/O ICF (``icf_tier``),
-#: ordered by ICF number (Martinez+2025 Table 4).
+#: ordered by ICF number (Martinez+2025 Table 5).
 VALID_NO_ICF_TIERS = (
     "NpOp",          # ICF 1: N+/O+
     "NppOpp",        # ICF 2: N2+/O2+

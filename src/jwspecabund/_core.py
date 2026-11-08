@@ -59,7 +59,7 @@ _LINE_WAVES: dict[str, float] = {
 _SNR_PROTECTED = {
     "OIII_4363", "OIII_5007", "OIII_4959", "HBETA",
     # Nitrogen lines used for ionic abundances — gated separately
-    # by _gate_nitrogen_ions() when icf_method="direct_sum".
+    # by _gate_nitrogen_ions() (applied for every icf_method).
     "NII_6585",
     "NIII_1747", "NIII_1749", "NIII_1750", "NIII_1752", "NIII_1754",
     "NIV_1483", "NIV_1486",
@@ -1276,6 +1276,9 @@ def _solve_densities_refined(
 def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
     """Return ionic species derived from incomplete UV doublets.
 
+    .. note:: Currently unused -- nothing calls this function, so
+       incomplete doublets are *not* excluded from the ICFs at present.
+
     When a UV doublet has only one member present (e.g. after SNR
     filtering removes the other), the single-member ionic abundance
     is still physically valid, but should *not* be fed into ICF
@@ -1323,8 +1326,10 @@ def _ions_from_incomplete_doublets(fluxes: dict[str, float]) -> set[str]:
 
 #: Ionisation-parameter diagnostics that ``logU_diagnostic`` may name.
 #:
-#: ``"N43"`` (N IV] 1486 / N III] 1750) is density-*insensitive* and is what
-#: Martinez+2025 recommend; ``"O32"`` ([O III] 5007 / [O II] 3727) is
+#: ``"N43"`` (N IV] 1486 / N III] 1750) is what Martinez+2025 recommend, as
+#: far less density-sensitive than O32 (though their Table 4 fit still
+#: moves by 0.4-1.7 dex across n_e = 1e2-1e6 near log N43 = 0, so it is
+#: also evaluated at ``ne_high``); ``"O32"`` ([O III] 5007 / [O II] 3727) is
 #: evaluated at ``ne_high``, so a poorly-constrained high-zone density
 #: propagates straight into log(U) and from there into the N/O and C/O ICFs.
 #: ``"O32_ionic"`` uses the same two lines as O32 but goes through the
@@ -1469,13 +1474,17 @@ def _compute_logU(
 
     Diagnostic priority and density (Martinez+2025)
     -----------------------------------------------
-    N43 (NIV]/NIII]) is the preferred log(U) diagnostic: it is
-    density-insensitive and traces the high-ionisation zone, so it is
+    N43 (NIV]/NIII]) is the preferred log(U) diagnostic: it is much less
+    density-sensitive than O32 (though not density-independent near the
+    upper calibration edge) and traces the high-ionisation zone, so it is
     evaluated at *ne_high*.  When the N43 ratio exceeds the upper
-    calibration edge the object is simply more highly ionised than the
-    grid (log U > -1.0; Martinez+2025 report this for their high-z
-    sample, §6.2), so the ratio is clipped to the edge and the resulting
-    high-U value (~ -1.0) is used rather than discarding N43.  O32
+    calibration edge the object is more highly ionised than the grid
+    (Martinez+2025 report this for their high-z sample, §6.2), so the
+    ratio is clipped to the edge and converted at the actual density.
+    The result is kept only if it passes the log(U) range check, which
+    at the edge happens only for Z/Zsun <~ 0.05 at n_e >~ 1e4 cm^-3
+    (Z/Zsun = 0.02 from ~1e3); otherwise the clipped N43 is rejected and
+    log(U) falls through to O32 (or ``None`` when locked to N43).  O32
     ([OIII]/[OII]) is only a fallback: it is density-*sensitive* and, per
     Martinez+2025 (recommendation 5), is evaluated with the measured
     high-ionisation-zone density *ne_high*; it is unreliable when that
@@ -1521,9 +1530,10 @@ def _compute_logU(
         off, nothing more.  Useful when the measured high-zone density
         is unreliable -- O32 is density-sensitive, so a [O II] or
         [Ar IV] ratio scattered to the high-density limit drags log(U)
-        down with it and from there into the ICFs.  Has no effect on
-        N43, which is density-insensitive by construction, and none on
-        the ICF surfaces, which keep the measured zone densities.
+        down with it and from there into the ICFs.  It is applied to N43
+        too, which moves little at low N43 but by up to ~1.7 dex across
+        the grid near log N43 = 0; it has no effect on the ICF surfaces,
+        which keep the measured zone densities.
         ``None`` (default) uses *ne_high*.
     ionic : dict, optional
         Ionic abundances (``"O+/H+"``, ``"O++/H+"``) for the
@@ -1560,7 +1570,8 @@ def _compute_logU(
             return False, 0.0
         return True, total
 
-    # N43 = NIV]1483,1486 / NIII]1750 — density-insensitive, recommended.
+    # N43 = NIV]1483,1486 / NIII]1750 — recommended; weakly density-sensitive
+    # except near the upper calibration edge.
     # NIII] 1750 is the whole quintuplet (Martinez+2025 footnote 1).
     # Total SNR must pass the cut for both NIV] and NIII].
     if lock_diag in (None, "N43"):
@@ -1580,13 +1591,14 @@ def _compute_logU(
             log_N43 = np.log10(N43)
             # A ratio past the UPPER calibration edge means the object is more
             # highly ionised than the Martinez+25 grid (their high-z sample
-            # shows this too, indicating log U > -1.0; Martinez+25 §6.2).  Clip
-            # to the edge and use the resulting high-ionisation log(U) (~ -1.0)
-            # rather than discarding the preferred, density-insensitive N43
-            # diagnostic for the density-sensitive O32 fallback.  The
-            # (N2+ + N3+)/O2+ ICF is near unity and barely changes for
-            # -2 < log U < -1 (Martinez+25 §6.3), so N/O is robust to the
-            # exact clipped value.
+            # shows this too; Martinez+25 §6.2).  Clip to the edge and convert
+            # at ne_U.  The clipped value does NOT reliably give log U ~ -1.0:
+            # log U(log N43 = 0.5) is -0.22 to +3.0 at n_e = 1e2 for
+            # Z/Zsun = 0.02-0.4, and stays above -1.0 at every density for
+            # Z/Zsun >~ 0.1.  It is accepted only for Z/Zsun <~ 0.05 at
+            # n_e >~ 1e4 (Z/Zsun = 0.02 from ~1e3), where it lands at -0.97
+            # to -1.16; otherwise the range check below rejects it and the
+            # tree falls through to O32 (or returns None when locked to N43).
             if log_N43 > _LOG_N43_VALID[1]:
                 logger.info(
                     "log(N43)=%.2f exceeds calibration ceiling %.1f "
@@ -1682,10 +1694,13 @@ def _gate_nitrogen_ions(
 ) -> dict[str, float]:
     """Remove nitrogen ionic abundances whose source lines are too noisy.
 
-    For **doublets** (NIII], NIV], NV): both members must have positive
-    flux, and the total doublet SNR (sum(flux) / sqrt(sum(err²))) must
-    be >= *snr_NO*.  If only one member is detected, the ion is excluded
-    regardless of SNR.
+    For **multiplets** (the NIII] quintuplet, NIV], NV): at least one
+    member must have positive flux and individual SNR >= 1, otherwise the
+    ion is excluded.  A single detected member is enough.  The total SNR
+    of the multiplet (summed flux over the errors combined by
+    :func:`_summed_flux_err`: linearly for the correlated NIII]
+    quintuplet, in quadrature otherwise) must then be >= *snr_NO*; when
+    the summed flux or error is not positive the ion is kept unchanged.
 
     For **single lines** (NII 6585): the line SNR must be >= *snr_NO*.
 
@@ -2516,9 +2531,10 @@ def _run_direct(
             lock_diag=logU_diagnostic, logU_ne=logU_ne, ionic=ionic,
         )
         # C/O ICF: recompute log U at the intermediate (C2+) zone density.
-        # Only the density-sensitive O32 diagnostic changes appreciably;
-        # N43 is density-insensitive so this is a no-op there, and
-        # O32_ionic moves by ~0.003 dex (kept for a uniform code path).  A pinned
+        # O32 changes most; N43 is re-evaluated at ne_mid too and moves
+        # little at low N43 but appreciably near the upper calibration edge
+        # (0.4-1.7 dex across 1e2-1e6 at log N43 = 0), and O32_ionic moves
+        # by ~0.003 dex (kept for a uniform code path).  A pinned
         # logU_ne makes it a no-op for both, so skip it and let the one
         # log(U) serve both zones.
         logU_co = logU
@@ -4324,8 +4340,8 @@ def compute_abundances(
         before reading anything into a missing ICF.
 
         Prefer the default unless you have a reason.  Martinez+2025
-        recommend N43 because it is density-*insensitive*, whereas O32
-        is evaluated at ``ne_high``, so forcing ``"O32"`` pushes any
+        recommend N43 because it is far less density-sensitive, whereas
+        O32 depends strongly on ``ne_high``, so forcing ``"O32"`` pushes any
         error in the high-zone density straight into log(U) and from
         there into the N/O and C/O ICFs.  The usual legitimate reason to
         force it is sample homogeneity -- keeping every object on one
@@ -4348,8 +4364,9 @@ def compute_abundances(
         N/O and C/O ICFs, and none of that is visible in the O/H you
         trust.  Pinning to a defensible density (10^2-10^3 cm^-3 for
         most H II regions) puts the conversion on a grid you can
-        justify.  N43 is density-insensitive, so pinning barely moves
-        it.
+        justify.  N43 is converted at the pinned density too; it barely
+        moves at low N43, but near the upper calibration edge (log N43
+        ~ 0) the conversion shifts by 0.4-1.7 dex across 10^2-10^6 cm^-3.
 
         When set, the C/O log(U) is no longer re-derived at the
         intermediate-zone density -- one pinned density gives one
