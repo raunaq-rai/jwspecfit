@@ -81,6 +81,48 @@ BRANCHING_RATIOS: dict[tuple[str, str], float] = {
 H8_H9_RATIO = 1.437
 
 
+# Narrow Balmer lines whose width and centroid follow [OIII] 5007.
+_BALMER_TIED_TO_OIII = (
+    "HALPHA", "HBETA", "HGAMMA", "HDELTA", "HEPSILON", "H8", "H9", "H10",
+)
+
+# Broad Balmer components whose centroid follows the narrow line.
+_BROAD_PAIRS = (
+    ("HALPHA_BROAD", "HALPHA"), ("HALPHA_BROAD2", "HALPHA"),
+    ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
+    ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
+    ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
+)
+
+# (primary, secondary) doublets with shared kinematics.
+_KINEMATIC_TIED = (
+    ("NV_1", "NV_2"),
+    ("CIV_1", "CIV_2"),
+    ("OIII_1666", "OIII_1661"),
+    ("CIII]_1907", "CIII]_1909"),
+    ("NIV_1486", "NIV_1483"),
+    ("SiIII_1", "SiIII_2"),
+    ("CII]_2326", "CII]_2324"),
+)
+
+# UV intercombination lines sharing one velocity width (first present = anchor).
+_UV_INTERCOM = ("CIII]_1907", "NIV_1486", "NIII_1750")
+
+# Doublets whose members always share a velocity width.
+_ALWAYS_TIE_WIDTH = (("CIII]_1907", "CIII]_1909"),)
+
+
+def _check_op_order(ops: list[tuple[int, int, float]]) -> None:
+    """Raise if an op copies a source that a later op still overwrites."""
+    written_later: set[int] = set()
+    for dst, src, _ in reversed(ops):
+        if src in written_later:
+            raise RuntimeError(
+                f"Tying op copies parameter {src} before its final value is set."
+            )
+        written_later.add(dst)
+
+
 @dataclass
 class ConstraintSet:
     """Collection of parameter constraints for a line fit.
@@ -123,8 +165,134 @@ class ConstraintSet:
                 set(self.blended_doublets), warn=False,
             )
 
+    def tying_ops(self) -> list[tuple[int, int, float]]:
+        """Ordered tying operations: the single source of truth for every tie.
+
+        Each operation ``(dst, src, ratio)`` means ``p[dst] = p[src] * ratio``.
+        :meth:`apply`, :meth:`free_mask` and the JAX likelihood all consume
+        this list, so they cannot disagree.  Operations are ordered so that
+        every source is final before it is copied (checked on return).
+
+        Returns
+        -------
+        list of (int, int, float)
+            Ordered tying operations on the full parameter vector
+            ``[A_0..A_n, mu_0..mu_n, sigma_0..sigma_n]``.
+        """
+        nL = len(self.line_names)
+        idx = {name: i for i, name in enumerate(self.line_names)}
+        ops: list[tuple[int, int, float]] = []
+
+        def amp(n: str) -> int:
+            return idx[n]
+
+        def cen(n: str) -> int:
+            return nL + idx[n]
+
+        def wid(n: str) -> int:
+            return 2 * nL + idx[n]
+
+        def lam_ratio(dst: str, src: str) -> float:
+            return REST_LINES_A[dst] / REST_LINES_A[src]
+
+        # --- Narrow Balmer kinematics tied to [OIII] 5007 (same velocity) ---
+        if self.tie_balmer_to_oiii and "OIII_5007" in idx:
+            for name in _BALMER_TIED_TO_OIII:
+                if name in idx:
+                    ops.append((wid(name), wid("OIII_5007"), lam_ratio(name, "OIII_5007")))
+            for name in _BALMER_TIED_TO_OIII:
+                if name in idx:
+                    ops.append((cen(name), cen("OIII_5007"), lam_ratio(name, "OIII_5007")))
+
+        # --- Broad Balmer centroids tied to their narrow counterparts ---
+        for broad_name, narrow_name in _BROAD_PAIRS:
+            if broad_name in idx and narrow_name in idx:
+                ops.append((cen(broad_name), cen(narrow_name), 1.0))
+
+        # --- [OIII] broad doublet kinematics (same outflowing gas) ---
+        for suffix in ("_BROAD", "_BROAD2"):
+            pri, sec = f"OIII_5007{suffix}", f"OIII_4959{suffix}"
+            if pri in idx and sec in idx:
+                r = REST_LINES_A["OIII_4959"] / REST_LINES_A["OIII_5007"]
+                ops.append((cen(sec), cen(pri), r))
+                ops.append((wid(sec), wid(pri), r))
+
+        # --- He I broad kinematics: one sigma_v / dv per tier ---
+        from .broad import HEI_BROAD_CANDIDATES as _HEI_BC
+        for suffix in ("_BROAD", "_BROAD2"):
+            present = [f"{n}{suffix}" for n in _HEI_BC if f"{n}{suffix}" in idx]
+            for tgt in present[1:]:
+                ops.append((cen(tgt), cen(present[0]), lam_ratio(tgt, present[0])))
+                ops.append((wid(tgt), wid(present[0]), lam_ratio(tgt, present[0])))
+
+        # --- [NII] doublet: flux ratio and kinematics ---
+        if self.tie_nii and "NII_6549" in idx and "NII_6585" in idx:
+            r = lam_ratio("NII_6549", "NII_6585")
+            ops.append((amp("NII_6549"), amp("NII_6585"), NII_RATIO))
+            ops.append((cen("NII_6549"), cen("NII_6585"), r))
+            ops.append((wid("NII_6549"), wid("NII_6585"), r))
+
+        if self.tie_uv_doublets:
+            # UV intercombination widths share one velocity dispersion.  This
+            # runs BEFORE the doublet ties below: a doublet primary can itself
+            # be a width target (N IV] 1486 -> C III] 1907), and its secondary
+            # must copy the primary's final width.
+            if self.tie_uv_widths:
+                present = [n for n in _UV_INTERCOM if n in idx]
+                for name in present[1:]:
+                    ops.append((wid(name), wid(present[0]), lam_ratio(name, present[0])))
+
+            # Kinematically tied doublets: amplitude free when resolved, fixed
+            # to the low-density / optically-thin ratio when blended.
+            _blended = self.blended_doublets or set()
+            for pri, sec in _KINEMATIC_TIED:
+                if pri in idx and sec in idx:
+                    r = lam_ratio(sec, pri)
+                    if self.tie_uv_centroids:
+                        ops.append((cen(sec), cen(pri), r))
+                    ops.append((wid(sec), wid(pri), r))
+                    fixed = {
+                        ("NIV_1486", "NIV_1483"): self.niv_doublet_ratio,
+                        ("CIII]_1907", "CIII]_1909"): self.ciii_doublet_ratio,
+                    }.get((pri, sec))
+                    if fixed is not None:
+                        ops.append((amp(sec), amp(pri), fixed))
+                    elif sec in _blended:
+                        ops.append((amp(sec), amp(pri),
+                                    _INTERCOM_LOW_DENSITY_RATIOS.get((pri, sec), 0.67)))
+
+            # N III] quintuplet: one flux, one velocity, one width.
+            if NIII_MULTIPLET_ANCHOR in idx:
+                for name, ratio in NIII_MULTIPLET_RATIOS.items():
+                    if name in idx:
+                        r = lam_ratio(name, NIII_MULTIPLET_ANCHOR)
+                        ops.append((amp(name), amp(NIII_MULTIPLET_ANCHOR), ratio))
+                        ops.append((cen(name), cen(NIII_MULTIPLET_ANCHOR), r))
+                        ops.append((wid(name), wid(NIII_MULTIPLET_ANCHOR), r))
+
+        # --- Doublet-internal width tying (always active) ---
+        for pri, sec in _ALWAYS_TIE_WIDTH:
+            if pri in idx and sec in idx:
+                op = (wid(sec), wid(pri), lam_ratio(sec, pri))
+                if op not in ops:
+                    ops.append(op)
+
+        # --- Fixed branching ratios (last: every primary is final by now) ---
+        if self.fix_branching_ratios:
+            for (pri, sec), ratio in BRANCHING_RATIOS.items():
+                if pri in idx and sec in idx:
+                    r = lam_ratio(sec, pri)
+                    ops.append((amp(sec), amp(pri), ratio))
+                    ops.append((cen(sec), cen(pri), r))
+                    ops.append((wid(sec), wid(pri), r))
+            if "H8" in idx and "H9" in idx:
+                ops.append((amp("H8"), amp("H9"), H8_H9_RATIO))
+
+        _check_op_order(ops)
+        return ops
+
     def apply(self, params: np.ndarray) -> np.ndarray:
-        """Apply constraints to a parameter vector (in-place copy).
+        """Apply constraints to a parameter vector (returns a copy).
 
         Parameters
         ----------
@@ -136,352 +304,28 @@ class ConstraintSet:
         np.ndarray
             Constrained parameter vector.
         """
-        p = params.copy()
-        nL = len(self.line_names)
-        idx = {name: i for i, name in enumerate(self.line_names)}
-
-        # --- Narrow-line kinematics tying to [OIII] 5007 ---
-        # Widths are tied in velocity space for all narrow lines.
-        # Centroids are tied for Balmer lines only (same systemic velocity).
-        # NII_6585 width is tied but centroid is free so it can fit its peak.
-        if self.tie_balmer_to_oiii and "OIII_5007" in idx:
-            i_o3 = idx["OIII_5007"]
-            lam_o3 = REST_LINES_A["OIII_5007"]
-            sigma_o3 = p[2 * nL + i_o3]
-            mu_o3 = p[nL + i_o3]
-
-            # Width tying: Balmer lines share OIII velocity dispersion.
-            # NII width is free (tied only via the doublet constraint).
-            width_targets = [
-                "HALPHA", "HBETA", "HGAMMA", "HDELTA",
-                "HEPSILON", "H8", "H9", "H10",
-            ]
-            for name in width_targets:
-                if name in idx:
-                    i_t = idx[name]
-                    ratio = REST_LINES_A[name] / lam_o3
-                    p[2 * nL + i_t] = sigma_o3 * ratio
-
-            # Centroid tying: Balmer lines only (not NII — its centroid is free).
-            centroid_targets = [
-                "HALPHA", "HBETA", "HGAMMA", "HDELTA",
-                "HEPSILON", "H8", "H9", "H10",
-            ]
-            for name in centroid_targets:
-                if name in idx:
-                    i_t = idx[name]
-                    ratio = REST_LINES_A[name] / lam_o3
-                    p[nL + i_t] = mu_o3 * ratio
-
-        # --- Tie broad centroids to their narrow counterparts ---
-        _BROAD_PAIRS = [
-            ("HALPHA_BROAD", "HALPHA"), ("HALPHA_BROAD2", "HALPHA"),
-            ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
-            ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
-            ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
-        ]
-        for broad_name, narrow_name in _BROAD_PAIRS:
-            if broad_name in idx and narrow_name in idx:
-                p[nL + idx[broad_name]] = p[nL + idx[narrow_name]]
-
-        # --- Tie [OIII] broad doublet kinematics ---
-        # Both components come from the same outflowing gas, so they
-        # share velocity (Δv) and dispersion (σ_v).  In observed-λ
-        # space both scale with rest wavelength.  For each broad tier
-        # (BROAD = outflow, BROAD2 = fast wind), anchor on the 5007
-        # member; the 4959 member is derived.  Amplitudes stay free.
-        oiii_lam_ratio = (
-            REST_LINES_A["OIII_4959"] / REST_LINES_A["OIII_5007"]
-        )
-        for suffix in ("_BROAD", "_BROAD2"):
-            pri, sec = f"OIII_5007{suffix}", f"OIII_4959{suffix}"
-            if pri in idx and sec in idx:
-                p[nL + idx[sec]] = p[nL + idx[pri]] * oiii_lam_ratio
-                p[2 * nL + idx[sec]] = p[2 * nL + idx[pri]] * oiii_lam_ratio
-
-        # --- Tie He I broad kinematics ---
-        # All HeI emission lines come from the He+ recombination zone
-        # (IP ~24.6 eV) so within each broad tier they trace one gas
-        # component and share σ_v / Δv.  Anchor on the first HeI broad
-        # present (by HEI_BROAD_CANDIDATES order); derive all others.
-        # Amplitudes are free (no fixed atomic ratio between HeI lines).
-        from .broad import HEI_BROAD_CANDIDATES as _HEI_BC
-        for suffix in ("_BROAD", "_BROAD2"):
-            present = [
-                f"{n}{suffix}" for n in _HEI_BC
-                if f"{n}{suffix}" in idx
-            ]
-            if len(present) < 2:
-                continue
-            anchor = present[0]
-            lam_anchor = REST_LINES_A[anchor]
-            i_anchor = idx[anchor]
-            for tgt in present[1:]:
-                ratio = REST_LINES_A[tgt] / lam_anchor
-                p[nL + idx[tgt]] = p[nL + i_anchor] * ratio
-                p[2 * nL + idx[tgt]] = p[2 * nL + i_anchor] * ratio
-
-        # --- [NII] doublet constraint (after Balmer tying so NII_6585 σ is set) ---
-        if self.tie_nii and "NII_6549" in idx and "NII_6585" in idx:
-            i49 = idx["NII_6549"]
-            i85 = idx["NII_6585"]
-            lam_ratio = REST_LINES_A["NII_6549"] / REST_LINES_A["NII_6585"]
-
-            # Amplitude: A_6549 = A_6585 × NII_RATIO
-            p[i49] = p[i85] * NII_RATIO
-
-            # Centroid: tied in velocity space
-            p[nL + i49] = p[nL + i85] * lam_ratio
-
-            # Width: tied in velocity space
-            p[2 * nL + i49] = p[2 * nL + i85] * lam_ratio
-
-        # --- UV doublet constraints ---
-        if self.tie_uv_doublets:
-            # Kinematically-tied doublets: kinematics shared, amplitude free
-            # when resolved.  If blended (unresolved), the amplitude is also
-            # fixed to the low-density / optically-thin ratio for fitting
-            # stability.  Resonance doublets (N V, C IV) are handled the same
-            # way: their flux ratio runs between 2:1 (optically thin) and 1:1
-            # (optically thick), so it is only fixed when the members cannot
-            # be resolved.
-            _KINEMATIC_TIED = [
-                # (primary, secondary) — amplitudes free when resolved
-                ("NV_1",      "NV_2"),
-                ("CIV_1",     "CIV_2"),
-                ("OIII_1666", "OIII_1661"),
-                ("CIII]_1907", "CIII]_1909"),
-                ("NIV_1486",   "NIV_1483"),
-                ("SiIII_1",   "SiIII_2"),
-                ("CII]_2326", "CII]_2324"),
-            ]
-            _blended = self.blended_doublets or set()
-            for pri, sec in _KINEMATIC_TIED:
-                if pri in idx and sec in idx:
-                    i_pri = idx[pri]
-                    i_sec = idx[sec]
-                    lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
-                    if self.tie_uv_centroids:
-                        p[nL + i_sec] = p[nL + i_pri] * lam_ratio
-                    p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
-                    # Use explicit ratio if provided (e.g. from
-                    # assumed density).
-                    if (pri, sec) == ("NIV_1486", "NIV_1483") and self.niv_doublet_ratio is not None:
-                        p[i_sec] = p[i_pri] * self.niv_doublet_ratio
-                    elif (pri, sec) == ("CIII]_1907", "CIII]_1909") and self.ciii_doublet_ratio is not None:
-                        p[i_sec] = p[i_pri] * self.ciii_doublet_ratio
-                    # Fix amplitude for unresolved doublets.
-                    elif sec in _blended:
-                        ratio = _INTERCOM_LOW_DENSITY_RATIOS.get(
-                            (pri, sec), 0.67,
-                        )
-                        p[i_sec] = p[i_pri] * ratio
-
-            # Tie UV intercombination line widths together in velocity
-            # space.  The first available line becomes the anchor whose
-            # width is free; all others are derived from it.  The
-            # shared width is jointly constrained by all tied lines
-            # through the residual.
-            # CIV excluded (resonance line), OIII] excluded (its own
-            # doublet constraint already ties 1661 to 1666).
-            if self.tie_uv_widths:
-                _UV_INTERCOM = [
-                    "CIII]_1907", "NIV_1486", "NIII_1750",
-                ]
-                _uv_present = [n for n in _UV_INTERCOM if n in idx]
-                if len(_uv_present) >= 2:
-                    anchor = _uv_present[0]
-                    i_anchor = idx[anchor]
-                    lam_anchor = REST_LINES_A[anchor]
-                    sigma_anchor = p[2 * nL + i_anchor]
-                    for name in _uv_present[1:]:
-                        i_t = idx[name]
-                        ratio = REST_LINES_A[name] / lam_anchor
-                        p[2 * nL + i_t] = sigma_anchor * ratio
-
-            # N III] quintuplet: one flux, one velocity, one width.  Runs after
-            # the width tie so the members inherit the anchor's final σ.
-            if NIII_MULTIPLET_ANCHOR in idx:
-                i_a = idx[NIII_MULTIPLET_ANCHOR]
-                lam_a = REST_LINES_A[NIII_MULTIPLET_ANCHOR]
-                for name, ratio in NIII_MULTIPLET_RATIOS.items():
-                    if name in idx:
-                        i_m = idx[name]
-                        lam_ratio = REST_LINES_A[name] / lam_a
-                        p[i_m] = p[i_a] * ratio
-                        p[nL + i_m] = p[nL + i_a] * lam_ratio
-                        p[2 * nL + i_m] = p[2 * nL + i_a] * lam_ratio
-
-        # --- Doublet-internal width tying (always active) ---
-        # Members of these doublets always share the same velocity width,
-        # even when tie_uv_doublets is False.
-        _ALWAYS_TIE_WIDTH = [
-            ("CIII]_1907", "CIII]_1909"),
-        ]
-        for pri, sec in _ALWAYS_TIE_WIDTH:
-            if pri in idx and sec in idx:
-                lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
-                p[2 * nL + idx[sec]] = p[2 * nL + idx[pri]] * lam_ratio
-
-        # --- Fixed branching ratios (last: every primary is final by now) ---
-        if self.fix_branching_ratios:
-            for (pri, sec), ratio in BRANCHING_RATIOS.items():
-                if pri in idx and sec in idx:
-                    i_pri, i_sec = idx[pri], idx[sec]
-                    lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
-                    p[i_sec] = p[i_pri] * ratio
-                    p[nL + i_sec] = p[nL + i_pri] * lam_ratio
-                    p[2 * nL + i_sec] = p[2 * nL + i_pri] * lam_ratio
-            if "H8" in idx and "H9" in idx:
-                p[idx["H8"]] = p[idx["H9"]] * H8_H9_RATIO
-
+        p = np.array(params, dtype=float, copy=True)
+        for dst, src, ratio in self.tying_ops():
+            p[dst] = p[src] * ratio
         return p
 
     def free_mask(self) -> np.ndarray:
         """Boolean mask of free (unconstrained) parameters.
 
-        Parameters that are determined by constraints are marked False.
-        The optimiser should only vary free parameters.
+        A parameter is free exactly when no tying operation writes to it.
 
         Returns
         -------
         np.ndarray
             Boolean array of length ``3 * n_lines``.
         """
-        nL = len(self.line_names)
-        free = np.ones(3 * nL, dtype=bool)
-        idx = {name: i for i, name in enumerate(self.line_names)}
-
-        if self.tie_nii and "NII_6549" in idx:
-            i49 = idx["NII_6549"]
-            # Amplitude, centroid, and sigma are derived
-            free[i49] = False
-            free[nL + i49] = False
-            free[2 * nL + i49] = False
-
-        if self.tie_balmer_to_oiii and "OIII_5007" in idx:
-            # Width tied for Balmer lines only (NII width is free).
-            width_targets = [
-                "HALPHA", "HBETA", "HGAMMA", "HDELTA",
-                "HEPSILON", "H8", "H9", "H10",
-            ]
-            for name in width_targets:
-                if name in idx:
-                    free[2 * nL + idx[name]] = False
-
-            # Centroid tied for Balmer lines only (NII centroid stays free).
-            centroid_targets = [
-                "HALPHA", "HBETA", "HGAMMA", "HDELTA",
-                "HEPSILON", "H8", "H9", "H10",
-            ]
-            for name in centroid_targets:
-                if name in idx:
-                    free[nL + idx[name]] = False
-
-        # Broad centroids tied to narrow.
-        _BROAD_PAIRS = [
-            ("HALPHA_BROAD", "HALPHA"), ("HALPHA_BROAD2", "HALPHA"),
-            ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
-            ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
-            ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
-        ]
-        for broad_name, narrow_name in _BROAD_PAIRS:
-            if broad_name in idx and narrow_name in idx:
-                free[nL + idx[broad_name]] = False
-
-        # OIII broad doublet (both tiers): 4959_BROAD[2] centroid and
-        # width derived from 5007_BROAD[2] (same outflowing gas).
-        for suffix in ("_BROAD", "_BROAD2"):
-            pri, sec = f"OIII_5007{suffix}", f"OIII_4959{suffix}"
-            if pri in idx and sec in idx:
-                free[nL + idx[sec]] = False
-                free[2 * nL + idx[sec]] = False
-
-        # HeI broad lines (both tiers): all non-anchor HeI broad
-        # centroids + widths are derived (same gas, single σ_v / Δv).
-        from .broad import HEI_BROAD_CANDIDATES as _HEI_BC
-        for suffix in ("_BROAD", "_BROAD2"):
-            present = [
-                f"{n}{suffix}" for n in _HEI_BC
-                if f"{n}{suffix}" in idx
-            ]
-            for tgt in present[1:]:
-                free[nL + idx[tgt]] = False
-                free[2 * nL + idx[tgt]] = False
-
-        # UV doublet constraints.
-        if self.tie_uv_doublets:
-            # Kinematically-tied doublets: sigma derived, centroid conditional.
-            # Amplitude is free when resolved, derived when blended.
-            _KINEMATIC_TIED = [
-                ("NV_1",      "NV_2"),
-                ("CIV_1",     "CIV_2"),
-                ("OIII_1666", "OIII_1661"),
-                ("CIII]_1907", "CIII]_1909"),
-                ("NIV_1486",   "NIV_1483"),
-                ("SiIII_1",   "SiIII_2"),
-                ("CII]_2326", "CII]_2324"),
-            ]
-            _blended = self.blended_doublets or set()
-            for pri, sec in _KINEMATIC_TIED:
-                if pri in idx and sec in idx:
-                    i_sec = idx[sec]
-                    if self.tie_uv_centroids:
-                        free[nL + i_sec] = False
-                    free[2 * nL + i_sec] = False
-                    # Amplitude derived when explicit ratio is set.
-                    if (pri, sec) == ("NIV_1486", "NIV_1483") and self.niv_doublet_ratio is not None:
-                        free[i_sec] = False
-                    elif (pri, sec) == ("CIII]_1907", "CIII]_1909") and self.ciii_doublet_ratio is not None:
-                        free[i_sec] = False
-                    elif sec in _blended:
-                        free[i_sec] = False
-
-            # N III] quintuplet: every member but the anchor is derived.
-            if NIII_MULTIPLET_ANCHOR in idx:
-                for name in NIII_MULTIPLET_RATIOS:
-                    if name in idx:
-                        i_m = idx[name]
-                        free[i_m] = False
-                        free[nL + i_m] = False
-                        free[2 * nL + i_m] = False
-
-            # UV intercombination widths: first available is anchor (free),
-            # all others are derived (not free).
-            # OIII] excluded — its width is independent.
-            if self.tie_uv_widths:
-                _UV_INTERCOM = [
-                    "CIII]_1907", "NIV_1486", "NIII_1750",
-                ]
-                _uv_present = [n for n in _UV_INTERCOM if n in idx]
-                if len(_uv_present) >= 2:
-                    for name in _uv_present[1:]:
-                        free[2 * nL + idx[name]] = False
-
-        # Doublet-internal width tying (always active).
-        _ALWAYS_TIE_WIDTH = [
-            ("CIII]_1907", "CIII]_1909"),
-        ]
-        for pri, sec in _ALWAYS_TIE_WIDTH:
-            if pri in idx and sec in idx:
-                free[2 * nL + idx[sec]] = False
-
-        # Fixed branching ratios: the secondary is fully derived.
-        if self.fix_branching_ratios:
-            for pri, sec in BRANCHING_RATIOS:
-                if pri in idx and sec in idx:
-                    i_sec = idx[sec]
-                    free[i_sec] = free[nL + i_sec] = free[2 * nL + i_sec] = False
-            if "H8" in idx and "H9" in idx:
-                free[idx["H8"]] = False
-
+        free = np.ones(3 * len(self.line_names), dtype=bool)
+        for dst, _, _ in self.tying_ops():
+            free[dst] = False
         return free
 
     def expand_free_to_full(self, p_free: np.ndarray) -> np.ndarray:
-        """Insert free parameters into a full-length vector.
-
-        Constrained slots are filled with placeholder values that will be
-        overwritten by :meth:`apply`.
+        """Insert free parameters into a full-length vector and apply ties.
 
         Parameters
         ----------
@@ -493,8 +337,6 @@ class ConstraintSet:
         np.ndarray
             Full parameter vector (length ``3 * n_lines``).
         """
-        nL = len(self.line_names)
-        full = np.zeros(3 * nL)
-        mask = self.free_mask()
-        full[mask] = p_free
+        full = np.zeros(3 * len(self.line_names))
+        full[self.free_mask()] = p_free
         return self.apply(full)

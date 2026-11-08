@@ -16,16 +16,7 @@ from math import sqrt
 
 import numpy as np
 
-from jwspecfit.constraints import (
-    BRANCHING_RATIOS,
-    H8_H9_RATIO,
-    ConstraintSet,
-    NII_RATIO,
-    NIII_MULTIPLET_ANCHOR,
-    NIII_MULTIPLET_RATIOS,
-    _INTERCOM_LOW_DENSITY_RATIOS,
-)
-from jwspecfit.lines import REST_LINES_A
+from jwspecfit.constraints import ConstraintSet
 
 from .likelihood import LikelihoodSpec
 
@@ -35,173 +26,12 @@ _SQRT2 = sqrt(2.0)
 
 
 def _compile_tying_ops(cs: ConstraintSet) -> list[tuple[int, int, float]]:
-    """Extract ordered (dst, src, ratio) tying operations from a ConstraintSet.
+    """Ordered ``(dst, src, ratio)`` tying operations, ``p[dst] = p[src] * ratio``.
 
-    Each operation means: ``p[dst] = p[src] * ratio``.
-    The operations are returned in the same order as ``ConstraintSet.apply()``
-    so that dependent constraints see their sources already updated.
-
-    Parameters
-    ----------
-    cs : ConstraintSet
-        The constraint set to compile.
-
-    Returns
-    -------
-    list of (int, int, float)
-        Ordered tying operations.
+    Delegates to :meth:`ConstraintSet.tying_ops` so the JAX likelihood uses
+    exactly the same ties as the NumPy one.
     """
-    nL = len(cs.line_names)
-    idx = {name: i for i, name in enumerate(cs.line_names)}
-    ops: list[tuple[int, int, float]] = []
-
-    # --- Balmer/OIII tying ---
-    if cs.tie_balmer_to_oiii and "OIII_5007" in idx:
-        i_o3 = idx["OIII_5007"]
-        lam_o3 = REST_LINES_A["OIII_5007"]
-
-        width_targets = [
-            "HALPHA", "HBETA", "HGAMMA", "HDELTA",
-            "HEPSILON", "H8", "H9", "H10",
-        ]
-        for name in width_targets:
-            if name in idx:
-                ratio = REST_LINES_A[name] / lam_o3
-                ops.append((2 * nL + idx[name], 2 * nL + i_o3, ratio))
-
-        centroid_targets = [
-            "HALPHA", "HBETA", "HGAMMA", "HDELTA",
-            "HEPSILON", "H8", "H9", "H10",
-        ]
-        for name in centroid_targets:
-            if name in idx:
-                ratio = REST_LINES_A[name] / lam_o3
-                ops.append((nL + idx[name], nL + i_o3, ratio))
-
-    # --- Broad centroid tying ---
-    _BROAD_PAIRS = [
-        ("HALPHA_BROAD", "HALPHA"), ("HALPHA_BROAD2", "HALPHA"),
-        ("HBETA_BROAD", "HBETA"), ("HBETA_BROAD2", "HBETA"),
-        ("HDELTA_BROAD", "HDELTA"), ("HDELTA_BROAD2", "HDELTA"),
-        ("HGAMMA_BROAD", "HGAMMA"), ("HGAMMA_BROAD2", "HGAMMA"),
-    ]
-    for broad_name, narrow_name in _BROAD_PAIRS:
-        if broad_name in idx and narrow_name in idx:
-            ops.append((nL + idx[broad_name], nL + idx[narrow_name], 1.0))
-
-    # --- OIII broad doublet kinematics (same outflowing gas) ---
-    # Apply to both broad tiers (BROAD = outflow, BROAD2 = fast wind).
-    oiii_lam_ratio = REST_LINES_A["OIII_4959"] / REST_LINES_A["OIII_5007"]
-    for suffix in ("_BROAD", "_BROAD2"):
-        pri, sec = f"OIII_5007{suffix}", f"OIII_4959{suffix}"
-        if pri in idx and sec in idx:
-            i_pri, i_sec = idx[pri], idx[sec]
-            ops.append((nL + i_sec, nL + i_pri, oiii_lam_ratio))         # centroid
-            ops.append((2 * nL + i_sec, 2 * nL + i_pri, oiii_lam_ratio))  # sigma
-
-    # --- HeI broad kinematics (same recombination zone gas) ---
-    # All HeI broads in each tier share one σ_v and Δv (anchored on
-    # the first present); each line's σ_λ / Δλ scales with rest λ.
-    from jwspecfit.broad import HEI_BROAD_CANDIDATES as _HEI_BC
-    for suffix in ("_BROAD", "_BROAD2"):
-        present = [
-            f"{n}{suffix}" for n in _HEI_BC
-            if f"{n}{suffix}" in idx
-        ]
-        if len(present) < 2:
-            continue
-        anchor = present[0]
-        i_anchor = idx[anchor]
-        lam_anchor = REST_LINES_A[anchor]
-        for tgt in present[1:]:
-            ratio = REST_LINES_A[tgt] / lam_anchor
-            i_tgt = idx[tgt]
-            ops.append((nL + i_tgt, nL + i_anchor, ratio))         # centroid
-            ops.append((2 * nL + i_tgt, 2 * nL + i_anchor, ratio))  # sigma
-
-    # --- NII doublet ---
-    if cs.tie_nii and "NII_6549" in idx and "NII_6585" in idx:
-        i49 = idx["NII_6549"]
-        i85 = idx["NII_6585"]
-        lam_ratio = REST_LINES_A["NII_6549"] / REST_LINES_A["NII_6585"]
-        ops.append((i49, i85, NII_RATIO))               # amplitude
-        ops.append((nL + i49, nL + i85, lam_ratio))      # centroid
-        ops.append((2 * nL + i49, 2 * nL + i85, lam_ratio))  # sigma
-
-    # --- UV doublet constraints ---
-    if cs.tie_uv_doublets:
-        # Kinematic-tied doublets: kinematics shared, amplitude free when
-        # resolved and fixed to the optically-thin / low-density ratio only
-        # when blended.  Resonance doublets (N V, C IV) are included here:
-        # their flux ratio runs between 2:1 (thin) and 1:1 (thick), so it is
-        # only fixed when the members cannot be resolved.
-        _KINEMATIC_TIED = [
-            ("NV_1", "NV_2"),
-            ("CIV_1", "CIV_2"),
-            ("OIII_1666", "OIII_1661"),
-            ("CIII]_1907", "CIII]_1909"),
-            ("NIV_1486", "NIV_1483"),
-            ("SiIII_1", "SiIII_2"),
-        ]
-        _blended = cs.blended_doublets or set()
-        for pri, sec in _KINEMATIC_TIED:
-            if pri in idx and sec in idx:
-                i_pri, i_sec = idx[pri], idx[sec]
-                lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
-                if cs.tie_uv_centroids:
-                    ops.append((nL + i_sec, nL + i_pri, lam_ratio))
-                ops.append((2 * nL + i_sec, 2 * nL + i_pri, lam_ratio))
-                if sec in _blended:
-                    ratio = _INTERCOM_LOW_DENSITY_RATIOS.get((pri, sec), 0.67)
-                    ops.append((i_sec, i_pri, ratio))
-
-        # UV intercombination width tying
-        if cs.tie_uv_widths:
-            _UV_INTERCOM = ["CIII]_1907", "NIV_1486", "NIII_1750"]
-            _uv_present = [n for n in _UV_INTERCOM if n in idx]
-            if len(_uv_present) >= 2:
-                anchor = _uv_present[0]
-                i_anchor = idx[anchor]
-                lam_anchor = REST_LINES_A[anchor]
-                for name in _uv_present[1:]:
-                    ratio = REST_LINES_A[name] / lam_anchor
-                    ops.append((2 * nL + idx[name], 2 * nL + i_anchor, ratio))
-
-        # N III] quintuplet: one flux, one velocity, one width.  Runs after
-        # the width tie so the members inherit the anchor's final σ.
-        if NIII_MULTIPLET_ANCHOR in idx:
-            i_a = idx[NIII_MULTIPLET_ANCHOR]
-            lam_a = REST_LINES_A[NIII_MULTIPLET_ANCHOR]
-            for name, ratio in NIII_MULTIPLET_RATIOS.items():
-                if name in idx:
-                    i_m = idx[name]
-                    lam_ratio = REST_LINES_A[name] / lam_a
-                    ops.append((i_m, i_a, ratio))
-                    ops.append((nL + i_m, nL + i_a, lam_ratio))
-                    ops.append((2 * nL + i_m, 2 * nL + i_a, lam_ratio))
-
-    # --- Always-tie-width doublets (unconditional) ---
-    _ALWAYS_TIE_WIDTH = [
-        ("CIII]_1907", "CIII]_1909"),
-    ]
-    for pri, sec in _ALWAYS_TIE_WIDTH:
-        if pri in idx and sec in idx:
-            lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
-            ops.append((2 * nL + idx[sec], 2 * nL + idx[pri], lam_ratio))
-
-    # --- Fixed branching ratios (last, as in ConstraintSet.apply) ---
-    if cs.fix_branching_ratios:
-        for (pri, sec), ratio in BRANCHING_RATIOS.items():
-            if pri in idx and sec in idx:
-                i_pri, i_sec = idx[pri], idx[sec]
-                lam_ratio = REST_LINES_A[sec] / REST_LINES_A[pri]
-                ops.append((i_sec, i_pri, ratio))
-                ops.append((nL + i_sec, nL + i_pri, lam_ratio))
-                ops.append((2 * nL + i_sec, 2 * nL + i_pri, lam_ratio))
-        if "H8" in idx and "H9" in idx:
-            ops.append((idx["H8"], idx["H9"], H8_H9_RATIO))
-
-    return ops
+    return cs.tying_ops()
 
 
 def make_jax_log_likelihood(
