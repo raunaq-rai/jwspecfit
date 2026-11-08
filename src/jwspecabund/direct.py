@@ -2734,12 +2734,14 @@ def compute_total_abundances(
             if t23 > 0:
                 NO_tiers["Direct sum UV: (N²⁺+N³⁺)/O²⁺"] = np.log10(t23)
 
-        # Izotov+06: ICF × N⁺/O⁺
+        # Izotov+06: ICF × N⁺/(O/H)
         if N_plus > 0 and O_plus > 0:
             icf_n_all = icf_nitrogen(O_plus, OH)
-            t4 = icf_n_all * N_plus / O_plus
+            # icf_nitrogen is the elemental ICF (N/H = ICF N+/H+), so it
+            # pairs with the total O/H — the same form as the adopted value.
+            t4 = icf_n_all * N_plus / OH
             if t4 > 0:
-                NO_tiers["Izotov+06: ICF × N⁺/O⁺"] = np.log10(t4)
+                NO_tiers["Izotov+06: ICF × N⁺/(O/H)"] = np.log10(t4)
                 NO_tiers["_izotov06_icf_value"] = icf_n_all
 
         if NO_tiers:

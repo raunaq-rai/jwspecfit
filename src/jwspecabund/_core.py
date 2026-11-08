@@ -1885,7 +1885,7 @@ _ICF_DESCRIPTIONS: dict[str, str] = {
     "Npp_Nppp_Opp": "direct sum: (N2+ + N3+) / O2+ — UV only, no ICF needed",
     "Nppp_Opp": "direct sum: N3+ / O2+ — UV only, no ICF needed",
     "Npp_Opp": "direct sum: N2+ / O2+ — UV only, no ICF needed",
-    "izotov06_fallback": "Izotov+06: ICF(O+/O) x N+/O+ — optical fallback",
+    "izotov06_fallback": "Izotov+06: ICF(O+/O) x N+/(O/H) — optical fallback",
 }
 
 _TE_RELATION_LABELS: dict[str, str] = {

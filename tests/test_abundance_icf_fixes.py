@@ -210,3 +210,11 @@ class SimpleLine:
     def __init__(self, flux, err):
         self.flux, self.flux_err = flux, err
         self.snr = flux / err
+
+
+def test_izotov_tier_row_matches_adopted_izotov_value():
+    """The comparison-table Izotov row must equal the adopted Izotov N/O."""
+    ionic = {"O+/H+": 1e-5, "O++/H+": 9e-5, "N+/H+": 1e-6}
+    tot = compute_total_abundances(ionic, icf_method="izotov06")
+    row = [v for k, v in tot["_NO_tiers"].items() if k.startswith("Izotov")]
+    assert row and row[0] == pytest.approx(np.log10(tot["N/O"]), abs=1e-12)
