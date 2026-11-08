@@ -1985,9 +1985,9 @@ def compute_ionic_abundances(
     if sii > 0:
         ionic["S+/H+"] = _ionic_abundance("S", 2, sii, Hb, Te_low, ne_lo, [6718, 6732])
 
-    # S++/H+ from [SIII] 9069 — intermediate (S²⁺) zone temperature
-    if "SIII_9069" in fluxes and fluxes["SIII_9069"] > 0:
-        ionic["S++/H+"] = _ionic_abundance("S", 3, fluxes["SIII_9069"], Hb, Te_mid, ne_md, 9069)
+    # S++/H+ from [SIII] 9069 (key SIII_9071, vacuum) — intermediate zone
+    if "SIII_9071" in fluxes and fluxes["SIII_9071"] > 0:
+        ionic["S++/H+"] = _ionic_abundance("S", 3, fluxes["SIII_9071"], Hb, Te_mid, ne_md, 9069)
 
     # Ne++/H+ from [NeIII] 3869 — T_high zone, O²⁺-zone density.
     # Like O²⁺, [NeIII] 3869 is density-insensitive below ~10⁵ cm⁻³ and Ne²⁺
@@ -1995,9 +1995,9 @@ def compute_ionic_abundances(
     if "NeIII_3869" in fluxes and fluxes["NeIII_3869"] > 0:
         ionic["Ne++/H+"] = _ionic_abundance("Ne", 3, fluxes["NeIII_3869"], Hb, Te_high, ne_opp, 3869)
 
-    # Ar++/H+ from [ArIII] 7136 — intermediate (S²⁺) zone temperature
-    if "ArIII_7136" in fluxes and fluxes["ArIII_7136"] > 0:
-        ionic["Ar++/H+"] = _ionic_abundance("Ar", 3, fluxes["ArIII_7136"], Hb, Te_mid, ne_md, 7136)
+    # Ar++/H+ from [ArIII] 7136 (key ArIII_7138, vacuum) — intermediate zone
+    if "ArIII_7138" in fluxes and fluxes["ArIII_7138"] > 0:
+        ionic["Ar++/H+"] = _ionic_abundance("Ar", 3, fluxes["ArIII_7138"], Hb, Te_mid, ne_md, 7136)
 
     # --- UV ionic abundances ---
     # Zone assignment follows Martinez+2025 (arXiv:2510.21960, §5.4/6.1):

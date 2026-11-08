@@ -283,20 +283,26 @@ _GRATING_LINES = [
 ]
 
 
-#: Line keys renamed in v1.1.11, mapped to their current names.  Hα now
-#: follows the other Balmer keys (HBETA, HGAMMA, ...), and the C III]
-#: 1908.73 component is named by its wavelength like its 1906.68 partner.
+#: Renamed line keys, mapped to their current names.  Hα follows the other
+#: Balmer keys (HBETA, HGAMMA, ...), and the C III] 1908.73 component is named
+#: by its wavelength like its 1906.68 partner (both v1.1.11).  The [S III],
+#: [Ar III] and [N II] keys below are the air-wavelength names jwspecabund
+#: used to look for; the fitter has always produced the vacuum-wavelength
+#: keys, so accepting the old names keeps hand-built flux dicts working.
 LEGACY_LINE_NAMES: dict[str, str] = {
     "Ha": "HALPHA",
     "Ha_BROAD": "HALPHA_BROAD",
     "Ha_BROAD2": "HALPHA_BROAD2",
     "CIII]": "CIII]_1909",
+    "SIII_9069": "SIII_9071",
+    "ArIII_7136": "ArIII_7138",
+    "NII_6550": "NII_6549",
 }
 
 
 def _warn_renamed(old: str, new: str, stacklevel: int) -> None:
     warnings.warn(
-        f"Line name {old!r} was renamed to {new!r} in jwspecfit 1.1.11; "
+        f"Line name {old!r} was renamed to {new!r}; "
         f"the old name will stop working in a future release.",
         FutureWarning,
         stacklevel=stacklevel + 1,

@@ -140,7 +140,7 @@ class TestIonicWiring:
             "HBETA": 100.0,
             "OIII_5007": 500.0,
             "OIII_4959": 167.0,
-            "SIII_9069": 20.0,
+            "SIII_9071": 20.0,
             "NeIII_3869": 40.0,
         }
 
