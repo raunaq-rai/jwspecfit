@@ -265,3 +265,32 @@ def test_lya_fesc_error_counts_shared_lya_once():
     assert out["f_esc"] == pytest.approx(0.2, rel=1e-12, abs=0)
     # Must be at least the Lya-only fractional error (20%).
     assert out["f_esc_err"] >= 0.2 * 0.2
+
+
+def test_niii_quintuplet_mc_error_is_correlated():
+    """Members share one fitted flux: the MC must not average their noise."""
+    import pyneb as pn
+    from jwspecabund import compute_abundances
+    from jwspecabund.direct import NIII_MULTIPLET, _hbeta_emissivity
+
+    Te, ne = 1.5e4, 300.0
+    Te_int = 0.83 * Te + 1700
+    o3, n3 = pn.Atom("O", 3), pn.Atom("N", 3)
+    jhb = _hbeta_emissivity(Te, ne)
+    fl = {"HBETA": 100.0}
+    for w in (5007, 4959, 4363):
+        fl[f"OIII_{w}"] = 100 * 1e-4 * o3.getEmissivity(Te, ne, wave=w) / jhb
+    jhb_i = _hbeta_emissivity(Te_int, ne)
+    for name, w in NIII_MULTIPLET.items():
+        fl[name] = 100 * 1e-5 * n3.getEmissivity(Te_int, ne, wave=w) / jhb_i
+    tot = sum(fl[n] for n in NIII_MULTIPLET)
+    # Only the quintuplet is noisy; each member's error is its share of 10%.
+    err = {k: (0.1 * v if k in NIII_MULTIPLET else 1e-9 * v) for k, v in fl.items()}
+    res = compute_abundances(
+        _M({k: SimpleLine(fl[k], err[k]) for k in fl}), z=0.0, method="direct",
+        dust_correct=False, icf_method="direct_sum", n_mc=600,
+        self_consistent_OIII=False, snr_line=0, progress=False,
+    )
+    expect = 0.4343 * sum(err[n] for n in NIII_MULTIPLET) / tot
+    sig = res.NO_err if np.isscalar(res.NO_err) else 0.5 * sum(res.NO_err)
+    assert sig == pytest.approx(expect, rel=0.15)

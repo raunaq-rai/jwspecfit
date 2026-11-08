@@ -2431,6 +2431,7 @@ def _run_direct(
         compute_ionic_abundances,
         compute_total_abundances,
     )
+    from .direct import NIII_MULTIPLET
     from .martinez25_icf import LOG_OH_SOLAR, _LOG_U_VALID
 
     # --- Steps 1-2: Multi-phase electron density + zone temperatures ---
@@ -2642,8 +2643,24 @@ def _run_direct(
         attempts += 1
         mc_fluxes = {}
         for name in fluxes:
+            if name in NIII_MULTIPLET:
+                continue
             mc_fluxes[name] = rng.normal(fluxes[name], errors.get(name, 0.0))
             mc_fluxes[name] = max(mc_fluxes[name], 1e-50)
+        # The N III] quintuplet members share one fitted flux (see
+        # _summed_flux_err), so their errors are fully correlated: draw the
+        # sum once and scale every member by the same factor.  Independent
+        # draws shrank the N++ error by ~1.8x.
+        _n3 = [n for n in NIII_MULTIPLET if n in fluxes]
+        if _n3:
+            _n3_sum, _n3_err = _summed_flux_err(_n3, fluxes, errors)
+            if _n3_sum > 0:
+                _scale = rng.normal(_n3_sum, _n3_err) / _n3_sum
+                for name in _n3:
+                    mc_fluxes[name] = max(fluxes[name] * _scale, 1e-50)
+            else:
+                for name in _n3:
+                    mc_fluxes[name] = max(rng.normal(fluxes[name], errors.get(name, 0.0)), 1e-50)
 
         try:
             # The other zones' densities are held fixed (varying them per
