@@ -937,8 +937,8 @@ class TestBroadComponentSummation:
             )
         return MockFitResult(lines=lines)
 
-    def test_broad_added_to_narrow(self):
-        """Broad Balmer flux should be summed into the narrow line."""
+    def test_broad_not_added_to_narrow(self):
+        """Abundances are normalised to narrow Balmer flux only."""
         from jwspecabund._core import _extract_fluxes
 
         result = self._make_mock_result({
@@ -950,8 +950,9 @@ class TestBroadComponentSummation:
 
         fluxes, errors, _ = _extract_fluxes(result)
 
-        assert fluxes["HALPHA"] == pytest.approx(4.0)
-        assert errors["HALPHA"] == pytest.approx(np.sqrt(0.1**2 + 0.2**2))
+        assert fluxes["HALPHA"] == 3.0
+        assert errors["HALPHA"] == 0.1
+        assert "HALPHA_BROAD" not in fluxes
         # Non-Balmer lines unaffected.
         assert fluxes["OIII_5007"] == pytest.approx(5.0)
 

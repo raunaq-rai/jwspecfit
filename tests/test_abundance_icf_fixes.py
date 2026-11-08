@@ -75,3 +75,20 @@ class TestNVEmissivity:
         without = compute_total_abundances(ionic, icf_method="direct_sum")
         assert with_nv["N/O"] == without["N/O"]
         assert with_nv["N/O_UV_raw"] == without["N/O_UV_raw"]
+
+
+class TestNarrowBalmerOnly:
+    """Broad Balmer components never enter the abundance normalisation."""
+
+    def test_posteriors_skip_broad(self):
+        from types import SimpleNamespace
+        from jwspecabund._core import _extract_posteriors
+        n = np.full(100, 1.0)
+        b = np.full(100, 0.5)
+        res = SimpleNamespace(lines={
+            "HBETA": SimpleNamespace(flux_posterior=n),
+            "HBETA_BROAD": SimpleNamespace(flux_posterior=b),
+        })
+        post = _extract_posteriors(res)
+        assert np.array_equal(post["HBETA"], n)
+        assert "HBETA_BROAD" not in post

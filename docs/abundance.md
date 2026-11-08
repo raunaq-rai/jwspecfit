@@ -62,13 +62,14 @@ result ──> _extract_fluxes() ──> (fluxes, errors, is_mcmc)
 
 - Iterates `result.lines`, skipping `_BROAD` entries on first pass.
 - If `flux_err` is a tuple `(lo, hi)`, symmetrises to `0.5*(lo+hi)` and sets `is_mcmc=True`.
-- Second pass: sums broad Balmer components (`HALPHA_BROAD`, `HBETA_BROAD`, etc.) into
-  the narrow totals so the Balmer decrement uses total hydrogen flux.
+- Broad components (`HALPHA_BROAD`, `HBETA_BROAD`, ...) are never used: abundances are
+  normalised to narrow H-beta and the Balmer decrement uses narrow lines only, since a
+  broad-line-region or outflow component is not the gas whose metal lines are measured.
 
 ### `_extract_posteriors(result)` -> `{name: flux_posterior_array}`
 
 - Only called when `is_mcmc=True`.
-- Extracts `lr.flux_posterior` arrays, summing broad Balmer posteriors sample-by-sample.
+- Extracts `lr.flux_posterior` arrays for the narrow components only.
 
 ---
 
