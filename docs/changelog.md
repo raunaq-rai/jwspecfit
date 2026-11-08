@@ -4,7 +4,7 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
-## Unreleased
+## 1.1.16 — 2026-11-08
 
 Fixes from an injection–recovery audit of the line fitting and MCMC
 (synthetic lines of known flux on real NIRSpec grids; every fix has a
