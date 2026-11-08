@@ -239,3 +239,16 @@ def test_hei_deblend_ratio_above_table_limit(Te):
     r = heI_4714_over_4472(Te, 1e4)
     assert r == heI_4714_over_4472(2.5e4, 1e4)
     assert 0.1 < r < 0.3
+
+
+class TestMartinezEdgeCases:
+
+    def test_forced_icf4_needs_every_ion(self):
+        from jwspecabund.martinez25_icf import compute_NO_martinez25_locked
+        ionic = {"O+/H+": 1e-5, "O++/H+": 9e-5, "N++/H+": 2e-6}  # no N+
+        assert compute_NO_martinez25_locked(ionic, -2.0, 0.1, 1e3, "NpNpp_OpOpp") is None
+
+    def test_nan_density_raises_cleanly(self):
+        from jwspecabund.martinez25_icf import icf_NpOp
+        with pytest.raises(ValueError, match="finite n_e"):
+            icf_NpOp(-2.0, 0.1, float("nan"))

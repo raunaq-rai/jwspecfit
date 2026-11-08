@@ -269,6 +269,9 @@ def _interp_ne(
     float
         Interpolated surface value.
     """
+    if not np.isfinite(ne):
+        # max(nan, 1) is nan and searchsorted would then index past the grid.
+        raise ValueError(f"Martinez+25 surfaces need a finite n_e; got {ne!r}.")
     log_ne = np.clip(np.log10(max(ne, 1.0)), _LOG_NE_GRID[0], _LOG_NE_GRID[-1])
 
     # Exact grid match — no interpolation needed.
@@ -976,7 +979,10 @@ def compute_NO_martinez25_locked(
 
     if icf_name == "NppNppp_Opp" and N_pp > 0 and N_ppp > 0 and O_pp > 0:
         return (N_pp + N_ppp) / O_pp * icf_NppNppp_Opp(logU, Z_Zsun, ne)
-    if icf_name == "NpNpp_OpOpp" and (N_plus + N_pp) > 0 and (O_plus + O_pp) > 0:
+    # Every ion in the tier must be present, as in the automatic choice: a
+    # draw missing N+ (or O+) would otherwise pass as N++/(O+ + O++) x ICF4.
+    if (icf_name == "NpNpp_OpOpp" and N_plus > 0 and N_pp > 0
+            and O_plus > 0 and O_pp > 0):
         return (N_plus + N_pp) / (O_plus + O_pp) * icf_NpNpp_OpOpp(logU, Z_Zsun, ne)
     if icf_name == "NppOpp" and N_pp > 0 and O_pp > 0:
         return N_pp / O_pp * icf_NppOpp(logU, Z_Zsun, ne)
