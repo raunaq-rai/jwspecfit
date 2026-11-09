@@ -4,6 +4,21 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### `dust_correct()` reports the Balmer lines it used
+
+- Prints a summary by default (`verbose=False` to silence;
+  `dc.summary()` to get it as a string). The summary gives A_V, the
+  method, and each decrement used, with its observed and Case B ratio
+  and its A_V. It also lists every rejected Balmer line with the reason
+  (`not fitted`, `SNR 3.0 < 5`, `redder than the anchor`), also stored
+  as `dc.balmer_rejected`.
+- When no decrement is usable, the `ValueError` now lists each Balmer
+  line and why it failed.
+- `snr_balmer` now applies to the Hβ anchor as well. Before, a
+  low-SNR Hβ could anchor the decrement.
+
 ## 1.2.0 — 2026-11-08
 
 ### Installation
