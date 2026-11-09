@@ -98,3 +98,31 @@ def test_snr_balmer_default_is_5():
     res.lines["HGAMMA"] = _MockLine("HGAMMA", hg.flux, hg.flux / 4.0)  # SNR 4
     dc = jwspecabund.dust_correct(res)
     assert "HGAMMA" not in {r["line"] for r in dc.balmer_info["individual"]}
+
+
+def test_summary_reports_lines_ratios_and_rejections(capsys):
+    res, _ = _reddened_result(1.0)
+    hd = res.lines["HDELTA"]
+    res.lines["HDELTA"] = _MockLine("HDELTA", hd.flux, hd.flux / 3.0)  # SNR 3
+    dc = jwspecabund.dust_correct(res)
+    out = capsys.readouterr().out
+    assert out.strip() == dc.summary()
+    assert "anchored on HALPHA" in out
+    assert "HBETA/HALPHA" in out and "Case B 0.3497" in out
+    assert dc.balmer_rejected == {"HDELTA": "SNR 3.0 < 5"}
+
+
+def test_verbose_false_is_silent(capsys):
+    res, _ = _reddened_result(1.0)
+    jwspecabund.dust_correct(res, verbose=False)
+    assert capsys.readouterr().out == ""
+
+
+def test_low_snr_hbeta_anchor_rejected_with_reasons():
+    # Hβ at SNR 2 used to anchor the decrement despite snr_balmer=5.
+    res = _MockResult({
+        "HBETA": _MockLine("HBETA", 1.0, 0.5),
+        "HGAMMA": _MockLine("HGAMMA", 0.4, 0.01),
+    })
+    with pytest.raises(ValueError, match=r"HBETA: SNR 2\.0 < 5"):
+        jwspecabund.dust_correct(res, verbose=False)
