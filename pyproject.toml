@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jwspecfit"
-version = "1.2.0"
+version = "1.2.1"
 description = "JWST NIRSpec emission-line fitting and ISM measurements"
 readme = "README.md"
 license = "MIT"

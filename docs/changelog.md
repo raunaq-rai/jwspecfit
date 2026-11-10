@@ -4,7 +4,7 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
-## Unreleased
+## 1.2.1 — 2026-11-10
 
 ### `dust_correct()` reports the Balmer lines it used
 
