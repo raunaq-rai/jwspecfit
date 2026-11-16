@@ -579,8 +579,10 @@ def fit_lines(
         σ_inst`` from its systemic prediction, where σ_inst is the
         instrumental Gaussian σ evaluated at the line.  The actual
         bound is ``min(centroid_vmax/c × λ_obs, centroid_max_sigma ×
-        σ_inst)``.  Broad components (``_BROAD``/``_BROAD2``) bypass
-        this cap so real outflow blueshifts aren't clipped.  Default
+        σ_inst)``.  Broad components (``_BROAD``/``_BROAD2``) and
+        absorption lines (``abs_*``) bypass this cap so real outflow
+        blueshifts aren't clipped; they keep only ``centroid_vmax``.
+        Default
         1.0 (≈ ±130 km/s at G395M OIII; ≈ ±60 km/s at G395H).
     moving_average : bool or int
         If ``False`` (default), use polynomial continuum.  If ``True``,
@@ -950,7 +952,10 @@ def fit_lines(
         local_sig = sig_inst[np.argmin(np.abs(spec.wave_A - lam_obs_A))]
         _C_KMS_CENT = 299792.458
         cent_margin_v = centroid_vmax / _C_KMS_CENT * lam_obs_A
-        if "BROAD" in name:
+        # Absorption lines also skip the resolution cap: ISM centroids sit
+        # at -270 to +73 km/s (Vasan et al. 2026), well past 1 sigma_inst
+        # on the M/H gratings.
+        if "BROAD" in name or name.startswith("abs_"):
             cent_margin = cent_margin_v
         else:
             cent_margin_res = centroid_max_sigma * local_sig

@@ -257,7 +257,10 @@ bound (`lines.merged_sigma_A`); without it a partly resolved [O II] blend
 at R = 2500 pinned at the cap and lost 21% of its flux.
 Centroids may move by min(`centroid_vmax`, `centroid_max_sigma` ×
 σ_inst), floored at two pixels and capped at half the distance to the
-nearest other line.  Amplitudes are seeded from the peak near the line
+nearest other line.  Broad components and absorption lines (`abs_*`)
+skip the σ_inst cap and keep only `centroid_vmax` (default 500 km/s):
+ISM absorption centroids at z > 5 reach −270 to +73 km/s (Vasan et al.
+2026), several σ_inst on the M/H gratings.  Amplitudes are seeded from the peak near the line
 (or the local noise level if nothing there is positive), bounded
 0 ≤ A ≤ 150 × that peak × √(2π) σ_upper.  `sigma_overrides` and
 `centroid_overrides` replace the automatic bounds for named lines.

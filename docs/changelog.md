@@ -4,6 +4,19 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### Absorption-line centroids can follow outflows
+
+- `abs_*` lines no longer take the narrow-line `centroid_max_sigma ×
+  σ_inst` cap; like broad components they keep only `centroid_vmax`
+  (default ±500 km/s), in both `jwspecfit.fit_lines` and jwspecmcmc.
+  At R ≈ 1000–2700 the old cap was ±50–130 km/s and pinned real ISM
+  offsets (Vasan et al. 2026: low-ion −140 to +73, high-ion
+  −211 ± 63 km/s). Results change for absorption fits on the M/H
+  gratings only; PRISM, where σ_inst already exceeds 500 km/s, is
+  unchanged. Use `centroid_overrides` for per-line windows.
+
 ## 1.2.1 — 2026-11-10
 
 ### `dust_correct()` reports the Balmer lines it used

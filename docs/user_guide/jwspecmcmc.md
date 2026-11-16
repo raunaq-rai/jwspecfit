@@ -209,7 +209,7 @@ Required arguments have no default.
 | `centroid_overrides` | `None` | Per-line centroid bounds `{line_name: (mu_lo, mu_hi)}` in Å, overriding the automatic velocity-based bounds. |
 | `sigma_factor` | `1.0` | Multiplier on the upper line-width bound; use > 1 for stacked spectra with broadened lines. |
 | `centroid_vmax` | `500.0` | Maximum centroid offset, in km/s, allowed for each line. |
-| `centroid_max_sigma` | `1.0` | Extra resolution-aware cap on narrow-line centroid offsets: `min(centroid_vmax-based, centroid_max_sigma * sigma_instrument)`. |
+| `centroid_max_sigma` | `1.0` | Extra resolution-aware cap on narrow-line centroid offsets: `min(centroid_vmax-based, centroid_max_sigma * sigma_instrument)`. Broad and `abs_*` lines skip it. |
 
 ### Priors & misc
 

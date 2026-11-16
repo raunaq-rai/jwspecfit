@@ -285,7 +285,9 @@ def fit_lines(
     centroid_max_sigma : float
         Extra resolution-aware cap on narrow-line centroid offsets: the
         margin is ``min(centroid_vmax-based, centroid_max_sigma *
-        sigma_instrument)`` (default 1.0).
+        sigma_instrument)`` (default 1.0).  Broad components and
+        absorption lines (``abs_*``) skip it and keep only
+        ``centroid_vmax``.
     prior_overrides : dict, optional
         Per-parameter prior overrides keyed by parameter name, e.g.
         ``{"A_OIII_5007": GaussianPrior(1e-17, 1e-18, 0, 1e-15)}``.

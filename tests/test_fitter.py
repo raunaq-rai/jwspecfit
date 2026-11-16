@@ -221,3 +221,55 @@ def test_lya_flux_recovered_on_gratings_and_prism(grating, sigma_A):
     spec = Spectrum(wave_um=wave, flux_ujy=flux, err_ujy=err, grating=grating)
     res = fit_lines(spec, z, lines=["Lya"], n_boot=0, _label="t")
     assert res.lines["Lya"].flux == pytest.approx(3e-18, rel=0.05, abs=0)
+
+
+def _blueshifted_absorption_spectrum(v_kms, R=2700.0, z=1.0, seed=7):
+    """Flat continuum with one abs_SiII1260 trough offset by *v_kms*."""
+    from scipy.special import erf
+
+    from jwspecfit import Spectrum
+
+    c = 299792.458
+    lam_sys = 1260.422 * (1.0 + z)
+    mu = lam_sys * (1.0 + v_kms / c)
+    wave_A = np.linspace(lam_sys - 60.0, lam_sys + 60.0, 1200)
+    sigma_A = lam_sys / R / 2.3548
+    edges = np.concatenate(
+        [[1.5 * wave_A[0] - 0.5 * wave_A[1]],
+         0.5 * (wave_A[:-1] + wave_A[1:]),
+         [1.5 * wave_A[-1] - 0.5 * wave_A[-2]]]
+    )
+    inv = 1.0 / (np.sqrt(2.0) * sigma_A)
+    cdf = 0.5 * (1.0 + erf((edges - mu) * inv))
+    line_flam = -2.0e-17 * np.diff(cdf) / np.diff(edges)
+    line_ujy = line_flam * wave_A**2 / 2.998e18 * 1e29
+    flux = 1.0 + line_ujy
+    err = np.full_like(flux, 0.01)
+    flux = flux + np.random.default_rng(seed).normal(0.0, err)
+    return Spectrum(wave_um=wave_A * 1e-4, flux_ujy=flux, err_ujy=err), lam_sys
+
+
+@pytest.mark.parametrize("v_kms", [-250.0, -150.0, +70.0])
+def test_absorption_centroid_not_clipped_by_resolution_cap(v_kms):
+    """ISM absorption offsets (Vasan+2026: -270 to +73 km/s) must be recoverable.
+
+    At R = 2700 the narrow-line cap of 1 sigma_inst is ~47 km/s, which
+    clipped real outflow blueshifts. Absorption lines keep only the
+    ``centroid_vmax`` velocity cap, like broad components.
+    """
+    spec, lam_sys = _blueshifted_absorption_spectrum(v_kms)
+    result = fit_lines(spec, z=1.0, R=2700.0, lines=["abs_SiII1260"], n_boot=0)
+    lr = result.lines["abs_SiII1260"]
+    v_fit = (lr.centroid_A / lam_sys - 1.0) * 299792.458
+    assert v_fit == pytest.approx(v_kms, abs=20.0)
+
+
+def test_absorption_centroid_still_capped_by_centroid_vmax():
+    """A trough beyond ``centroid_vmax`` is pinned at the velocity cap."""
+    spec, lam_sys = _blueshifted_absorption_spectrum(-250.0)
+    result = fit_lines(
+        spec, z=1.0, R=2700.0, lines=["abs_SiII1260"], n_boot=0,
+        centroid_vmax=100.0,
+    )
+    v_fit = (result.lines["abs_SiII1260"].centroid_A / lam_sys - 1.0) * 299792.458
+    assert v_fit >= -100.0 - 1e-6
