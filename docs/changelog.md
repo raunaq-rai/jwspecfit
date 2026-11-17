@@ -4,6 +4,25 @@ This project does not yet follow a formal release schedule. Key
 additions are listed below in reverse chronological order. Commit
 history on GitHub is the authoritative source.
 
+## Unreleased
+
+### A missing [O III] 4959 is no longer taken as zero in T_e
+
+- Every [O III] T_e diagnostic (`compute_Te_OIII`,
+  `compute_Te_OIII_1666`, `compute_Te_ne_OIII` and the per-draw MC
+  path) divides by the 5007+4959 doublet sum, and the model side always
+  uses both emissivities. When λ4959 was not supplied it was silently
+  taken as 0, so the auroral/nebular ratio came out 1.335× too large:
+  T_e(4363) was 11–42 % high (15,000 K → 17,575 K at n_e = 10⁵) and
+  the joint T_e–n_e solve 2–6 % high, with n_e pushed up. A missing
+  member is now inferred from the other through the fixed 4959/5007
+  branching ratio (0.33512, both from ¹D₂), with its error scaled
+  rather than added in quadrature, and a warning is logged. New public
+  helper `oiii_nebular_flux()`.
+- Fits from jwspecfit always include λ4959, so their results are
+  unchanged. External flux tables that omit it were affected. Do not
+  pass the doublet sum as `flux_5007`: it would now be scaled up again.
+
 ## 1.2.2 — 2026-11-16
 
 ### Absorption-line centroids can follow outflows

@@ -593,6 +593,96 @@ def ne_zone_fallback(zone: str, z: float) -> float:
 # Electron temperature
 # ---------------------------------------------------------------------------
 
+def oiii_nebular_flux(
+    flux_5007: float,
+    flux_4959: float | None = None,
+    err_5007: float | None = None,
+    err_4959: float | None = None,
+    *,
+    warn: bool = True,
+) -> tuple[float, float | None]:
+    """[O III] lambda5007 + lambda4959, inferring a missing member.
+
+    Every [O III] T_e diagnostic here divides by the *doublet sum*, and the
+    model side always uses the sum of both emissivities.  Supplying only
+    lambda5007 and leaving lambda4959 at zero therefore makes the
+    observed auroral/nebular ratio 1.335x too large and biases T_e high.
+    Both lines decay from the same upper level (1D2), so their ratio is a
+    pure branching ratio, :data:`~jwspecabund.strong_line.OIII_4959_5007_RATIO`
+    (0.33512, independent of T_e and n_e), and a missing member is
+    reconstructed exactly from the other.
+
+    Parameters
+    ----------
+    flux_5007, flux_4959 : float or None
+        Line fluxes.  ``None`` or a non-positive value marks the line as
+        not measured.
+    err_5007, err_4959 : float or None
+        1 sigma errors.  When a member is inferred it is fully correlated
+        with the measured one, so the error is scaled, not added in
+        quadrature.
+    warn : bool
+        Log a warning when a member is inferred (default ``True``); the
+        per-draw callers switch it off.
+
+    Returns
+    -------
+    tuple
+        ``(flux_sum, err_sum)``; *err_sum* is ``None`` when the needed
+        error was not supplied.
+
+    Raises
+    ------
+    ValueError
+        If neither member is positive.
+    """
+    from .strong_line import OIII_4959_5007_RATIO as r
+
+    f5007 = float(flux_5007) if flux_5007 is not None else 0.0
+    f4959 = float(flux_4959) if flux_4959 is not None else 0.0
+    have_5007, have_4959 = f5007 > 0, f4959 > 0
+
+    if have_5007 and have_4959:
+        if err_5007 is None:
+            return f5007 + f4959, None
+        e4959 = err_4959 if (err_4959 is not None and err_4959 > 0) else 0.0
+        return f5007 + f4959, float(np.hypot(err_5007, e4959))
+    if have_5007:
+        scale, flux, err, missing = 1.0 + r, f5007, err_5007, "4959"
+    elif have_4959:
+        scale, flux, err, missing = (1.0 + r) / r, f4959, err_4959, "5007"
+    else:
+        raise ValueError("[OIII] nebular flux (5007+4959) is non-positive.")
+    if warn:
+        logger.warning(
+            "[OIII] %s not supplied; inferring it from the fixed "
+            "4959/5007 = %.5f branching ratio. If the flux passed already "
+            "holds the doublet sum, pass the two lines separately instead.",
+            missing, r,
+        )
+    return flux * scale, (float(err) * scale if err is not None else None)
+
+
+def _complete_oiii_doublet(
+    flux_5007: float, flux_4959: float,
+) -> tuple[float, float]:
+    """Fill in a missing [O III] doublet member silently, for internal callers.
+
+    Returns ``(flux_5007, flux_4959)`` with any non-positive member replaced
+    by its branching-ratio value, so the downstream T_e functions see a
+    complete doublet and do not warn once per posterior draw.  Only for
+    point values: an inferred member must not be given an independent error.
+    Pairs that cannot be completed are returned unchanged.
+    """
+    from .strong_line import OIII_4959_5007_RATIO as r
+
+    if flux_5007 > 0 and not flux_4959 > 0:
+        return flux_5007, flux_5007 * r
+    if flux_4959 > 0 and not flux_5007 > 0:
+        return flux_4959 / r, flux_4959
+    return flux_5007, flux_4959
+
+
 def compute_Te_OIII(
     flux_4363: float,
     flux_5007: float,
@@ -611,7 +701,8 @@ def compute_Te_OIII(
     flux_5007 : float
         [OIII] 5007 flux.
     flux_4959 : float
-        [OIII] 4959 flux.
+        [OIII] 4959 flux.  Pass 0 if not measured: it is then inferred from
+        lambda5007 (see :func:`oiii_nebular_flux`).
     ne : float
         Electron density in cm^-3.
 
@@ -622,9 +713,7 @@ def compute_Te_OIII(
     """
     pn = _get_pyneb()
 
-    nebular = flux_5007 + flux_4959
-    if nebular <= 0:
-        raise ValueError("[OIII] nebular flux (5007+4959) is non-positive.")
+    nebular, _ = oiii_nebular_flux(flux_5007, flux_4959)
     if flux_4363 <= 0:
         raise ValueError("[OIII] 4363 flux is non-positive.")
 
@@ -686,7 +775,8 @@ def compute_Te_OIII_1666(
     flux_5007 : float
         [OIII] 5007 flux (dust-corrected).
     flux_4959 : float
-        [OIII] 4959 flux (dust-corrected).
+        [OIII] 4959 flux (dust-corrected).  Pass 0 if not measured: it is
+        then inferred from lambda5007 (see :func:`oiii_nebular_flux`).
     ne : float
         Electron density in cm^-3.
 
@@ -697,9 +787,7 @@ def compute_Te_OIII_1666(
     """
     from scipy.optimize import brentq
 
-    nebular = flux_5007 + flux_4959
-    if nebular <= 0:
-        raise ValueError("[OIII] nebular flux (5007+4959) is non-positive.")
+    nebular, _ = oiii_nebular_flux(flux_5007, flux_4959)
     if flux_1666 <= 0:
         raise ValueError("O III] 1666 flux is non-positive.")
 
@@ -1126,12 +1214,16 @@ def compute_Te_ne_OIII(
     flux_5007 : float
         [O III] 5007 flux (dust-corrected).
     flux_4959 : float
-        [O III] 4959 flux (dust-corrected).  Optional; the nebular
-        denominator is ``flux_5007 + flux_4959``.
+        [O III] 4959 flux (dust-corrected).  Optional: when omitted (or
+        non-positive) it is inferred from lambda5007 through the fixed
+        4959/5007 branching ratio, because the model denominator is always
+        the doublet sum (see :func:`oiii_nebular_flux`).  Do not pass the
+        doublet sum as *flux_5007*.
     err_1666, err_4363, err_5007, err_4959 : float or None
-        1 sigma flux errors.  When *err_1666*, *err_4363* and *err_5007*
-        are all given and positive, a *n_draws* posterior is run and the
-        error bars, upper-limit flag and convergence fraction are filled in.
+        1 sigma flux errors.  When *err_1666*, *err_4363* and the error of
+        the measured nebular line(s) are all given and positive, a
+        *n_draws* posterior is run and the error bars, upper-limit flag and
+        convergence fraction are filled in.
     coll_file : str
         O III collision-strength file; see :func:`_get_oiii_atom`.  The
         default is the package's :data:`OIII_1666_COLL_FILE` (TZ17);
@@ -1166,9 +1258,7 @@ def compute_Te_ne_OIII(
     Hsiao et al. (2026), arXiv:2608.20339; the method is due to Berg (2018)
     and Arellano-Cordova et al. (2020).
     """
-    f_neb = float(flux_5007) + float(flux_4959)
-    if f_neb <= 0:
-        raise ValueError("[OIII] nebular flux (5007+4959) is non-positive.")
+    f_neb, _ = oiii_nebular_flux(flux_5007, flux_4959)
     if flux_4363 <= 0:
         raise ValueError("[OIII] 4363 flux is non-positive.")
     if flux_1666 <= 0:
@@ -1215,17 +1305,23 @@ def compute_Te_ne_OIII(
         },
     )
 
-    errs = (err_1666, err_4363, err_5007)
+    _, err_neb = oiii_nebular_flux(
+        flux_5007, flux_4959, err_5007, err_4959, warn=False,
+    )
+    errs = (err_1666, err_4363, err_neb)
     if not all(e is not None and e > 0 for e in errs):
         return out
 
     rng = np.random.default_rng(seed)
     e4959 = err_4959 if (err_4959 is not None and err_4959 > 0) else 0.0
+    # A member inferred from the other is fully correlated with it, so the
+    # nebular draw must scale one draw, not add an independent one.
+    both_measured = flux_5007 > 0 and flux_4959 > 0
 
     _ln10 = np.log(10.0)
     _r1666 = err_1666 / flux_1666
     _r4363 = err_4363 / flux_4363
-    _rneb = float(np.hypot(err_5007, e4959)) / f_neb
+    _rneb = err_neb / f_neb
     out.log_ratio_errs = {
         "4363": float(np.hypot(_r4363, _rneb) / _ln10),
         "1666_4363": float(np.hypot(_r1666, _r4363) / _ln10),
@@ -1237,7 +1333,10 @@ def compute_Te_ne_OIII(
     for _ in range(int(n_draws)):
         d1666 = rng.normal(flux_1666, err_1666)
         d4363 = rng.normal(flux_4363, err_4363)
-        dneb = rng.normal(flux_5007, err_5007) + rng.normal(flux_4959, e4959)
+        if both_measured:
+            dneb = rng.normal(flux_5007, err_5007) + rng.normal(flux_4959, e4959)
+        else:
+            dneb = rng.normal(f_neb, err_neb)
         hit = _solve_oiii_once(grid, d1666, d4363, dneb)
         if hit is None:
             continue

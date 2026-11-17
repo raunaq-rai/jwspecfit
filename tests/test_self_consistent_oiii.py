@@ -53,12 +53,19 @@ class TestRoundTrip:
         assert not sol.at_grid_edge
 
     def test_lambda4959_optional(self):
-        """The nebular denominator may be lambda5007 alone."""
+        """Omitting lambda4959 must not bias the solve: it is inferred from
+        lambda5007 through the branching ratio, not taken as zero."""
         f1666, f4363, f5007, f4959 = _oiii_fluxes(15000, 1e5)
         with_4959 = compute_Te_ne_OIII(f1666, f4363, f5007, f4959)
-        # Scale lambda5007 up to stand in for the doublet sum.
-        without = compute_Te_ne_OIII(f1666, f4363, f5007 + f4959)
-        assert without.Te == pytest.approx(with_4959.Te, rel=1e-6)
+        without = compute_Te_ne_OIII(f1666, f4363, f5007)
+        assert without.Te == pytest.approx(with_4959.Te, rel=1e-4)
+        assert without.ne == pytest.approx(with_4959.ne, rel=1e-3)
+        assert without.Te == pytest.approx(15000, rel=2e-3)
+
+    def test_lambda5007_alone_inferred_from_lambda4959(self):
+        f1666, f4363, f5007, f4959 = _oiii_fluxes(15000, 1e5)
+        sol = compute_Te_ne_OIII(f1666, f4363, 0.0, f4959)
+        assert sol.Te == pytest.approx(15000, rel=2e-3)
 
     def test_rejects_nonpositive_flux(self):
         f1666, f4363, f5007, f4959 = _oiii_fluxes(15000, 1e5)
@@ -70,7 +77,7 @@ class TestRoundTrip:
         # members is fatal.
         with pytest.raises(ValueError, match="nebular"):
             compute_Te_ne_OIII(f1666, f4363, 0.0, 0.0)
-        assert compute_Te_ne_OIII(f1666, f4363, 0.0, f5007 + f4959).converged
+        assert compute_Te_ne_OIII(f1666, f4363, 0.0, f4959).converged
 
 
 class TestUncertainties:
@@ -731,3 +738,95 @@ class TestLowIonisationDensityConsistency:
         )
         diag = self._diag(ne_low=700.0, ne_Opp=1.6e5, sc=sc)
         assert "saturate" not in diag["ne(low)"]
+
+
+class TestMissingLambda4959:
+    """A missing [O III] 4959 used to be taken as zero.
+
+    Every [O III] T_e diagnostic divides by the doublet sum, so treating an
+    unmeasured lambda4959 as 0 inflated the auroral/nebular ratio by 1.335x
+    and biased T_e high with no warning.  It is now inferred from lambda5007
+    through the fixed 4959/5007 branching ratio.
+    """
+
+    def test_branching_ratio_matches_pyneb(self):
+        """The constant used must be the atom's own, at any T_e and n_e."""
+        from jwspecabund.strong_line import OIII_4959_5007_RATIO
+
+        atom = _get_oiii_atom()
+        for Te, ne in ((8000, 1e2), (15000, 1e5), (30000, 1e7)):
+            r = (atom.getEmissivity(Te, ne, wave=4959)
+                 / atom.getEmissivity(Te, ne, wave=5007))
+            assert r == pytest.approx(OIII_4959_5007_RATIO, rel=1e-4)
+
+    def test_nebular_flux_helper(self):
+        from jwspecabund import oiii_nebular_flux
+        from jwspecabund.strong_line import OIII_4959_5007_RATIO as r
+
+        assert oiii_nebular_flux(3.0, 1.0, 0.3, 0.1) == pytest.approx(
+            (4.0, np.hypot(0.3, 0.1)))
+        # Inferred member: fully correlated, so the error scales.
+        f, e = oiii_nebular_flux(3.0, 0.0, 0.3)
+        assert f == pytest.approx(3.0 * (1 + r))
+        assert e == pytest.approx(0.3 * (1 + r))
+        f, e = oiii_nebular_flux(0.0, 1.0, None, 0.1)
+        assert f == pytest.approx((1 + r) / r)
+        assert e == pytest.approx(0.1 * (1 + r) / r)
+        with pytest.raises(ValueError, match="nebular"):
+            oiii_nebular_flux(0.0, 0.0)
+
+    def test_warns_when_inferring(self, caplog):
+        f1666, f4363, f5007, _ = _oiii_fluxes(15000, 1e5)
+        with caplog.at_level("WARNING", logger="jwspecabund.direct"):
+            compute_Te_ne_OIII(f1666, f4363, f5007)
+        assert "4959 not supplied" in caplog.text
+
+    @pytest.mark.parametrize("Te", [10000, 15000, 25000])
+    def test_single_ratio_diagnostics_unbiased(self, Te):
+        from jwspecabund import compute_Te_OIII, compute_Te_OIII_1666
+
+        f1666, f4363, f5007, f4959 = _oiii_fluxes(Te, 1e2)
+        assert compute_Te_OIII(f4363, f5007, 0.0, 1e2) == pytest.approx(
+            compute_Te_OIII(f4363, f5007, f4959, 1e2), rel=1e-4)
+        assert compute_Te_OIII_1666(f1666, f5007, 0.0, 1e2) == pytest.approx(
+            compute_Te_OIII_1666(f1666, f5007, f4959, 1e2), rel=1e-4)
+
+    def test_posterior_error_not_underestimated(self):
+        """An inferred lambda4959 adds no independent noise: the ratio error
+        must equal the one from a fully correlated doublet."""
+        f1666, f4363, f5007, f4959 = _oiii_fluxes(15000, 1e5)
+        errs = {"err_1666": 0.1 * f1666, "err_4363": 0.1 * f4363}
+        sol = compute_Te_ne_OIII(
+            f1666, f4363, f5007, err_5007=0.05 * f5007, n_draws=300, **errs,
+        )
+        # 5 % on lambda5007 alone -> 5 % on the inferred sum.
+        expected = np.hypot(0.1, 0.05) / np.log(10.0)
+        assert sol.log_ratio_errs["4363"] == pytest.approx(expected, rel=1e-6)
+        assert sol.Te == pytest.approx(15000, rel=0.05)
+
+    def test_pipeline_without_4959_matches_full_doublet(self):
+        """compute_abundances on a fit with no lambda4959 must match the
+        full-doublet answer, point estimate and posterior alike."""
+        full = _mock_result(13000, 1e6)
+        partial = _mock_result(13000, 1e6)
+        del partial.lines["OIII_4959"]
+        kw = dict(z=6.0, method="direct", dust_correct=False, n_mc=150,
+                  progress=False)
+        a = compute_abundances(full, **kw)
+        b = compute_abundances(partial, **kw)
+        assert b.Te_diagnostic == a.Te_diagnostic == "self_consistent"
+        assert b.Te_high == pytest.approx(a.Te_high, rel=1e-3)
+        assert b.OH == pytest.approx(a.OH, abs=0.02)
+        assert b.Te_high == pytest.approx(13000, rel=0.1)
+
+    def test_pipeline_single_ratio_without_4959(self):
+        partial = _mock_result(15000, 1e2, with_1666=False)
+        full = _mock_result(15000, 1e2, with_1666=False)
+        del partial.lines["OIII_4959"]
+        kw = dict(z=6.0, method="direct", dust_correct=False, n_mc=150,
+                  progress=False)
+        a = compute_abundances(full, **kw)
+        b = compute_abundances(partial, **kw)
+        assert b.Te_diagnostic == a.Te_diagnostic == "4363"
+        assert b.Te_high == pytest.approx(a.Te_high, rel=1e-3)
+        assert b.OH == pytest.approx(a.OH, abs=0.02)

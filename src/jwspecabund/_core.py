@@ -646,8 +646,9 @@ def _compute_multi_ne(
 
 
 #: O III lines the self-consistent T_e-n_e solve needs, all above
-#: *snr_auroral*.  lambda4959 is optional (it only widens the nebular
-#: denominator), so it is not required here.
+#: *snr_auroral*.  lambda4959 is not required: when it is missing it is
+#: inferred from lambda5007 through the fixed branching ratio (see
+#: :func:`~jwspecabund.direct.oiii_nebular_flux`), never taken as zero.
 _SELF_CONSISTENT_LINES = ("OIII_1666", "OIII_4363", "OIII_5007")
 
 
@@ -706,6 +707,7 @@ def _solve_Te_high(
     """
     from .direct import (
         OIII_1666_COLL_FILE,
+        _complete_oiii_doublet,
         compute_Te_ne_OIII,
         compute_Te_OIII,
         compute_Te_OIII_1666,
@@ -742,6 +744,7 @@ def _solve_Te_high(
     # PyNEB cannot invert -- a noisy or over-fit lambda4363 can land above
     # the physical maximum -- must not abort the whole calculation when the
     # other diagnostic is available and fine.
+    f5007, f4959 = _complete_oiii_doublet(f5007, f4959)
     for key, solver, args in (
         ("4363", compute_Te_OIII, (f4363, f5007, f4959)),
         ("1666", compute_Te_OIII_1666, (f1666, f5007, f4959)),
@@ -786,10 +789,17 @@ def _draw_Te_ne_OIII(
     """
     from .direct import (
         OIII_1666_COLL_FILE,
+        _complete_oiii_doublet,
         _oiii_te_ne_grid,
         _solve_oiii_once,
         compute_Te_OIII,
         compute_Te_OIII_1666,
+    )
+
+    # Every diagnostic divides by the doublet sum; a lambda4959 that was never
+    # measured is the branching-ratio share of this draw's lambda5007, not 0.
+    f5007, f4959 = _complete_oiii_doublet(
+        sample.get("OIII_5007", 0.0), sample.get("OIII_4959", 0.0),
     )
 
     if diagnostic == "self_consistent":
@@ -798,7 +808,7 @@ def _draw_Te_ne_OIII(
             grid,
             sample.get("OIII_1666", 0.0),
             sample.get("OIII_4363", 0.0),
-            sample.get("OIII_5007", 0.0) + sample.get("OIII_4959", 0.0),
+            f5007 + f4959,
         )
         if hit is None:
             raise ValueError(
@@ -809,17 +819,11 @@ def _draw_Te_ne_OIII(
 
     if diagnostic == "1666":
         Te = compute_Te_OIII_1666(
-            sample.get("OIII_1666", 0.0),
-            sample.get("OIII_5007", 0.0),
-            sample.get("OIII_4959", 0.0),
-            ne_Opp,
+            sample.get("OIII_1666", 0.0), f5007, f4959, ne_Opp,
         )
     else:
         Te = compute_Te_OIII(
-            sample.get("OIII_4363", 0.0),
-            sample.get("OIII_5007", 0.0),
-            sample.get("OIII_4959", 0.0),
-            ne_Opp,
+            sample.get("OIII_4363", 0.0), f5007, f4959, ne_Opp,
         )
     return Te, ne_Opp
 
@@ -1082,13 +1086,15 @@ def _single_ratio_alternatives(
     from .direct import (
         Te_int_from_high,
         Te_low_from_high,
+        _complete_oiii_doublet,
         compute_ionic_abundances,
         compute_Te_OIII,
         compute_Te_OIII_1666,
     )
 
-    f5007 = fluxes.get("OIII_5007", 0.0)
-    f4959 = fluxes.get("OIII_4959", 0.0)
+    f5007, f4959 = _complete_oiii_doublet(
+        fluxes.get("OIII_5007", 0.0), fluxes.get("OIII_4959", 0.0),
+    )
     alts: dict[str, dict[str, Any]] = {}
     diag: dict[str, str] = {}
     if f5007 <= 0:
